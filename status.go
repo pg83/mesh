@@ -6,8 +6,11 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
+
+const sockPathMax = 108
 
 type LinkStatus struct {
 	Peer     uint16 `json:"peer"`
@@ -62,14 +65,25 @@ func (n *Node) status() *Status {
 	return st
 }
 
+// statusLoop serves one JSON document per connection. A name starting with
+// "@" is an abstract socket: it lives in the network namespace, has no path,
+// and so escapes the 108 byte limit on socket paths.
 func (n *Node) statusLoop() {
-	if n.cfg.Status == "" {
+	path := n.cfg.Status
+
+	if path == "" {
 		return
 	}
 
-	os.Remove(n.cfg.Status)
+	if !strings.HasPrefix(path, "@") {
+		if len(path) >= sockPathMax {
+			throwFmt("status socket path is %d bytes, the limit is %d", len(path), sockPathMax-1)
+		}
 
-	ln := throw2(net.Listen("unix", n.cfg.Status))
+		os.Remove(path)
+	}
+
+	ln := throw2(net.Listen("unix", path))
 
 	for {
 		conn := throw2(ln.Accept())

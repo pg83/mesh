@@ -24,6 +24,7 @@ from pathlib import Path
 MESH = Path(os.environ["MESH_TEST_BINARY"])
 PORT = 7000
 SUBNET = "10.77.0.0/24"
+STATUS = "@mesh"  # abstract socket: per netns, and no path length limit
 
 LIFETIME = "600"  # seconds; bounds what a killed lab can leak
 
@@ -154,16 +155,13 @@ class Lab:
             })
         return reg
 
-    def sock(self, node):
-        return str(self.dir / f"{node.name}.sock")
-
     def write_config(self, node):
         cfg = {
             "index": node.index,
             "key": node.keys["key"],
             "port": PORT,
             "subnet": SUBNET,
-            "status": self.sock(node),
+            "status": STATUS,
             "registry": self.registry(),
         }
         path = self.dir / f"{node.name}.json"
@@ -219,13 +217,13 @@ class Lab:
     # --- observations ---
 
     def status(self, name):
+        """Asks the node itself, from inside its namespace."""
         node = self.nodes[name]
-        with socket.socket(socket.AF_UNIX) as s:
-            s.connect(self.sock(node))
-            data = b""
-            while chunk := s.recv(65536):
-                data += chunk
-        return json.loads(data)
+        r = self.nsenter(node, MESH, "status", "-s", STATUS,
+                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if r.returncode != 0:
+            raise OSError(f"{name}: status failed")
+        return json.loads(r.stdout)
 
     def links(self, name):
         try:
