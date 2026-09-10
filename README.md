@@ -89,6 +89,8 @@ never dialed: the overlay must not run over itself.
 
 ## Behaviour
 
+- A responder confirms a session only after receiving an authenticated
+  transport packet, so one-way init traffic cannot advertise a working link.
 - One session per peer, bound to the peer identity. Any authenticated packet
   updates the remote endpoint, so a peer can roam.
 - Keepalive after 5 s idle, session dropped after 15 s without traffic.

@@ -155,13 +155,23 @@ func (n *Node) install(s *Session) {
 
 	n.sessions[s.peer] = s
 	n.byID[s.localID] = s
+	n.dropUnconfirmed(s.peer)
 	n.dropPending(s.peer)
 	n.forgetAttempts(s.peer)
 	n.log.Info("link up", "peer", s.peer, "endpoint", s.endpoint)
 
+	n.send(s.seal([]byte{innerKeepalive}, time.Now()), s.endpoint)
 	n.recompute()
 	n.syncTo(s.peer)
 	n.publish(time.Now())
+}
+
+func (n *Node) dropUnconfirmed(peer uint16) {
+	for id, s := range n.byID {
+		if s.peer == peer && n.sessions[peer] != s {
+			delete(n.byID, id)
+		}
+	}
 }
 
 func (n *Node) remove(s *Session, why string) {
@@ -276,7 +286,8 @@ func (n *Node) handleInit(packet []byte, addr *net.UDPAddr) {
 	now := time.Now()
 	s := newSession(peer.index, n.freshID(), remoteID, send, recv, addr, now)
 
-	n.install(s)
+	n.dropUnconfirmed(peer.index)
+	n.byID[s.localID] = s
 
 	out := make([]byte, headerResponse, headerResponse+len(response))
 
@@ -328,6 +339,10 @@ func (n *Node) handleTransport(packet []byte, addr *net.UDPAddr) {
 
 	s.endpoint = addr
 	s.lastRecv = time.Now()
+
+	if n.sessions[s.peer] != s {
+		n.install(s)
+	}
 
 	if len(inner) == 0 {
 		return
@@ -423,6 +438,12 @@ func (n *Node) tick(now time.Time) {
 	for id, h := range n.pending {
 		if now.Sub(h.created) > handshakeTimeout {
 			delete(n.pending, id)
+		}
+	}
+
+	for id, s := range n.byID {
+		if n.sessions[s.peer] != s && now.Sub(s.created) > handshakeTimeout {
+			delete(n.byID, id)
 		}
 	}
 

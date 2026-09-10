@@ -58,6 +58,9 @@ def test():
         lab.wait_ping('c', 'b')
         probe.stdin.close()
         assert probe.wait(timeout=10) == 0
+        lab.wait_links('b', ['c'], timeout=30)
+        lab.wait(lambda: lab.status('b')['pending'] > 0, 'redial from advertised candidates')
+        lab.wait_ping('b', 'c')
 
 
 lib.main(test)
