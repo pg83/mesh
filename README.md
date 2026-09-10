@@ -99,8 +99,11 @@ never dialed: the overlay must not run over itself.
 ```
 ./build          # .build/bin/mesh, published as ./mesh
 ./build test     # go test + e2e topologies in tst/
-./lint.sh        # house style gate
+./lint.sh        # house style gate, needs a sibling ay checkout
 ```
+
+CI runs the same `./build test` on every push and pull request. The lab needs
+unprivileged user namespaces and the tun module, which the workflow enables.
 
 E2E tests run nodes in separate network namespaces wired by a userspace
 switch (`tst/lib.py`); see `CLAUDE.md`.

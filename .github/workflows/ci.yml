@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # The e2e lab puts every node in its own network namespace and wires
+      # them with TUN devices, so it needs unprivileged user namespaces,
+      # which Ubuntu confines by default, and the tun module.
+      - name: Prepare namespaces and tun
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo modprobe tun
+          ls -l /dev/net/tun
+          unshare -rUn true && echo "user namespaces ok"
+
+      - name: Format
+        run: |
+          test -z "$(gofmt -l *.go)" || { gofmt -d *.go; exit 1; }
+
+      - name: Vet
+        run: go vet ./...
+        env:
+          GOFLAGS: -mod=vendor
+
+      - name: Build and test
+        run: ./build test
