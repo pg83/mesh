@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"slices"
+	"strconv"
 	"time"
 )
 
@@ -15,14 +17,22 @@ type LinkStatus struct {
 }
 
 type Status struct {
-	Index   uint16       `json:"index"`
-	Links   []LinkStatus `json:"links"`
-	Pending int          `json:"pending"`
+	Index   uint16              `json:"index"`
+	Links   []LinkStatus        `json:"links"`
+	Nodes   []uint16            `json:"nodes"`
+	Routes  map[string][]uint16 `json:"routes"`
+	Pending int                 `json:"pending"`
 }
 
 func (n *Node) status() *Status {
 	now := time.Now()
-	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}}
+
+	st := &Status{
+		Index:  n.cfg.Index,
+		Links:  []LinkStatus{},
+		Nodes:  []uint16{},
+		Routes: map[string][]uint16{},
+	}
 
 	n.mu.Lock()
 
@@ -35,6 +45,16 @@ func (n *Node) status() *Status {
 			Age:      int(now.Sub(s.created).Seconds()),
 			Idle:     int(now.Sub(s.lastRecv).Seconds()),
 		})
+	}
+
+	for index := range n.ads {
+		st.Nodes = append(st.Nodes, index)
+	}
+
+	slices.Sort(st.Nodes)
+
+	for dst, path := range n.routes {
+		st.Routes[strconv.Itoa(int(dst))] = path
 	}
 
 	st.Pending = len(n.pending)

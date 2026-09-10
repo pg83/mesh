@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"encoding/base64"
 	"net"
 )
@@ -8,6 +9,7 @@ import (
 type Peer struct {
 	index  uint16
 	pub    []byte
+	sig    ed25519.PublicKey
 	intip  [4]byte
 	static []*net.UDPAddr
 }
@@ -53,6 +55,7 @@ func newRegistry(peers []PeerConfig) *Registry {
 		p := &Peer{
 			index: pc.Index,
 			pub:   decodeKey(pc.Pub),
+			sig:   ed25519.PublicKey(decodeKey(pc.Sig)),
 			intip: parseIntip(pc.Intip),
 		}
 

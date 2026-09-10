@@ -1,12 +1,14 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +43,11 @@ type Node struct {
 	pending  map[uint32]*Handshake
 	lastInit map[uint16]uint64
 	attempts map[string]*Attempt
+	sig      ed25519.PrivateKey
+	ads      map[uint16]*Known
+	routes   map[uint16][]uint16
+	subnet   *net.IPNet
+	lastAd   time.Time
 }
 
 func newNode(cfg *Config, log *slog.Logger) *Node {
@@ -51,11 +58,16 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		throwFmt("index %d not in registry", cfg.Index)
 	}
 
+	dh, sig := deriveKeys(decodeKey(cfg.Key))
+
 	n := &Node{
 		cfg:      cfg,
 		reg:      reg,
-		key:      loadKeyPair(cfg),
+		key:      dh,
+		sig:      sig,
 		log:      log,
+		ads:      map[uint16]*Known{},
+		routes:   map[uint16][]uint16{},
 		sessions: map[uint16]*Session{},
 		byID:     map[uint32]*Session{},
 		pending:  map[uint32]*Handshake{},
@@ -66,6 +78,12 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	if string(n.key.Public) != string(me.pub) {
 		throwFmt("private key does not match registry entry %d", cfg.Index)
 	}
+
+	if string(sig.Public().(ed25519.PublicKey)) != string(me.sig) {
+		throwFmt("signing key does not match registry entry %d", cfg.Index)
+	}
+
+	_, n.subnet = throw3(net.ParseCIDR(cfg.Subnet))
 
 	n.conn = throw2(net.ListenUDP("udp", &net.UDPAddr{Port: cfg.Port}))
 	n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
@@ -128,6 +146,10 @@ func (n *Node) install(s *Session) {
 	n.dropPending(s.peer)
 	n.forgetAttempts(s.peer)
 	n.log.Info("link up", "peer", s.peer, "endpoint", s.endpoint)
+
+	n.recompute()
+	n.syncTo(s.peer)
+	n.publish(time.Now())
 }
 
 func (n *Node) remove(s *Session, why string) {
@@ -135,6 +157,9 @@ func (n *Node) remove(s *Session, why string) {
 	delete(n.byID, s.localID)
 	n.forgetAttempts(s.peer)
 	n.log.Info("link down", "peer", s.peer, "why", why)
+
+	n.recompute()
+	n.publish(time.Now())
 }
 
 func (n *Node) dropPending(peer uint16) {
@@ -299,6 +324,8 @@ func (n *Node) handleTransport(packet []byte, addr *net.UDPAddr) {
 	switch inner[0] {
 	case innerData:
 		n.handleData(inner)
+	case innerAd:
+		n.handleAd(inner, s.peer)
 	}
 }
 
@@ -357,11 +384,7 @@ func (n *Node) tunLoop() {
 }
 
 func (n *Node) route(dst uint16) []uint16 {
-	if n.sessions[dst] == nil {
-		return nil
-	}
-
-	return []uint16{dst}
+	return n.routes[dst]
 }
 
 func (n *Node) timerLoop() {
@@ -385,6 +408,12 @@ func (n *Node) tick(now time.Time) {
 		if now.Sub(h.created) > handshakeTimeout {
 			delete(n.pending, id)
 		}
+	}
+
+	n.expire(now)
+
+	if now.Sub(n.lastAd) >= adInterval {
+		n.publish(now)
 	}
 
 	n.dial(now)
@@ -417,7 +446,28 @@ func (n *Node) dial(now time.Time) {
 }
 
 func (n *Node) candidates(peer *Peer) []*net.UDPAddr {
-	return peer.static
+	addrs := slices.Clone(peer.static)
+	known := n.ads[peer.index]
+
+	if known == nil {
+		return addrs
+	}
+
+	for _, text := range known.ad.Addrs {
+		addr, err := net.ResolveUDPAddr("udp", text)
+
+		if err != nil || n.subnet.Contains(addr.IP) {
+			continue
+		}
+
+		same := func(a *net.UDPAddr) bool { return a.String() == addr.String() }
+
+		if !slices.ContainsFunc(addrs, same) {
+			addrs = append(addrs, addr)
+		}
+	}
+
+	return addrs
 }
 
 func (n *Node) sendInit(peer *Peer, addr *net.UDPAddr, now time.Time) {

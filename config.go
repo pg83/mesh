@@ -8,6 +8,7 @@ import (
 type PeerConfig struct {
 	Index  uint16   `json:"index"`
 	Pub    string   `json:"pub"`
+	Sig    string   `json:"sig"`
 	Intip  string   `json:"intip"`
 	Static []string `json:"static"`
 }

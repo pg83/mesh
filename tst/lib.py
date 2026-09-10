@@ -148,6 +148,7 @@ class Lab:
             reg.append({
                 "index": node.index,
                 "pub": node.keys["pub"],
+                "sig": node.keys["sig"],
                 "intip": intip(node.index),
                 "static": static,
             })
@@ -253,6 +254,32 @@ class Lab:
             if self.ping(src, dst):
                 return
         raise AssertionError(f"ping {src} -> {dst} failed for {timeout}s")
+
+    def route(self, src, dst):
+        """The hop list src currently uses towards dst, node names."""
+        by_index = {node.index: name for name, node in self.nodes.items()}
+        path = self.status(src)["routes"].get(str(self.nodes[dst].index))
+        return [by_index[hop] for hop in path] if path else None
+
+    def wait_route(self, src, dst, hops, timeout=30):
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.route(src, dst) == hops:
+                return
+            time.sleep(0.2)
+        raise AssertionError(f"route {src} -> {dst} is {self.route(src, dst)}, want {hops}")
+
+    def wait_nodes(self, name, others, timeout=30):
+        want = sorted(self.nodes[o].index for o in others)
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                if self.status(name)["nodes"] == want:
+                    return
+            except (OSError, json.JSONDecodeError):
+                pass
+            time.sleep(0.2)
+        raise AssertionError(f"{name}: knows {self.status(name)['nodes']}, want {want}")
 
 
 def main(test):

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Two segments joined by one node: links follow the wires, a and b never
-link directly. Traffic across r waits for gossip; only links are checked."""
+"""Two segments joined by one node: a and b can never link directly, learn
+each other only through r's gossip, and talk over the two-hop path."""
 
 import time
 
@@ -14,6 +14,12 @@ def test():
         lab.wait_links("b", ["r"])
         lab.wait_ping("a", "r")
         lab.wait_ping("b", "r")
+
+        lab.wait_nodes("a", ["a", "r", "b"])
+        lab.wait_route("a", "b", ["r", "b"])
+        lab.wait_route("b", "a", ["r", "a"])
+        lab.wait_ping("a", "b")
+        lab.wait_ping("b", "a")
 
         time.sleep(5)
         lab.wait_links("a", ["r"], timeout=1)

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/json"
 	"os"
@@ -15,24 +17,36 @@ var cipherSuite = noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, no
 const prologue = "mesh/1"
 
 type KeyPair struct {
-	Pub string `json:"pub"`
 	Key string `json:"key"`
+	Pub string `json:"pub"`
+	Sig string `json:"sig"`
+}
+
+func deriveKeys(seed []byte) (noise.DHKey, ed25519.PrivateKey) {
+	h := sha512.Sum512(seed)
+	scalar := h[:32]
+
+	scalar[0] &= 248
+	scalar[31] &= 127
+	scalar[31] |= 64
+
+	pub := throw2(curve25519.X25519(scalar, curve25519.Basepoint))
+
+	return noise.DHKey{Private: scalar, Public: pub}, ed25519.NewKeyFromSeed(seed)
 }
 
 func keygen() {
-	kp := throw2(cipherSuite.GenerateKeypair(rand.Reader))
+	seed := make([]byte, ed25519.SeedSize)
+
+	throw2(rand.Read(seed))
+
+	dh, sig := deriveKeys(seed)
 
 	out := throw2(json.Marshal(KeyPair{
-		Pub: base64.StdEncoding.EncodeToString(kp.Public),
-		Key: base64.StdEncoding.EncodeToString(kp.Private),
+		Key: base64.StdEncoding.EncodeToString(seed),
+		Pub: base64.StdEncoding.EncodeToString(dh.Public),
+		Sig: base64.StdEncoding.EncodeToString(sig.Public().(ed25519.PublicKey)),
 	}))
 
 	os.Stdout.Write(append(out, '\n'))
-}
-
-func loadKeyPair(cfg *Config) noise.DHKey {
-	priv := decodeKey(cfg.Key)
-	pub := throw2(curve25519.X25519(priv, curve25519.Basepoint))
-
-	return noise.DHKey{Private: priv, Public: pub}
 }

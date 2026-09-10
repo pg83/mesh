@@ -8,6 +8,7 @@ const (
 	packetTransport = 3
 	innerKeepalive  = 0
 	innerData       = 1
+	innerAd         = 2
 	headerInit      = 1 + 4
 	headerResponse  = 1 + 4 + 4
 	headerTransport = 1 + 4 + 8

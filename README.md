@@ -6,9 +6,10 @@ symmetric AEAD; a gossip map on each node describes who can reach whom; the
 source picks the whole path and relays only follow it; IP rides on top over a
 TUN device.
 
-This is the first version: registry, links, TUN, direct delivery, and the
-dial loop over the static address set. Gossip, the map, and relaying through
-other nodes come next and do not change the wire format.
+This is the first version: registry, links, TUN, gossip, the routing map,
+relaying, and the dial loop over the full address closure. Link metrics,
+retransmits and additional transports come later and do not change the wire
+format.
 
 ## Usage
 
@@ -28,16 +29,22 @@ Config is JSON:
   "subnet": "10.77.0.0/24",
   "status": "/run/mesh/status.sock",
   "registry": [
-    {"index": 1, "pub": "<base64>", "intip": "10.77.0.1", "static": ["5.188.103.251:7064"]},
-    {"index": 2, "pub": "<base64>", "intip": "10.77.0.2", "static": []}
+    {"index": 1, "pub": "<x25519>", "sig": "<ed25519>", "intip": "10.77.0.1", "static": ["5.188.103.251:7064"]},
+    {"index": 2, "pub": "<x25519>", "sig": "<ed25519>", "intip": "10.77.0.2", "static": []}
   ]
 }
 ```
 
-The registry is the same on every node: index, public key, internal address,
-and the static endpoints a node has, if any. A node without static endpoints
-is never dialed; it dials. `tun` (default `mesh0`) and `mtu` (default 1380)
-are optional.
+The registry is the same on every node: index, both public keys, internal
+address, and the static endpoints a node has, if any. A node without static
+endpoints is never dialed by a node that has not heard of it; it dials, and
+its own advertised addresses let others dial it back later. `tun` (default
+`mesh0`) and `mtu` (default 1380) are optional.
+
+`key` is one 32-byte seed. The Noise static keypair (`pub`) and the
+advertisement signing keypair (`sig`) are both derived from it: an
+advertisement travels past its author, so the link cipher cannot vouch for
+it and it carries its own signature.
 
 ## Wire format
 
@@ -49,16 +56,38 @@ Outer packet, first byte is the type:
 | response | `2`, receiver id (4), sender id (4), Noise IK message 2 |
 | transport | `3`, receiver id (4), counter (8), ChaCha20-Poly1305 over the inner packet, header as associated data |
 
-Inner packet, first byte is the type: `0` keepalive, `1` data. Data carries
-src index (2), hop count (1), the path as indexes (2 each), the cursor (1),
-then the IP packet. A relay checks that the cursor points at itself, advances
-it, and hands the packet to the session of the next index.
+Inner packet, first byte is the type: `0` keepalive, `1` data, `2`
+advertisement. Data carries src index (2), hop count (1), the path as indexes
+(2 each), the cursor (1), then the IP packet. A relay checks that the cursor
+points at itself, advances it, and hands the packet to the session of the
+next index. An advertisement carries a 64-byte signature and the JSON body.
+
+## Map
+
+Every node floods one advertisement about itself: its index, a timestamp, the
+addresses it offers, and the peers it currently has a link with. Timestamps
+are per-node counters and are only ever compared with another advertisement
+of the same node; expiry runs on local arrival time instead. A newer
+advertisement is stored and passed on to every link except the one it came
+from, so it stops spreading on its own. A link coming up hands the new peer
+the whole database at once.
+
+Routes are a breadth-first search by hop count over the advertised graph,
+recomputed whenever it changes. The source puts the whole path into the
+packet, so relays make no decisions and loops cannot form.
+
+Dialing knocks on the closure of known addresses: the statics from the
+registry plus everything a peer advertises, which arrives through the mesh.
+So a node reachable only through a relay today becomes directly reachable as
+soon as one of its addresses works. Addresses inside the mesh subnet are
+never dialed: the overlay must not run over itself.
 
 ## Behaviour
 
 - One session per peer, bound to the peer identity. Any authenticated packet
   updates the remote endpoint, so a peer can roam.
 - Keepalive after 5 s idle, session dropped after 15 s without traffic.
+- Advertisement every 10 s and on every link change, expired after 40 s.
 - Dialing knocks on every known address of every peer without a session, with
   per-address backoff from 1 s to 5 min. Crossed handshakes: the larger index
   gives up its own attempt. An init from a peer that already has a session
