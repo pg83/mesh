@@ -16,8 +16,6 @@ jobs:
     name: Build and test
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    env:
-      MESH_TEST_ARTIFACTS: ${{ runner.temp }}/mesh-artifacts
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -36,6 +34,7 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client openssh-server rsync curl iperf3 iproute2 util-linux
           echo /usr/sbin >> "$GITHUB_PATH"
+          echo "MESH_TEST_ARTIFACTS=$RUNNER_TEMP/mesh-artifacts" >> "$GITHUB_ENV"
 
       - name: Prepare namespaces and tun
         run: |
@@ -67,8 +66,6 @@ jobs:
     name: Coverage
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    env:
-      MESH_TEST_ARTIFACTS: ${{ runner.temp }}/mesh-artifacts
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,6 +81,7 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client openssh-server rsync curl iperf3 iproute2 util-linux
           echo /usr/sbin >> "$GITHUB_PATH"
+          echo "MESH_TEST_ARTIFACTS=$RUNNER_TEMP/mesh-artifacts" >> "$GITHUB_ENV"
 
       - name: Prepare namespaces and tun
         run: |
