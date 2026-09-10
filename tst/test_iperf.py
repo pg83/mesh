@@ -9,6 +9,8 @@ import workload
 def test():
     workload.require('iperf3')
     with lib.Lab(['a', 'r', 'b'], {1: ['a', 'r'], 2: ['r', 'b']}) as lab:
+        lab.wait_route('a', 'b', ['r', 'b'])
+        lab.wait_route('b', 'a', ['r', 'a'])
         lab.wait_ping('a', 'b')
         host = workload.address(lab, 'b')
         server = lab.spawn('b', ['iperf3', '-s', '-B', host, '-p', '5201'], 'iperf-server')

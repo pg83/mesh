@@ -1,7 +1,7 @@
 # mesh
 
-[![CI](https://github.com/pg83/mesh/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pg83/mesh/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/pg83/mesh/branch/main/graph/badge.svg)](https://app.codecov.io/gh/pg83/mesh)
+[![CI](https://github.com/pg83/mesh/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/pg83/mesh/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/pg83/mesh/branch/master/graph/badge.svg)](https://app.codecov.io/gh/pg83/mesh)
 [![Go version](https://img.shields.io/github/go-mod/go-version/pg83/mesh)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
