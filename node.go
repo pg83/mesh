@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/flynn/noise"
@@ -95,8 +97,18 @@ func (n *Node) run() {
 	go n.loop("recv", n.recvLoop)
 	go n.loop("tun", n.tunLoop)
 	go n.loop("status", n.statusLoop)
+	go n.loop("signal", n.signalLoop)
 
 	n.loop("timer", n.timerLoop)
+}
+
+func (n *Node) signalLoop() {
+	signals := make(chan os.Signal, 1)
+
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+
+	n.log.Info("stopping", "signal", <-signals)
+	os.Exit(0)
 }
 
 func (n *Node) loop(name string, body func()) {

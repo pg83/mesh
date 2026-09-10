@@ -1,27 +1,34 @@
-name: ci
+name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
   test:
+    name: Build and test
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-
     steps:
-      - uses: actions/checkout@v5
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v6
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: false
 
-      # The e2e lab puts every node in its own network namespace and wires
-      # them with TUN devices, so it needs unprivileged user namespaces,
-      # which Ubuntu confines by default, and the tun module.
+      # The lab puts every node in its own network namespace and wires them
+      # with TUN devices, so it needs unprivileged user namespaces, which
+      # Ubuntu confines by default, and the tun module.
       - name: Prepare namespaces and tun
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -30,8 +37,7 @@ jobs:
           unshare -rUn true && echo "user namespaces ok"
 
       - name: Format
-        run: |
-          test -z "$(gofmt -l *.go)" || { gofmt -d *.go; exit 1; }
+        run: test -z "$(gofmt -l *.go)" || { gofmt -d *.go; exit 1; }
 
       - name: Vet
         run: go vet ./...
@@ -40,3 +46,34 @@ jobs:
 
       - name: Build and test
         run: ./build test
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Prepare namespaces and tun
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo modprobe tun
+
+      - name: Run the tests against the instrumented binary
+        run: ./build -Dcoverage coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          use_oidc: true
+          files: .build/coverage.out
+          disable_search: true
+          fail_ci_if_error: true
+          verbose: true

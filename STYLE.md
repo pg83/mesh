@@ -158,3 +158,7 @@ JSON only. No YAML, ever.
 `./lint.sh` is the style gate: it runs `ay dev refac lint` from the sibling
 `ay` checkout (style checks, the naming convention included), then `gofmt -w`.
 Run it before committing style-sensitive changes.
+
+The gate strips every comment that is not a compiler directive. What a piece
+of code does belongs in its name; why it exists belongs in the commit message
+and in `README.md`.

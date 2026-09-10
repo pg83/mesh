@@ -3,6 +3,28 @@ import build
 from pathlib import Path
 
 
+build.flags.allow({
+    "coverage": {
+        "descr": "instrument the binary; `./build -Dcoverage coverage` writes $(B)/coverage.out",
+        "default": "",
+    },
+})
+
+COVERAGE = bool(build.flags.coverage)
+
+
+def coverage_dir(name):
+    return f"$(B)/coverage/{name}"
+
+
+def mkdir(path):
+    return [
+        "python3",
+        "-c",
+        f"from pathlib import Path; Path(r'{path}').mkdir(parents=True, exist_ok=True)",
+    ]
+
+
 ROOT = Path(__file__).parent
 
 
@@ -43,6 +65,9 @@ GO_ENV = {
     "GOWORK": "off",
 }
 
+# With -Dcoverage the binary counts what it executes (Go's own
+# instrumentation) and every process writes its counters to GOCOVERDIR at
+# exit, so the end-to-end tests measure coverage of the real program.
 mesh = command(
     name="mesh",
     inputs=GO_INPUTS,
@@ -51,6 +76,7 @@ mesh = command(
         "go", "build",
         "-trimpath",
         "-buildvcs=false",
+        *(["-cover", "-covermode=atomic"] if COVERAGE else []),
         "-o", "$(B)/bin/mesh",
         ".",
     ],
@@ -76,23 +102,36 @@ go_test = command(
 )
 
 e2e_tests = []
+coverage_dirs = []
 for test_path in build.glob("$(S)/tst/test_*.py"):
     test_name = test_path.rsplit("/", 1)[-1][len("test_"):-len(".py")]
     test_stamp = f"$(B)/tests/{test_name}.stamp"
+    env = {
+        "MESH_TEST_BINARY": mesh.outputs[0],
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    prelude = []
+    outputs = [test_stamp]
+
+    if COVERAGE:
+        # the counters are a declared output so the coverage node sees them
+        env["GOCOVERDIR"] = coverage_dir(test_name)
+        prelude = [mkdir(env["GOCOVERDIR"])]
+        coverage_dirs.append(env["GOCOVERDIR"])
+        outputs.append(env["GOCOVERDIR"])
+
     e2e_tests.append(command(
         name=f"e2e_{test_name}",
         inputs=[test_path, "$(S)/tst/lib.py"],
-        outputs=[test_stamp],
+        outputs=outputs,
         deps=[mesh],
         cmd=[
+            *prelude,
             ["python3", test_path],
             touch(test_stamp),
         ],
         cwd="$(S)",
-        env={
-            "MESH_TEST_BINARY": mesh.outputs[0],
-            "PYTHONDONTWRITEBYTECODE": "1",
-        },
+        env=env,
         descr="EE",
         color="green",
     ))
@@ -101,3 +140,16 @@ group("install", mesh)
 group("unit", go_test)
 group("e2e", *e2e_tests)
 group("test", go_test, *e2e_tests)
+
+if COVERAGE:
+    coverage = command(
+        name="coverage",
+        inputs=["$(S)/dev/coverage.py"],
+        outputs=["$(B)/coverage.out"],
+        deps=e2e_tests,
+        cmd=["python3", "$(S)/dev/coverage.py", "--output", "$(B)/coverage.out", *coverage_dirs],
+        cwd="$(S)",
+        env=GO_ENV,
+        descr="CV",
+        color="magenta",
+    )

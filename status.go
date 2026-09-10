@@ -65,9 +65,6 @@ func (n *Node) status() *Status {
 	return st
 }
 
-// statusLoop serves one JSON document per connection. A name starting with
-// "@" is an abstract socket: it lives in the network namespace, has no path,
-// and so escapes the 108 byte limit on socket paths.
 func (n *Node) statusLoop() {
 	path := n.cfg.Status
 

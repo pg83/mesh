@@ -1,5 +1,10 @@
 # mesh
 
+[![CI](https://github.com/pg83/mesh/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/pg83/mesh/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/pg83/mesh/branch/main/graph/badge.svg)](https://app.codecov.io/gh/pg83/mesh)
+[![Go version](https://img.shields.io/github/go-mod/go-version/pg83/mesh)](go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Private overlay network for a closed set of nodes. Every node knows every
 public key; links are UDP sessions negotiated with Noise IK and carried by a
 symmetric AEAD; a gossip map on each node describes who can reach whom; the
@@ -104,6 +109,11 @@ never dialed: the overlay must not run over itself.
 
 CI runs the same `./build test` on every push and pull request. The lab needs
 unprivileged user namespaces and the tun module, which the workflow enables.
+
+Coverage comes from the end-to-end suite rather than from unit tests:
+`./build -Dcoverage coverage` builds an instrumented binary, points every test
+node at its own `GOCOVERDIR`, and merges the counters every mesh process wrote
+at exit into `.build/coverage.out`. CI uploads that profile to Codecov.
 
 E2E tests run nodes in separate network namespaces wired by a userspace
 switch (`tst/lib.py`); see `CLAUDE.md`.
