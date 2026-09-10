@@ -1,0 +1,7 @@
+/mesh
+/.build/
+*.test
+*.out
+__pycache__/
+*.pyc
+.claude/
