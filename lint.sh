@@ -4,5 +4,5 @@ set -xue
 
 ../ay/ay dev refac lint
 rm -f node_ownership_gen.go
-gofmt -w .
+gofmt -w *.go
 ./build mesh
