@@ -17,8 +17,10 @@ def test():
         lab.unblock('a', 'b', seg=2)
         lab.block('a', 'b', seg=1)
         before = stream.replies
-        lab.wait(lambda: lab.status('a')['links'][0]['endpoint'] == '10.2.0.2:7000'
-                 if lab.status('a')['links'] else False, 'second endpoint', timeout=40)
+        def second_endpoint():
+            links = lab.status('a')['links']
+            return bool(links) and links[0]['endpoint'] == '10.2.0.2:7000'
+        lab.wait(second_endpoint, 'second endpoint', timeout=40)
         stream.progress(after=before + 2)
         assert lab.traffic('a', 'b', seg=2) > 0
         stream.finish()

@@ -486,8 +486,11 @@ class Lab:
     def wait_route(self, src, dst, hops, timeout=30):
         deadline = time.time() + timeout
         while time.time() < deadline:
-            if self.route(src, dst) == hops:
-                return
+            try:
+                if self.route(src, dst) == hops:
+                    return
+            except (OSError, json.JSONDecodeError):
+                pass
             time.sleep(0.2)
         raise AssertionError(f"route {src} -> {dst} is {self.route(src, dst)}, want {hops}")
 
