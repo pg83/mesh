@@ -121,3 +121,44 @@ switch (`tst/lib.py`); see `CLAUDE.md`.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Application and failure tests
+
+The e2e suite requires Linux, Python 3.12+, Go, iproute2, util-linux, OpenSSH
+(client and server), rsync, curl and iperf3. All are required in CI; missing
+programs fail the test. Each application runs in a node's network namespace
+and connects to another node's mesh IP. OpenSSH runs as the invoking user
+inside a nested user namespace, with fresh host/user keys and no PAM.
+
+`Lab.block` / `unblock` cut individual directions or segments without killing
+nodes. `intercept` can drop, delay, hold, duplicate, copy or corrupt selected
+outer packets. Held packets can be released later; delivery counters show
+which path carried traffic. These controls live in the existing userspace
+switch, not in the mesh daemon.
+
+The application scenarios exercise persistent SSH across direct/relay path
+changes, one-way failures, relay exits, total outages, mesh restarts, endpoint
+roaming and fallback between two physical segments. Concurrent SSH clients
+have distinct mesh IPs. The same SSH process exchanges numbered requests
+throughout; tests reject missing/duplicate replies and report its maximum
+pause. Route convergence is bounded by 30 seconds and SSH recovery by 60
+seconds, allowing for the current 15-second session timeout and TCP retries.
+
+Other scenarios transfer and hash files through scp and curl while cutting
+the active path, synchronize trees with rsync, and run iperf3 TCP/UDP streams
+with deterministic loss and delay. UDP probes check packet sizes, replay,
+reordering and packets older than the replay window. Gossip expiry,
+handshake loss/replay, unknown keys, CLI errors and malformed packets have
+separate tests. `mesh-probe` is built only with the `meshprobe` tag for the
+protocol test; it sends authenticated malformed messages to real mesh nodes.
+It is absent from the production binary and its coverage profile.
+
+`./build -j 4 test` runs the suite. `./build -j 4 -Dcoverage coverage` runs it
+against the instrumented daemon and enforces 95% statement coverage. Each
+individual daemon run has a separate counter directory; shutdown waits for
+all processes and missing daemon counters fail the run. CLI coverage is
+merged too. Codecov receives that same profile and requires 95% coverage.
+
+On failure the suite prints application/mesh logs and channel counters. Set
+`MESH_TEST_ARTIFACTS` to preserve these along with status snapshots outside
+the build temporary directory; CI uploads them as failure artifacts.

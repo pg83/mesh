@@ -74,3 +74,13 @@ func decodeData(inner []byte) (*Data, bool) {
 func advanceCursor(inner []byte, cursor int) {
 	inner[4+2*int(inner[3])] = byte(cursor)
 }
+
+func validIPv4(packet []byte) bool {
+	if len(packet) < 20 || packet[0]>>4 != 4 {
+		return false
+	}
+
+	head := int(packet[0]&15) * 4
+
+	return head >= 20 && head <= len(packet) && int(binary.BigEndian.Uint16(packet[2:4])) == len(packet)
+}

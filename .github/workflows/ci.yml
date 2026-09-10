@@ -15,7 +15,9 @@ jobs:
   test:
     name: Build and test
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      MESH_TEST_ARTIFACTS: ${{ runner.temp }}/mesh-artifacts
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -29,6 +31,12 @@ jobs:
       # The lab puts every node in its own network namespace and wires them
       # with TUN devices, so it needs unprivileged user namespaces, which
       # Ubuntu confines by default, and the tun module.
+      - name: Install application test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client openssh-server rsync curl iperf3 iproute2 util-linux
+          echo /usr/sbin >> "$GITHUB_PATH"
+
       - name: Prepare namespaces and tun
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -45,12 +53,22 @@ jobs:
           GOFLAGS: -mod=vendor
 
       - name: Build and test
-        run: ./build test
+        run: ./build -j 4 test
+
+      - name: Save failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mesh-test-failure
+          path: ${{ runner.temp }}/mesh-artifacts
+          retention-days: 7
 
   coverage:
     name: Coverage
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      MESH_TEST_ARTIFACTS: ${{ runner.temp }}/mesh-artifacts
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -61,15 +79,22 @@ jobs:
           go-version-file: go.mod
           cache: false
 
+      - name: Install application test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client openssh-server rsync curl iperf3 iproute2 util-linux
+          echo /usr/sbin >> "$GITHUB_PATH"
+
       - name: Prepare namespaces and tun
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo modprobe tun
 
       - name: Run the tests against the instrumented binary
-        run: ./build -Dcoverage coverage
+        run: ./build -j 4 -Dcoverage coverage
 
       - name: Upload coverage to Codecov
+        if: ${{ !cancelled() && hashFiles('.build/coverage.out') != '' }}
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           use_oidc: true
@@ -77,3 +102,11 @@ jobs:
           disable_search: true
           fail_ci_if_error: true
           verbose: true
+
+      - name: Save failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mesh-coverage-failure
+          path: ${{ runner.temp }}/mesh-artifacts
+          retention-days: 7

@@ -1,4 +1,5 @@
 import build
+import os
 
 from pathlib import Path
 
@@ -86,6 +87,17 @@ mesh = command(
     color="cyan",
 )
 
+probe = command(
+    name="probe",
+    inputs=GO_INPUTS,
+    outputs=["$(B)/bin/mesh-probe"],
+    cmd=["go", "build", "-trimpath", "-tags=meshprobe", "-o", "$(B)/bin/mesh-probe", "."],
+    cwd="$(S)",
+    env=GO_ENV,
+    descr="GO",
+    color="cyan",
+)
+
 go_test_stamp = "$(B)/tests/go.stamp"
 go_test = command(
     name="go_test",
@@ -107,7 +119,9 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
     test_name = test_path.rsplit("/", 1)[-1][len("test_"):-len(".py")]
     test_stamp = f"$(B)/tests/{test_name}.stamp"
     env = {
+        "MESH_TEST_ARTIFACTS": os.environ.get("MESH_TEST_ARTIFACTS", ""),
         "MESH_TEST_BINARY": mesh.outputs[0],
+        "MESH_TEST_PROBE": probe.outputs[0],
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     prelude = []
@@ -122,9 +136,9 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
 
     e2e_tests.append(command(
         name=f"e2e_{test_name}",
-        inputs=[test_path, "$(S)/tst/lib.py"],
+        inputs=[test_path, "$(S)/tst/lib.py", "$(S)/tst/workload.py", "$(S)/tst/program.py"],
         outputs=outputs,
-        deps=[mesh],
+        deps=[mesh, probe] if test_name == "protocol" else [mesh],
         cmd=[
             *prelude,
             ["python3", test_path],

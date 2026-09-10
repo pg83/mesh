@@ -1,3 +1,5 @@
+//go:build !meshprobe
+
 package main
 
 import (

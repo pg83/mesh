@@ -349,6 +349,10 @@ func (n *Node) handleData(inner []byte) {
 	}
 
 	if d.cursor == len(d.path)-1 {
+		if !validIPv4(d.ip) {
+			return
+		}
+
 		n.tun.write(d.ip)
 
 		return

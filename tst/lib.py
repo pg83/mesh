@@ -8,9 +8,13 @@ nothing else. Requires unprivileged user namespaces; a test re-execs itself
 under `unshare -rUn` and spawns one `unshare -n` holder per node.
 """
 
+import collections
 import fcntl
+import heapq
 import json
 import os
+import shutil
+import signal
 import select
 import socket
 import struct
@@ -19,9 +23,10 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from pathlib import Path
 
-MESH = Path(os.environ["MESH_TEST_BINARY"])
+MESH = Path(os.environ["MESH_TEST_BINARY"]).resolve()
 PORT = 7000
 SUBNET = "10.77.0.0/24"
 STATUS = "@mesh"  # abstract socket: per netns, and no path length limit
@@ -37,7 +42,8 @@ def unshared():
     """Re-exec under a fresh user+net namespace once."""
     if os.environ.get("MESH_TEST_UNSHARED") == "1":
         return
-    env = dict(os.environ, MESH_TEST_UNSHARED="1")
+    env = dict(os.environ, MESH_TEST_UNSHARED="1",
+               MESH_TEST_UID=str(os.getuid()), MESH_TEST_GID=str(os.getgid()))
     os.execvpe("unshare", ["unshare", "-rUn", sys.executable, *sys.argv], env)
 
 
@@ -58,6 +64,8 @@ class Node:
         self.pid = None
         self.proc = None
         self.keys = None
+        self.addresses = {}
+        self.coverage = None
 
 
 class Lab:
@@ -71,6 +79,17 @@ class Lab:
         self.tuns = {}  # fd -> (seg, node)
         self.ports = {}  # (seg, addr bytes) -> fd
         self.running = True
+        self.lock = threading.RLock()
+        self.rules = []
+        self.blocked = set()
+        self.counts = collections.Counter()
+        self.delayed = []
+        self.serial = 0
+        self.switch_error = None
+        self.thread = None
+        self.processes = []
+        self.configs = {}
+        self.coverage_dirs = []
         for seg, names in segments.items():
             for name in names:
                 self.nodes[name].segments.append(seg)
@@ -81,6 +100,7 @@ class Lab:
         return f"/proc/{pid}/ns/net"
 
     def nsenter(self, node, *cmd, **kw):
+        kw.setdefault("timeout", 10)
         return subprocess.run(
             ["nsenter", "-t", str(node.pid), "-n", *cmd], **kw
         )
@@ -100,7 +120,10 @@ class Lab:
             ["timeout", LIFETIME, "unshare", "-n", "sleep", "infinity"],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
+        deadline = time.monotonic() + 10
         while os.stat(self.netns(self.holder_pid(node))).st_ino == mine:
+            assert node.holder.poll() is None, "namespace holder exited"
+            assert time.monotonic() < deadline, "namespace holder did not start"
             time.sleep(0.01)
         node.pid = self.holder_pid(node)
         self.nsenter(node, "ip", "link", "set", "lo", "up", check=True)
@@ -116,23 +139,165 @@ class Lab:
         os.close(nsfd)
         os.close(mine)
         addr = segaddr(seg, node.index)
+        node.addresses[seg] = addr
         self.nsenter(node, "ip", "addr", "add", f"{addr}/24", "dev", name, check=True)
         self.nsenter(node, "ip", "link", "set", name, "up", check=True)
         self.tuns[fd] = (seg, node)
         self.ports[(seg, socket.inet_aton(addr))] = fd
 
+    def block(self, src, dst, seg=None, both=True):
+        with self.lock:
+            self.blocked.add((src, dst, seg))
+            if both:
+                self.blocked.add((dst, src, seg))
+
+    def unblock(self, src, dst, seg=None, both=True):
+        with self.lock:
+            self.blocked.discard((src, dst, seg))
+            if both:
+                self.blocked.discard((dst, src, seg))
+
+    def intercept(self, src, dst, action, count=1, kind=None, seg=None,
+                  min_size=0, every=1, delay=0):
+        rule = dict(src=src, dst=dst, action=action, count=count, kind=kind,
+                    seg=seg, min_size=min_size, every=every, delay=delay,
+                    seen=0, hits=0, held=[])
+        with self.lock:
+            self.rules.append(rule)
+        return rule
+
+    def clear(self, rule):
+        with self.lock:
+            self.rules.remove(rule)
+
+    def release(self, rule, reverse=False):
+        with self.lock:
+            held, rule['held'] = rule['held'], []
+            for out, packet, key in reversed(held) if reverse else held:
+                self.deliver(out, packet, key)
+
+    def traffic(self, src, dst, seg=None):
+        with self.lock:
+            return sum(v for (a, b, s, action), v in self.counts.items()
+                       if a == src and b == dst and action == 'sent' and (seg is None or seg == s))
+
+    def deliver(self, out, packet, key):
+        os.write(out, packet)
+        self.counts[(*key, 'sent')] += 1
+
     def switch(self):
-        fds = list(self.tuns)
-        while self.running:
-            ready, _, _ = select.select(fds, [], [], 0.2)
-            for fd in ready:
-                pkt = os.read(fd, 65536)
-                if len(pkt) < 20 or pkt[0] >> 4 != 4:
-                    continue
-                seg, _ = self.tuns[fd]
-                out = self.ports.get((seg, pkt[16:20]))
-                if out is not None and out != fd:
-                    os.write(out, pkt)
+        try:
+            fds = list(self.tuns)
+            while self.running:
+                ready, _, _ = select.select(fds, [], [], 0.01)
+                with self.lock:
+                    now = time.monotonic()
+                    while self.delayed and self.delayed[0][0] <= now:
+                        _, _, out, packet, key = heapq.heappop(self.delayed)
+                        self.deliver(out, packet, key)
+                    for fd in ready:
+                        packet = os.read(fd, 65536)
+                        if len(packet) < 20 or packet[0] >> 4 != 4:
+                            continue
+                        seg, src = self.tuns[fd]
+                        out = self.ports.get((seg, packet[16:20]))
+                        if out is None or out == fd:
+                            continue
+                        dst = self.tuns[out][1]
+                        key = (src.name, dst.name, seg)
+                        if key in self.blocked or (src.name, dst.name, None) in self.blocked:
+                            self.counts[(*key, 'dropped')] += 1
+                            continue
+                        head = (packet[0] & 15) * 4
+                        payload = packet[head + 8:] if packet[9] == 17 else b''
+                        for rule in self.rules:
+                            if (rule['src'] != src.name or rule['dst'] != dst.name
+                                    or rule['count'] == 0
+                                    or rule['seg'] not in (None, seg)
+                                    or len(payload) < rule['min_size']
+                                    or (rule['kind'] is not None and payload[:1] != bytes([rule['kind']]))):
+                                continue
+                            rule['seen'] += 1
+                            if rule['seen'] % rule['every']:
+                                continue
+                            rule['hits'] += 1
+                            if rule['count'] > 0:
+                                rule['count'] -= 1
+                            action = rule['action']
+                            self.counts[(*key, action)] += 1
+                            if action in ('hold', 'copy'):
+                                rule['held'].append((out, packet, key))
+                            if action in ('hold', 'drop'):
+                                break
+                            if action == 'delay':
+                                self.serial += 1
+                                heapq.heappush(self.delayed, (now + rule['delay'], self.serial, out, packet, key))
+                                break
+                            if action == 'corrupt':
+                                # IPv4 permits a zero UDP checksum. Keep the IP header
+                                # intact so the altered ciphertext reaches mesh's AEAD.
+                                damaged = bytearray(packet)
+                                damaged[head + 6:head + 8] = b'\0\0'
+                                damaged[-1] ^= 1
+                                packet = bytes(damaged)
+                            if action == 'duplicate':
+                                self.deliver(out, packet, key)
+                            self.deliver(out, packet, key)
+                            break
+                        else:
+                            self.deliver(out, packet, key)
+        except BaseException as error:
+            self.switch_error = error
+
+    def set_address(self, name, seg, address):
+        node = self.nodes[name]
+        with self.lock:
+            old = node.addresses[seg]
+            fd = self.ports.pop((seg, socket.inet_aton(old)))
+            self.nsenter(node, 'ip', 'addr', 'del', f'{old}/24', 'dev', f's{seg}', check=True)
+            self.nsenter(node, 'ip', 'addr', 'add', f'{address}/24', 'dev', f's{seg}', check=True)
+            self.ports[(seg, socket.inet_aton(address))] = fd
+            node.addresses[seg] = address
+
+    def command(self, name, argv, user=False):
+        command = ['nsenter', '-t', str(self.nodes[name].pid), '-n']
+        if user:
+            command += ['unshare', '-U', '--map-user=' + os.environ['MESH_TEST_UID'],
+                        '--map-group=' + os.environ['MESH_TEST_GID']]
+        return command + [str(a) for a in argv]
+
+    def run(self, name, argv, user=False, **kwargs):
+        kwargs.setdefault('check', True)
+        kwargs.setdefault('timeout', 90)
+        kwargs.setdefault('capture_output', True)
+        kwargs.setdefault('text', True)
+        return subprocess.run(self.command(name, argv, user), **kwargs)
+
+    def spawn(self, name, argv, label, user=False, **kwargs):
+        with open(self.dir / f'{label}.log', 'ab') as log:
+            kwargs.setdefault('stdout', log)
+            kwargs.setdefault('stderr', log)
+            kwargs.setdefault('stdin', subprocess.DEVNULL)
+            proc = subprocess.Popen(['timeout', '--preserve-status', LIFETIME, *self.command(name, argv, user)],
+                                    start_new_session=True, **kwargs)
+        self.processes.append(proc)
+        return proc
+
+    def check(self):
+        if self.switch_error:
+            raise AssertionError('userspace switch failed') from self.switch_error
+        for node in self.nodes.values():
+            if node.proc is not None:
+                assert node.proc.poll() is None, f'mesh {node.name} exited: {node.proc.returncode}'
+
+    def wait(self, predicate, description, timeout=30):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.check()
+            if predicate():
+                return
+            time.sleep(0.05)
+        raise AssertionError(f'timed out after {timeout}s: {description}')
 
     # --- nodes ---
 
@@ -145,7 +310,7 @@ class Lab:
         for node in self.nodes.values():
             static = []
             if node.name in self.statics:
-                static = [f"{segaddr(seg, node.index)}:{PORT}" for seg in node.segments]
+                static = [f"{node.addresses[seg]}:{PORT}" for seg in node.segments]
             reg.append({
                 "index": node.index,
                 "pub": node.keys["pub"],
@@ -164,23 +329,32 @@ class Lab:
             "status": STATUS,
             "registry": self.registry(),
         }
+        cfg.update(self.configs.get(node.name, {}))
         path = self.dir / f"{node.name}.json"
         path.write_text(json.dumps(cfg, indent=2))
         return path
 
     def start_node(self, name):
         node = self.nodes[name]
-        log = open(self.dir / f"{name}.log", "ab")
-        node.proc = subprocess.Popen(
-            ["timeout", LIFETIME, "nsenter", "-t", str(node.pid), "-n", MESH, "run", "-c", self.write_config(node)],
-            stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-        )
+        assert node.proc is None
+        env = os.environ.copy()
+        if env.get('GOCOVERDIR'):
+            node.coverage = Path(env['GOCOVERDIR']) / ('daemon-' + name + '-' + uuid.uuid4().hex)
+            node.coverage.mkdir(parents=True)
+            self.coverage_dirs.append(node.coverage)
+            env['GOCOVERDIR'] = str(node.coverage)
+        node.proc = self.spawn(name, [MESH, 'run', '-c', self.write_config(node)], name, env=env)
 
     def stop_node(self, name):
         node = self.nodes[name]
-        node.proc.terminate()
-        node.proc.wait()
+        proc = node.proc
+        assert proc is not None
+        proc.terminate()
+        code = proc.wait(timeout=10)
         node.proc = None
+        assert code == 0, f'mesh {name} exited with {code}'
+        if node.coverage:
+            assert list(node.coverage.glob('covcounters.*')), f'no daemon counters in {node.coverage}'
 
     def start(self):
         for node in self.nodes.values():
@@ -188,36 +362,86 @@ class Lab:
             self.start_holder(node)
             for seg in node.segments:
                 self.add_wire(node, seg)
-        threading.Thread(target=self.switch, daemon=True).start()
+        self.thread = threading.Thread(target=self.switch, daemon=True)
+        self.thread.start()
         for name in self.nodes:
             self.start_node(name)
 
     def stop(self):
-        self.running = False
+        errors = []
         for node in self.nodes.values():
             if node.proc:
-                node.proc.terminate()
+                try:
+                    self.stop_node(node.name)
+                except Exception as error:
+                    errors.append(error)
+        for proc in self.processes:
+            if proc.poll() is None:
+                os.killpg(proc.pid, signal.SIGTERM)
+        for proc in self.processes:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
+                errors.append(AssertionError(f'process did not stop: {proc.args}'))
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=5)
+            assert not self.thread.is_alive(), 'switch did not stop'
+        for fd in self.tuns:
+            os.close(fd)
+        for node in self.nodes.values():
             if node.holder:
                 node.holder.terminate()
+                node.holder.wait(timeout=5)
+        if errors:
+            raise errors[0]
+        if self.switch_error:
+            raise AssertionError('userspace switch failed') from self.switch_error
 
     def __enter__(self):
-        self.start()
+        try:
+            self.start()
+        except BaseException:
+            self.dump_logs()
+            self.stop()
+            raise
         return self
 
     def __exit__(self, kind, value, tb):
         if kind is not None:
+            for name in self.nodes:
+                try:
+                    (self.dir / f'{name}-status.json').write_text(json.dumps(self.status(name), indent=2))
+                except Exception:
+                    pass
+        try:
+            self.stop()
+        except BaseException:
             self.dump_logs()
-        self.stop()
+            raise
+        if kind is not None:
+            self.dump_logs()
+        else:
+            shutil.rmtree(self.dir)
 
     def dump_logs(self):
-        for name in self.nodes:
-            path = self.dir / f"{name}.log"
-            sys.stderr.write(f"--- {name} ---\n{path.read_text()}")
+        sys.stderr.write(f'lab artifacts: {self.dir}\n')
+        for path in self.dir.glob('*.log'):
+            sys.stderr.write(f'--- {path.name} ---\n{path.read_text(errors="replace")}')
+        counters = {str(k): v for k, v in self.counts.items()}
+        (self.dir / 'channels.json').write_text(json.dumps(counters, indent=2))
+        sys.stderr.write(f'link counters: {counters}\n')
+        artifacts = os.environ.get('MESH_TEST_ARTIFACTS')
+        if artifacts:
+            shutil.copytree(self.dir, Path(artifacts) / self.dir.name, dirs_exist_ok=True)
 
     # --- observations ---
 
     def status(self, name):
         """Asks the node itself, from inside its namespace."""
+        self.check()
         node = self.nodes[name]
         r = self.nsenter(node, MESH, "status", "-s", STATUS,
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
