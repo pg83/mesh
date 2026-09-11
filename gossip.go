@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/ed25519"
+	"encoding/binary"
 	"encoding/json"
 	"net"
 	"slices"
@@ -12,10 +13,11 @@ import (
 const adTimeout = 40 * time.Second
 
 type Ad struct {
-	Index     uint16   `json:"index"`
-	ID        uint64   `json:"ts"`
-	Addrs     []string `json:"addrs"`
-	Neighbors []uint16 `json:"neighbors"`
+	Index     uint16              `json:"index"`
+	ID        uint64              `json:"ts"`
+	Addrs     []string            `json:"addrs"`
+	Neighbors []uint16            `json:"neighbors"`
+	Seen      map[uint16][]string `json:"seen,omitempty"`
 }
 
 type Known struct {
@@ -25,21 +27,47 @@ type Known struct {
 	received time.Time
 }
 
-func encodeAd(blob, sig []byte) []byte {
-	out := make([]byte, 0, 1+ed25519.SignatureSize+len(blob))
+func encodeAd(blob, sig []byte, via string) []byte {
+	out := make([]byte, 0, 3+len(via)+ed25519.SignatureSize+len(blob))
 
 	out = append(out, innerAd)
+	out = binary.LittleEndian.AppendUint16(out, uint16(len(via)))
+	out = append(out, via...)
 	out = append(out, sig...)
 
 	return append(out, blob...)
 }
 
-func decodeAd(inner []byte) ([]byte, []byte, bool) {
-	if len(inner) < 1+ed25519.SignatureSize {
-		return nil, nil, false
+func decodeAd(inner []byte) ([]byte, []byte, string, bool) {
+	if len(inner) < 3 {
+		return nil, nil, "", false
 	}
 
-	return inner[1+ed25519.SignatureSize:], inner[1 : 1+ed25519.SignatureSize], true
+	head := 3 + int(binary.LittleEndian.Uint16(inner[1:]))
+
+	if len(inner) < head+ed25519.SignatureSize {
+		return nil, nil, "", false
+	}
+
+	return inner[head+ed25519.SignatureSize:], inner[head : head+ed25519.SignatureSize], string(inner[3:head]), true
+}
+
+func (n *Node) receipts(now time.Time) map[uint16][]string {
+	seen := map[uint16][]string{}
+
+	for index, peer := range n.peers {
+		for addr, received := range peer.received {
+			if now.Sub(received) >= sessionTimeout {
+				delete(peer.received, addr)
+			} else {
+				seen[index] = append(seen[index], addr)
+			}
+		}
+
+		slices.Sort(seen[index])
+	}
+
+	return seen
 }
 
 func (n *Node) localAddrs() []string {
@@ -89,6 +117,7 @@ func (n *Node) publish(now time.Time) {
 		ID:        n.nextPacketID(),
 		Addrs:     n.localAddrs(),
 		Neighbors: n.neighbors(),
+		Seen:      n.receipts(now),
 	}
 
 	blob := throw2(json.Marshal(ad))
@@ -102,17 +131,17 @@ func (n *Node) publish(now time.Time) {
 
 	n.ads[n.cfg.Index] = known
 
-	inner := encodeAd(known.blob, known.sig)
-
 	for index, s := range n.peers {
 		for _, addr := range n.candidates(n.reg.byIndex[index]) {
+			inner := encodeAd(known.blob, known.sig, addr.String())
+
 			n.send(s.seal(inner, n.nextPacketID()), addr)
 		}
 	}
 }
 
 func (n *Node) flood(known *Known, from uint16) {
-	inner := encodeAd(known.blob, known.sig)
+	inner := encodeAd(known.blob, known.sig, "")
 
 	for peer := range n.peers {
 		if peer != from {
@@ -122,7 +151,7 @@ func (n *Node) flood(known *Known, from uint16) {
 }
 
 func (n *Node) handleAd(inner []byte, from uint16) {
-	blob, sig, ok := decodeAd(inner)
+	blob, sig, via, ok := decodeAd(inner)
 
 	if !ok {
 		return
@@ -140,19 +169,24 @@ func (n *Node) handleAd(inner []byte, from uint16) {
 		return
 	}
 
+	if ad.Index == from && via != "" {
+		n.peers[from].received[via] = time.Now()
+	}
+
 	if ad.ID <= n.adIDs[ad.Index] {
 		return
 	}
 
 	n.adIDs[ad.Index] = ad.ID
 	n.ads[ad.Index] = &Known{ad: ad, blob: blob, sig: sig, received: time.Now()}
+	n.chooseEndpoint(n.peers[ad.Index])
 	n.recompute()
 	n.flood(n.ads[ad.Index], from)
 }
 
 func (n *Node) syncTo(peer uint16) {
 	for _, known := range n.ads {
-		n.forward(peer, encodeAd(known.blob, known.sig))
+		n.forward(peer, encodeAd(known.blob, known.sig, ""))
 	}
 }
 

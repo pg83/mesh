@@ -60,7 +60,7 @@ func main() {
 				_, key = deriveKeys(decodeKey(command.Key))
 			}
 
-			inner := encodeAd(command.Body, ed25519.Sign(key, command.Body))
+			inner := encodeAd(command.Body, ed25519.Sign(key, command.Body), "")
 
 			out = session.seal(inner, packetID)
 		default:

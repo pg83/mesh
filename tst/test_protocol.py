@@ -32,7 +32,7 @@ def test():
         def data(path, cursor=0, payload=b''):
             return b'\x01\x01\x00' + bytes([len(path)]) + b''.join(struct.pack('<H', p) for p in path) + bytes([cursor]) + payload
         for packet in [b'', b'\xff', b'\x01', b'\x01\1\0\0', b'\x01\1\0\x11',
-                       data([2], cursor=1), data([3]), data([2, 99]), b'\x02', b'\x02' + b'\0' * 64 + b'{']:
+                       data([2], cursor=1), data([3]), data([2, 99]), b'\x02', b'\x02\xff\xff', b'\x02' + b'\0' * 66 + b'{']:
             inner(packet)
         send('short-transport')
         now = time.time_ns() + 1_000_000_000

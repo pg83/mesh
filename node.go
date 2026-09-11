@@ -168,7 +168,13 @@ func (n *Node) handleTransport(packet []byte, addr *net.UDPAddr) {
 	}
 
 	if binary.LittleEndian.Uint64(packet[3:]) == s.window.top {
-		s.endpoint = addr
+		changed := s.observed == nil || s.observed.String() != addr.String()
+
+		s.observed = addr
+
+		if changed {
+			n.chooseEndpoint(s)
+		}
 	}
 
 	s.lastRecv = time.Now()
@@ -221,6 +227,38 @@ func (n *Node) forward(peer uint16, inner []byte) {
 	n.send(s.seal(inner, n.nextPacketID()), s.endpoint)
 }
 
+func (n *Node) chooseEndpoint(s *Session) {
+	if s.observed == nil {
+		return
+	}
+
+	if known := n.ads[s.peer]; known != nil && time.Since(known.received) < sessionTimeout {
+		seen := known.ad.Seen[n.cfg.Index]
+
+		if slices.Contains(seen, s.observed.String()) {
+			s.endpoint = s.observed
+
+			return
+		}
+
+		if s.endpoint != nil && slices.Contains(seen, s.endpoint.String()) {
+			return
+		}
+
+		if len(seen) > 0 {
+			for _, addr := range n.candidates(n.reg.byIndex[s.peer]) {
+				if slices.Contains(seen, addr.String()) {
+					s.endpoint = addr
+
+					return
+				}
+			}
+		}
+	}
+
+	s.endpoint = s.observed
+}
+
 func (n *Node) tunLoop() {
 	buf := make([]byte, maxPacket)
 
@@ -268,6 +306,10 @@ func (n *Node) tick(now time.Time) {
 
 	n.expire(now)
 
+	for _, peer := range n.peers {
+		n.chooseEndpoint(peer)
+	}
+
 	n.publish(now)
 }
 
@@ -279,7 +321,7 @@ func (n *Node) candidates(peer *Peer) []*net.UDPAddr {
 		texts = append(texts, known.ad.Addrs...)
 	}
 
-	if addr := n.peers[peer.index].endpoint; addr != nil {
+	if addr := n.peers[peer.index].observed; addr != nil {
 		texts = append(texts, addr.String())
 	}
 

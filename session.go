@@ -20,7 +20,9 @@ type Session struct {
 	send     cipher.AEAD
 	recv     cipher.AEAD
 	window   Window
+	observed *net.UDPAddr
 	endpoint *net.UDPAddr
+	received map[string]time.Time
 	created  time.Time
 	lastRecv time.Time
 }
@@ -41,10 +43,11 @@ func newSession(local, peer *Peer, private []byte) *Session {
 	shared := throw2(curve25519.X25519(private, peer.pub))
 
 	return &Session{
-		local: local.index,
-		peer:  peer.index,
-		send:  sessionCipher(shared, local.pub, peer.pub),
-		recv:  sessionCipher(shared, peer.pub, local.pub),
+		local:    local.index,
+		peer:     peer.index,
+		send:     sessionCipher(shared, local.pub, peer.pub),
+		recv:     sessionCipher(shared, peer.pub, local.pub),
+		received: map[string]time.Time{},
 	}
 }
 

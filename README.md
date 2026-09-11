@@ -61,11 +61,11 @@ it and it carries its own signature.
 
 All multibyte integers in the mesh protocol use little-endian order.
 Encapsulated IP packets retain their standard network format. The key
-context is `mesh/3`; older wire formats are incompatible, so upgrade all
+context is `mesh/4`; older wire formats are incompatible, so upgrade all
 nodes together.
 
 Each pair derives a shared secret with X25519 and directional encryption
-keys with HKDF-SHA256. The HKDF context contains `mesh/3`, the sender's public
+keys with HKDF-SHA256. The HKDF context contains `mesh/4`, the sender's public
 key and the receiver's public key, in that order. There is no handshake and
 no forward secrecy.
 
@@ -82,7 +82,10 @@ process restarts.
 Inner packet, first byte is the type: `1` data, `2` advertisement. Data carries src index (2), hop count (1), the path as indexes
 (2 each), the cursor (1), then the IP packet. A relay checks that the cursor
 points at itself, advances it, and hands the packet to the session of the
-next index. An advertisement carries a 64-byte signature and the JSON body.
+next index. An advertisement carries a destination length (2), the destination
+string, a 64-byte signature and the JSON body. Own probes identify the endpoint
+being tried; forwarded advertisements use an empty destination. The destination
+is authenticated by the transport AEAD; the signature covers the JSON body.
 
 One packet counter is initialized from Unix nanoseconds when the node starts.
 Every outgoing transport packet and every locally authored advertisement
@@ -93,7 +96,12 @@ advertisements retain their author's ID inside a fresh transport packet.
 
 Every node floods one advertisement about itself: its index, a packet ID in
 the `ts` field, the addresses it offers, and the peers it currently has a link
-with. Advertisement IDs are only compared with another advertisement of the
+with. Its `seen` map also lists, for each peer, the destinations named in
+that peer's own gossip received during the last five seconds. These receipts
+let the sender distinguish a working outgoing endpoint from an incoming-only
+one. The destination travels in the authenticated envelope, so one signed
+announcement and one advertisement ID still serve all endpoints.
+Advertisement IDs are only compared with another advertisement of the
 same node; expiry runs on local arrival time instead. A newer
 advertisement is stored and passed on to peers with an observed endpoint,
 except the one it came from, so it stops spreading on its own. This includes
@@ -119,8 +127,9 @@ are used as configured.
 - No handshake, separate keepalive or exponential backoff. Own gossip goes
   to every endpoint once per second, regardless of data traffic or link state.
 - Any authenticated, non-replayed packet refreshes the peer's activity. Only
-  a higher packet ID updates its remote endpoint, so delayed packets cannot
-  undo roaming.
+  a higher packet ID updates its observed source address, so delayed packets
+  cannot undo roaming. Data prefers an endpoint confirmed by the peer's fresh
+  gossip, using the observed address until confirmation is available.
 - A link becomes alive on the first accepted packet and expires after five
   seconds without accepted packets, checked by the one-second timer.
 - Advertisement every second and on every link change, expired after 40 s.

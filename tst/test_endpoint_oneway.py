@@ -1,4 +1,5 @@
 """01: An incoming-only endpoint must not steal data from a working endpoint."""
+import time
 import lib
 import workload
 
@@ -10,9 +11,13 @@ def test():
     with lab:
         lab.wait_links('a', ['b'])
         lab.wait_links('b', ['a'])
-        stream = workload.SshServer(lab, 'b').stream('a')
+        server = workload.SshServer(lab, 'b')
+        lab.wait(lambda: delayed['hits'] >= 2, 'incoming-only endpoint keeps sending')
+        time.sleep(.3)
+        stream = server.stream('a')
         for _ in range(5):
-            stream.progress()
+            time.sleep(1)
+            stream.progress(timeout=5)
         assert delayed['hits'] > 0
         assert stream.max_gap < 5
         stream.finish()
