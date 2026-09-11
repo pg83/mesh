@@ -1,4 +1,5 @@
 """02: Previously unseen old packets cannot roll back the selected source address."""
+import time
 import lib
 import workload
 
@@ -13,6 +14,7 @@ def test():
         lab.wait(lambda: lab.status('a')['links'][0]['endpoint'] == '10.1.0.99:7000', 'new source address')
         lab.block('b', 'a', both=False)
         lab.release(held)
+        time.sleep(.2)
         assert lab.status('a')['links'][0]['endpoint'] == '10.1.0.99:7000'
         lab.unblock('b', 'a', both=False)
         stream.progress()

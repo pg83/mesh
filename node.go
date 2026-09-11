@@ -31,6 +31,7 @@ type Node struct {
 	packetID uint64
 	sig      ed25519.PrivateKey
 	ads      map[uint16]*Known
+	adIDs    map[uint16]uint64
 	routes   map[uint16][]uint16
 	subnet   *net.IPNet
 }
@@ -52,6 +53,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		sig:      sig,
 		log:      log,
 		ads:      map[uint16]*Known{},
+		adIDs:    map[uint16]uint64{},
 		routes:   map[uint16][]uint16{},
 		sessions: map[uint16]*Session{},
 		peers:    map[uint16]*Session{},
@@ -165,7 +167,10 @@ func (n *Node) handleTransport(packet []byte, addr *net.UDPAddr) {
 		return
 	}
 
-	s.endpoint = addr
+	if binary.LittleEndian.Uint64(packet[3:]) == s.window.top {
+		s.endpoint = addr
+	}
+
 	s.lastRecv = time.Now()
 
 	if n.sessions[s.peer] != s {

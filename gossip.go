@@ -140,10 +140,11 @@ func (n *Node) handleAd(inner []byte, from uint16) {
 		return
 	}
 
-	if old := n.ads[ad.Index]; old != nil && ad.ID <= old.ad.ID {
+	if ad.ID <= n.adIDs[ad.Index] {
 		return
 	}
 
+	n.adIDs[ad.Index] = ad.ID
 	n.ads[ad.Index] = &Known{ad: ad, blob: blob, sig: sig, received: time.Now()}
 	n.recompute()
 	n.flood(n.ads[ad.Index], from)

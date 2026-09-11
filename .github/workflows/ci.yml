@@ -52,7 +52,7 @@ jobs:
           GOFLAGS: -mod=readonly
 
       - name: Build and test
-        run: ./build -j 4 test
+        run: ./build -k -j 4 test
 
       - name: Save failure diagnostics
         if: failure()
@@ -89,7 +89,7 @@ jobs:
           sudo modprobe tun
 
       - name: Run all e2e tests with the race detector
-        run: ./build -j 4 -Drace test
+        run: ./build -k -j 4 -Drace test
 
       - name: Save failure diagnostics
         if: failure()
@@ -126,7 +126,7 @@ jobs:
           sudo modprobe tun
 
       - name: Run the tests against the instrumented binary
-        run: ./build -j 4 -Dcoverage coverage
+        run: ./build -k -j 4 -Dcoverage coverage
 
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() && hashFiles('.build/coverage.out') != '' }}

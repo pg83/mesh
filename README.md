@@ -104,7 +104,7 @@ packet, so relays make no decisions and loops cannot form.
 
 Every second, a node sends its signed advertisement to every known endpoint of every
 peer: static registry addresses, advertised addresses learned through gossip,
-and the last authenticated source address. A peer reachable only through a
+and the source address from the highest accepted packet ID. A peer reachable only through a
 relay can become directly reachable as soon as an endpoint works. Learned
 addresses inside the mesh subnet are filtered; static registry addresses
 are used as configured.
@@ -113,11 +113,14 @@ are used as configured.
 
 - No handshake, separate keepalive or exponential backoff. Own gossip goes
   to every endpoint once per second, regardless of data traffic or link state.
-- Any authenticated, non-replayed packet refreshes the peer's activity and
-  updates its remote endpoint, so a peer can roam.
+- Any authenticated, non-replayed packet refreshes the peer's activity. Only
+  a higher packet ID updates its remote endpoint, so delayed packets cannot
+  undo roaming.
 - A link becomes alive on the first accepted packet and expires after five
   seconds without accepted packets, checked by the one-second timer.
 - Advertisement every second and on every link change, expired after 40 s.
+  The highest accepted advertisement ID remains remembered until process
+  exit, preventing superseded announcements from returning after expiry.
 - Replay protection on packet IDs with a 1024-slot window. Derived keys and
   replay state survive link expiry within the running process; a receiver
   restart resets its replay history.
