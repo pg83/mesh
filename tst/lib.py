@@ -450,19 +450,21 @@ class Lab:
         return json.loads(r.stdout)
 
     def links(self, name):
-        try:
-            return {link["peer"] for link in self.status(name)["links"]}
-        except (OSError, json.JSONDecodeError):
-            return set()
+        return {link["peer"] for link in self.status(name)["links"]}
 
     def wait_links(self, name, peers, timeout=15):
         want = {self.nodes[p].index for p in peers}
         deadline = time.time() + timeout
+        last = None
         while time.time() < deadline:
-            if self.links(name) == want:
-                return
+            try:
+                last = self.links(name)
+                if last == want:
+                    return
+            except (OSError, json.JSONDecodeError) as error:
+                last = error
             time.sleep(0.2)
-        raise AssertionError(f"{name}: links {self.links(name)} != {want} after {timeout}s")
+        raise AssertionError(f"{name}: links {last!r} != {want} after {timeout}s")
 
     def ping(self, src, dst):
         node = self.nodes[src]

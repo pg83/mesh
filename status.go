@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"slices"
@@ -96,8 +97,5 @@ func showStatus(path string) {
 
 	defer conn.Close()
 
-	buf := make([]byte, 1<<20)
-	size := throw2(conn.Read(buf))
-
-	os.Stdout.Write(buf[:size])
+	throw2(io.Copy(os.Stdout, conn))
 }
