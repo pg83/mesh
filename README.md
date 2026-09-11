@@ -119,11 +119,8 @@ Discovery does not depend on an existing route or a reverse connection.
 Gossip merges each directed pair independently. An omitted pair is unchanged;
 a newer record replaces an older version of that pair. Newly learned versions
 are forwarded promptly. Relaying or repeating the same version never refreshes
-its local expiry. Physical edge records live for at most five seconds from receipt. Internal
-IP-to-endpoint attachments and withdrawals retain the 40-second metadata
-lifetime. Endpoint ownership is retained separately for encryption: forwarding
-a source route does not depend on a relay retaining the complete graph.
-The highest pair versions remain remembered after expiry to reject stale reintroduction.
+its local expiry. Records live for at most five seconds from receipt; their
+highest versions remain remembered after expiry to reject stale reintroduction.
 Local observations generate fresh versions each second.
 
 BFS follows the directed endpoint graph, with stable endpoint ordering for

@@ -21,13 +21,13 @@ func (r *Record) alive(now time.Time) bool {
 	return r.Alive && now.Before(r.expires)
 }
 
-func (n *Node) record(edge Edge, alive bool, now time.Time, lifetime time.Duration) {
-	n.graph[edge] = &Record{Update: Update{Edge: edge, ID: n.nextPacketID(), Alive: alive}, expires: now.Add(lifetime)}
+func (n *Node) record(edge Edge, alive bool, now time.Time) {
+	n.graph[edge] = &Record{Update: Update{Edge: edge, ID: n.nextPacketID(), Alive: alive}, expires: now.Add(adTimeout)}
 }
 
 func (n *Node) recompute(now time.Time) {
 	adjacency := map[Endpoint][]Endpoint{}
-	owners := n.owners
+	owners := map[Endpoint]uint16{}
 
 	for index, peer := range n.reg.byIndex {
 		owners[peer.endpoint()] = index
