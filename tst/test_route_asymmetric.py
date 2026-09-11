@@ -12,9 +12,16 @@ def test():
         lab.wait_route('b', 'a', ['r4', 'r3', 'a'])
         stream = workload.SshServer(lab, 'b').stream('a')
         stream.progress()
+        path = [('a', 'r1'), ('r1', 'r2'), ('r2', 'b'), ('b', 'r4'), ('r4', 'r3'), ('r3', 'a')]
+        data = [lab.intercept(src, dst, 'observe', kind=3, min_size=900, count=-1) for src, dst in path]
+        workload.udp_server(lab, 'b')
+        udp = workload.UdpClient(lab, 'a', 'b')
+        for index in range(20):
+            payload = str(index).encode().ljust(900, b'.')
+            udp.send(payload)
+            assert udp.recv() == payload
+        assert [rule['hits'] for rule in data] == [20] * len(path), data
         stream.finish()
-        for src, dst in [('a', 'r1'), ('r1', 'r2'), ('r2', 'b'), ('b', 'r4'), ('r4', 'r3'), ('r3', 'a')]:
-            assert lab.traffic(src, dst) > 0, (src, dst)
         lab.wait_ping('b', 'a')
 
 

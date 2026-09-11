@@ -15,7 +15,8 @@ def test():
         lab.block('b', 'a', both=False)
         lab.release(held)
         time.sleep(.2)
-        assert lab.status('a')['links'][0]['endpoint'] == '10.1.0.99:7000'
+        endpoint = lab.status('a')['links'][0]['endpoint']
+        assert endpoint == '10.1.0.99:7000', endpoint
         lab.unblock('b', 'a', both=False)
         stream.progress()
         stream.finish()

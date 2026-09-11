@@ -23,6 +23,8 @@ type Session struct {
 	observed *net.UDPAddr
 	endpoint *net.UDPAddr
 	received map[string]time.Time
+	seen     []string
+	seenAt   time.Time
 	created  time.Time
 	lastRecv time.Time
 }

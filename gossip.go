@@ -150,7 +150,7 @@ func (n *Node) flood(known *Known, from uint16) {
 	}
 }
 
-func (n *Node) handleAd(inner []byte, from uint16) {
+func (n *Node) handleAd(inner []byte, from uint16, latest bool) {
 	blob, sig, via, ok := decodeAd(inner)
 
 	if !ok {
@@ -170,7 +170,15 @@ func (n *Node) handleAd(inner []byte, from uint16) {
 	}
 
 	if ad.Index == from && via != "" {
-		n.peers[from].received[via] = time.Now()
+		s := n.peers[from]
+
+		s.received[via] = time.Now()
+
+		if latest {
+			s.seen = ad.Seen[n.cfg.Index]
+			s.seenAt = time.Now()
+			n.chooseEndpoint(s)
+		}
 	}
 
 	if ad.ID <= n.adIDs[ad.Index] {
@@ -179,7 +187,6 @@ func (n *Node) handleAd(inner []byte, from uint16) {
 
 	n.adIDs[ad.Index] = ad.ID
 	n.ads[ad.Index] = &Known{ad: ad, blob: blob, sig: sig, received: time.Now()}
-	n.chooseEndpoint(n.peers[ad.Index])
 	n.recompute()
 	n.flood(n.ads[ad.Index], from)
 }

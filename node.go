@@ -191,7 +191,7 @@ func (n *Node) handleTransport(packet []byte, addr *net.UDPAddr) {
 	case innerData:
 		n.handleData(inner)
 	case innerAd:
-		n.handleAd(inner, s.peer)
+		n.handleAd(inner, s.peer, binary.LittleEndian.Uint64(packet[3:]) == s.window.top)
 	}
 }
 
@@ -232,8 +232,8 @@ func (n *Node) chooseEndpoint(s *Session) {
 		return
 	}
 
-	if known := n.ads[s.peer]; known != nil && time.Since(known.received) < sessionTimeout {
-		seen := known.ad.Seen[n.cfg.Index]
+	if time.Since(s.seenAt) < sessionTimeout {
+		seen := s.seen
 
 		if slices.Contains(seen, s.observed.String()) {
 			s.endpoint = s.observed
