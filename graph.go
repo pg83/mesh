@@ -43,6 +43,10 @@ func (n *Node) recompute(now time.Time) {
 		if index := owners[edge.From]; edge.From.Port == 0 && index != 0 && edge.To.Port != 0 {
 			owners[edge.To] = index
 		}
+
+		if index := owners[edge.To]; edge.To.Port == 0 && index != 0 && edge.From.Port != 0 {
+			owners[edge.From] = index
+		}
 	}
 
 	for _, neighbors := range adjacency {
