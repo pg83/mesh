@@ -12,11 +12,12 @@ def test():
         lab.wait_route('n16', 'n0', list(reversed(names[:16])), timeout=60)
         lab.wait_route('n0', 'n17', None)
         workload.udp_server(lab, 'n16')
+        observers = [lab.intercept(names[i], names[i + 1], 'observe', kind=3, count=-1) for i in range(16)]
         udp = workload.UdpClient(lab, 'n0', 'n16')
         for size in (1, 1200, 1352):
             payload = b'x' * size
             udp.send(payload)
-            assert udp.recv(timeout=5) == payload, size
+            assert udp.recv(timeout=5) == payload, (size, [rule['hits'] for rule in observers])
         log = workload.udp_server(lab, 'n17')
         too_far = workload.UdpClient(lab, 'n0', 'n17')
         too_far.send(b'unreachable')

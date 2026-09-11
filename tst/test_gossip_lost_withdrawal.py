@@ -7,6 +7,7 @@ import workload
 def test():
     with lib.Lab(['a', 'r', 'b'], {1: ['a', 'r'], 2: ['r', 'b']}) as lab:
         lab.wait_route('a', 'b', ['r', 'b'])
+        lab.wait_route('r', 'a', ['a'])
         log = workload.udp_server(lab, 'a')
         udp = workload.UdpClient(lab, 'r', 'a')
         held = lab.intercept('r', 'a', 'hold', kind=4, count=-1)
