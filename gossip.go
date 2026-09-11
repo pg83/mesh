@@ -8,10 +8,7 @@ import (
 	"time"
 )
 
-const (
-	adTimeout       = sessionTimeout
-	gossipBatchSize = 8
-)
+const gossipBatchSize = 8
 
 type Ad struct {
 	Index uint16   `json:"index"`
@@ -68,32 +65,23 @@ func (n *Node) refresh(now time.Time) {
 
 	for edge := range n.owned {
 		if !desired[edge] {
-			n.record(edge, false, now)
+			n.record(edge, false)
 		}
 	}
 
 	for edge := range desired {
-		n.record(edge, true, now)
+		n.record(edge, true)
 	}
 
 	n.owned = desired
-	n.recompute(now)
+	n.recompute()
 }
 
-func (n *Node) publish(now time.Time) {
+func (n *Node) publish() {
 	updates := []Update{}
 
 	for _, record := range n.graph {
-		remaining := record.expires.Sub(now)
-
-		if remaining <= 0 {
-			continue
-		}
-
-		update := record.Update
-
-		update.TTL = uint32((remaining + time.Millisecond - 1) / time.Millisecond)
-		updates = append(updates, update)
+		updates = append(updates, *record)
 	}
 
 	slices.SortFunc(updates, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
@@ -144,11 +132,10 @@ func (n *Node) handleAd(inner []byte, from uint16, pending map[Edge]uint16) {
 		return
 	}
 
-	now := time.Now()
 	topologyChanged := false
 
 	for _, update := range ad.Edges {
-		if update.ID == 0 || update.TTL == 0 || update.TTL > uint32(adTimeout/time.Millisecond) || update.From.IP == 0 || update.To.IP == 0 || update.From == update.To {
+		if update.ID == 0 || update.From.IP == 0 || update.To.IP == 0 || update.From == update.To {
 			continue
 		}
 
@@ -158,16 +145,16 @@ func (n *Node) handleAd(inner []byte, from uint16, pending map[Edge]uint16) {
 			continue
 		}
 
-		if previous == nil || previous.alive(now) != update.Alive {
+		if previous == nil || previous.Alive != update.Alive {
 			topologyChanged = true
 		}
 
-		n.graph[update.Edge] = &Record{Update: update, expires: now.Add(time.Duration(update.TTL) * time.Millisecond)}
+		n.graph[update.Edge] = &update
 		pending[update.Edge] = from
 	}
 
 	if topologyChanged {
-		n.recompute(now)
+		n.recompute()
 	}
 }
 
@@ -202,21 +189,10 @@ func (n *Node) relayGossip(pending map[Edge]uint16) {
 		return
 	}
 
-	now := time.Now()
 	batches := map[uint16][]Update{}
 
 	for edge, from := range pending {
-		record := n.graph[edge]
-		remaining := record.expires.Sub(now)
-
-		if remaining <= 0 {
-			continue
-		}
-
-		update := record.Update
-
-		update.TTL = uint32((remaining + time.Millisecond - 1) / time.Millisecond)
-		batches[from] = append(batches[from], update)
+		batches[from] = append(batches[from], *n.graph[edge])
 	}
 
 	for from, updates := range batches {

@@ -1,4 +1,4 @@
-"""Expired node advertisements leave the database, then return after reconnection."""
+"""Gossip and traffic resume after reconnecting separated network segments."""
 
 import lib
 
@@ -8,9 +8,8 @@ def test():
         lab.wait_nodes('a', ['a', 'r', 'b'])
         lab.wait_ping('a', 'b')
         lab.block('r', 'b')
-        lab.wait_route('a', 'b', None)
-        lab.wait_nodes('a', ['a', 'r'], timeout=55)
-        lab.wait_nodes('r', ['a', 'r'], timeout=10)
+        lab.wait_links('r', ['a'])
+        lab.wait_links('b', [])
         lab.unblock('r', 'b')
         lab.wait_nodes('a', ['a', 'r', 'b'], timeout=45)
         lab.wait_ping('a', 'b')

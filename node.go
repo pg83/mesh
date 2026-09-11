@@ -30,7 +30,7 @@ type Node struct {
 	peers      map[uint16]*Session
 	packetID   uint64
 	sig        ed25519.PrivateKey
-	graph      map[Edge]*Record
+	graph      map[Edge]*Update
 	owned      map[Edge]bool
 	observed   map[Edge]time.Time
 	local      map[Endpoint]int
@@ -52,7 +52,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 
 	n := &Node{
 		cfg: cfg, reg: reg, key: dh, sig: sig, log: log,
-		graph: map[Edge]*Record{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
+		graph: map[Edge]*Update{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
 		discovered: map[uint16]map[Endpoint]time.Time{}, owners: map[Endpoint]uint16{},
 		routes: map[Endpoint][]Edge{}, peers: map[uint16]*Session{},
 		packetID: uint64(time.Now().UnixNano()),
@@ -179,8 +179,8 @@ func (n *Node) handleTransport(packet []byte, edge Edge, pending map[Edge]uint16
 
 	if !exists {
 		n.owned[edge] = true
-		n.record(edge, true, now)
-		n.recompute(now)
+		n.record(edge, true)
+		n.recompute()
 		n.log.Info("link up", "from", edge.From.string(), "to", edge.To.string())
 	}
 
@@ -261,13 +261,13 @@ func (n *Node) timerLoop() {
 
 		for _, endpoints := range n.discovered {
 			for ep, received := range endpoints {
-				if now.Sub(received) > adTimeout {
+				if now.Sub(received) > sessionTimeout {
 					delete(endpoints, ep)
 				}
 			}
 		}
 
-		n.publish(now)
+		n.publish()
 		n.mu.Unlock()
 	}
 }

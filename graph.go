@@ -1,31 +1,18 @@
 package main
 
-import (
-	"slices"
-	"time"
-)
+import "slices"
 
 type Update struct {
 	Edge
 	ID    uint64 `json:"id"`
 	Alive bool   `json:"alive"`
-	TTL   uint32 `json:"ttl"`
 }
 
-type Record struct {
-	Update
-	expires time.Time
+func (n *Node) record(edge Edge, alive bool) {
+	n.graph[edge] = &Update{Edge: edge, ID: n.nextPacketID(), Alive: alive}
 }
 
-func (r *Record) alive(now time.Time) bool {
-	return r.Alive && now.Before(r.expires)
-}
-
-func (n *Node) record(edge Edge, alive bool, now time.Time) {
-	n.graph[edge] = &Record{Update: Update{Edge: edge, ID: n.nextPacketID(), Alive: alive}, expires: now.Add(adTimeout)}
-}
-
-func (n *Node) recompute(now time.Time) {
+func (n *Node) recompute() {
 	adjacency := map[Endpoint][]Endpoint{}
 	owners := map[Endpoint]uint16{}
 
@@ -34,7 +21,7 @@ func (n *Node) recompute(now time.Time) {
 	}
 
 	for edge, record := range n.graph {
-		if !record.alive(now) {
+		if !record.Alive {
 			continue
 		}
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A four node chain across three segments: the ends reach each other over a
-three hop path, and the path shifts when a middle node drops out."""
+three hop path, then recover after a middle node restarts."""
 
 import lib
 
@@ -18,7 +18,11 @@ def test():
         lab.wait_ping("b", "a")
 
         lab.stop_node("n")
-        lab.wait_route("a", "b", None, timeout=60)
+        lab.wait_links("m", ["a"])
+        lab.wait_links("b", [])
+        lab.start_node("n")
+        lab.wait_ping("a", "b")
+        lab.wait_ping("b", "a")
 
 
 lib.main(test)

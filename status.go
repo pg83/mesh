@@ -40,14 +40,11 @@ func (n *Node) status() *Status {
 	vertices := map[Endpoint]bool{}
 
 	for edge, record := range n.graph {
-		if !record.alive(now) {
+		if !record.Alive {
 			continue
 		}
 
-		update := record.Update
-
-		update.TTL = uint32(record.expires.Sub(now) / time.Millisecond)
-		st.Graph = append(st.Graph, update)
+		st.Graph = append(st.Graph, *record)
 
 		vertices[edge.From] = true
 		vertices[edge.To] = true

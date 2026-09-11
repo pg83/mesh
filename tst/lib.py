@@ -59,8 +59,8 @@ def endpoint_address(ep):
     return socket.inet_ntoa(ep['ip'].to_bytes(4, 'little'))
 
 
-def edge(source, target, ident, alive=True, ttl=5000):
-    return dict(**{'from': source, 'to': target}, id=ident, alive=alive, ttl=ttl)
+def edge(source, target, ident, alive=True):
+    return dict(**{'from': source, 'to': target}, id=ident, alive=alive)
 
 
 def segaddr(seg, index):

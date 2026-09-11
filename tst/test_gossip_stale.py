@@ -17,11 +17,10 @@ def test():
         withdrawn = [dict(e, id=ident + 1, alive=False) for e in old]
         probe.send(op='ad', body=dict(index=2, edges=withdrawn))
         lab.wait(lambda: 3 not in lab.known_nodes('a'), 'withdrawn endpoint disappears')
-        time.sleep(6)
         # A new envelope and transport ID cannot make these old pair versions fresh.
         probe.send(op='ad', body=dict(index=2, edges=old))
         time.sleep(.2)
-        assert 3 not in lab.known_nodes('a'), 'expired, superseded graph records returned'
+        assert 3 not in lab.known_nodes('a'), 'superseded graph records returned'
         assert lab.route('a', 'b') is None
         probe.finish()
 

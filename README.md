@@ -84,9 +84,8 @@ exact next destination. Local delivery verifies the destination mesh IP.
 
 Inner gossip starts with `2`, an Ed25519 signature (64), and a JSON object
 containing the signer's registry index and an `edges` list. Each record has
-`from` and `to` endpoints (`ip` integer and `port`), an `id`, an `alive` flag,
-and remaining `ttl` in milliseconds. Gossip is split into batches of up to
-eight records: even with maximum-width fields the IPv4/UDP packet stays below
+`from` and `to` endpoints (`ip` integer and `port`), an `id`, and an `alive`
+flag. Gossip is split into batches of up to eight records: even with maximum-width fields the IPv4/UDP packet stays below
 1200 bytes.
 The signer may transmit any part of the graph, including records learned
 from other members; the signature authenticates the transmitting member's
@@ -94,7 +93,7 @@ report. It does not claim that every reported edge touches that member.
 
 One counter starts at Unix nanoseconds on process startup and increments
 for every locally generated graph record and outgoing transport packet.
-Forwarding a graph record preserves its ID and reduces its remaining TTL.
+Forwarding a graph record preserves its ID and alive flag.
 
 ## Map and routing
 
@@ -121,16 +120,17 @@ Gossip merges each directed pair independently. An omitted pair is unchanged;
 a newer record replaces an older version of that pair. Newly learned versions
 are collected across packets returned by one socket read and relayed using
 the newest version per pair, reducing redundant sends during bursts.
-Relaying or repeating the same version never refreshes
-its local expiry. Records live for at most five seconds from receipt; their
-highest versions remain remembered after expiry to reject stale reintroduction.
+Records have no age-based expiry. A newer `alive=false` record withdraws an
+edge; older versions cannot restore it. Automatic cleanup of unreachable
+parts of the graph is not implemented.
 Local observations generate fresh versions each second.
 
 BFS follows the directed endpoint graph, with stable endpoint ordering for
 identical path lengths. The resulting path is compiled into concrete UDP
 hops; movements between endpoints on the same host require no packet. The
 return path is computed independently. There is no separate per-host
-endpoint selector. Changes and the one-second expiry pass rebuild routes.
+endpoint selector. Graph changes and the one-second local observation pass
+rebuild routes.
 
 Status exposes incoming endpoint pairs, the live graph, its vertices, and
 routes keyed by destination endpoint. The runtime keeps one state mutex and
@@ -202,8 +202,8 @@ the active path, synchronize trees with rsync, and run iperf3 TCP/UDP streams
 with deterministic loss and delay. UDP probes check packet sizes, replay,
 reordering and packets older than the replay window. Separate tests check
 gossip on every endpoint during UDP traffic, data keeping a link alive
-when gossip is dropped, five-second expiry, replay after expiry, and a
-20-second RTT carrying UDP traffic without link flaps. Gossip expiry, unknown
+when gossip is dropped, five-second local link expiry, replay after expiry, and a
+20-second RTT carrying UDP traffic without link flaps. Gossip reconnection, unknown
 keys, CLI errors and malformed packets also have separate tests. `mesh-probe` is built only with the `meshprobe` tag for the
 protocol test; it sends authenticated malformed messages to real mesh nodes.
 It is absent from the production binary and its coverage profile.

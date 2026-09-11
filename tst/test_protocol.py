@@ -43,7 +43,7 @@ def test():
         send('ad', body=dict(body, index=99))
         send('ad', body=dict(body, index=3))
         # Reject malformed graph entries without discarding independent valid pairs.
-        for change in [dict(id=0), dict(ttl=0), dict(ttl=5001), {'from':lib.endpoint('0.0.0.0')}, {'to':b}]:
+        for change in [dict(id=0), {'from':lib.endpoint('0.0.0.0')}, {'to':b}]:
             send('ad', body=dict(index=1, edges=[dict(records[2], **dict(id=ident+1) | change)]))
         # An update to one pair does not remove another pair omitted from this batch.
         send('ad', body=dict(index=1, edges=[dict(records[0], id=ident+2)]))
@@ -57,7 +57,7 @@ def test():
         assert probe.wait(timeout=10) == 0
         lab.wait_links('b', ['c'])
         attempt = lab.intercept('b', 'a', 'copy', kind=4)
-        lab.wait(lambda: attempt['hits'] == 1, 'gossip to expired endpoint')
+        lab.wait(lambda: attempt['hits'] == 1, 'gossip after local link timeout')
 
 
 lib.main(test)
