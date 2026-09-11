@@ -2,12 +2,10 @@ package main
 
 import (
 	"crypto/ed25519"
-	"encoding/binary"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -31,31 +29,34 @@ type LocalEndpoint struct {
 }
 
 type Node struct {
-	ws         map[Edge]*WSConnection
-	dialing    map[Edge]uint64
-	listeners  map[string]*WSListener
-	tlsCA      map[uint64]string
 	cfg        *Config
 	reg        *Registry
 	key        DHKey
-	sockets    map[uint16]*UDPSocket
-	endpoints  []SocketEndpoint
-	incoming   map[Endpoint]uint64
-	addresses  map[uint64]Endpoint
-	tun        *Tun
-	log        *slog.Logger
-	mu         sync.Mutex
-	peers      map[uint16]*Session
-	packetID   uint64
 	sig        ed25519.PrivateKey
+	log        *slog.Logger
+	subnet     *net.IPNet
+	sockets    map[uint16]*UDPSocket
+	listeners  map[string]*WSListener
+	tlsCA      map[uint64]string
+	endpoints  []SocketEndpoint
+	tun        *Tun
+	events     chan any
+	tunInbox   chan any
+	tunWrites  chan []byte
+	actors     map[Edge]*EdgeActor
+	snapshot   *Snapshot
+	ws         map[Edge]WSStatus
+	dialing    map[Edge]bool
+	packetID   uint64
 	graph      map[Edge]State
 	owned      map[Edge]bool
 	observed   map[Edge]time.Time
-	local      map[uint64]*LocalEndpoint
 	discovered map[uint16]map[uint64]time.Time
+	local      map[uint64]*LocalEndpoint
+	incoming   map[Endpoint]uint64
+	addresses  map[uint64]Endpoint
 	owners     map[uint64]uint16
 	routes     map[uint64][]Edge
-	subnet     *net.IPNet
 }
 
 func newNode(cfg *Config, log *slog.Logger) *Node {
@@ -69,12 +70,13 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	dh, sig := deriveKeys(decodeKey(cfg.Key))
 
 	n := &Node{
+		events: make(chan any, 1024), tunInbox: make(chan any, 1024), tunWrites: make(chan []byte, 1024), actors: map[Edge]*EdgeActor{},
 		cfg: cfg, reg: reg, key: dh, sig: sig, log: log,
 		graph: map[Edge]State{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
 		discovered: map[uint16]map[uint64]time.Time{}, owners: map[uint64]uint16{},
-		routes: map[uint64][]Edge{}, peers: map[uint16]*Session{},
+		routes:   map[uint64][]Edge{},
 		packetID: uint64(time.Now().UnixNano()), addresses: map[uint64]Endpoint{},
-		ws: map[Edge]*WSConnection{}, dialing: map[Edge]uint64{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
+		ws: map[Edge]WSStatus{}, dialing: map[Edge]bool{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
 	}
 
 	if string(n.key.public) != string(me.pub) {
@@ -99,7 +101,6 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		}
 
 		if index != cfg.Index {
-			n.peers[index] = newSession(me, peer, dh.private)
 			n.discovered[index] = map[uint64]time.Time{}
 		}
 	}
@@ -141,26 +142,32 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 }
 
 func (n *Node) run() {
+	n.publishSnapshot(true)
+
 	for _, listener := range n.listeners {
 		go n.loop("websocket listener", func() { throw(listener.server.Serve(listener.conn)) })
 	}
 
 	for _, socket := range n.sockets {
-		go n.loop("recv", func() { n.recvLoop(socket) })
+		go n.loop("UDP discovery", func() { n.discoverUDP(socket) })
 	}
 
-	go n.loop("tun", n.tunLoop)
+	go n.loop("TUN reader", n.readTun)
+	go n.loop("TUN actor", n.tunLoop)
+	go n.loop("TUN writer", func() {
+		for p := range n.tunWrites {
+			n.tun.write(p)
+		}
+	})
 	go n.loop("status", n.statusLoop)
 	go n.loop("signal", n.signalLoop)
-
-	n.loop("timer", n.timerLoop)
+	n.loop("graph", n.graphLoop)
 }
 
 func (n *Node) signalLoop() {
 	signals := make(chan os.Signal, 1)
 
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-
 	n.log.Info("stopping", "signal", <-signals)
 	os.Exit(0)
 }
@@ -172,181 +179,12 @@ func (n *Node) loop(name string, body func()) {
 	})
 }
 
-func (n *Node) send(packet []byte, edge Edge, peer uint16) {
-	local := n.local[edge.From]
-
-	if local == nil {
-		return
-	}
-
-	if local.socket == nil {
-		n.sendWS(packet, edge, peer)
-
-		return
-	}
-
-	if n.addresses[edge.To].Proto != "udp" {
-		return
-	}
-
-	local.socket.conn.WriteTo(packet, &ipv4.ControlMessage{Src: local.address.ip(), IfIndex: local.iface}, n.addresses[edge.To].addr())
-}
-
-func (n *Node) recvLoop(socket *UDPSocket) {
-	buf := make([]byte, maxPacket)
-
-	for {
-		size, control, addr, err := socket.conn.ReadFrom(buf)
-
-		throw(err)
-
-		if size == 0 || control == nil || control.Dst == nil {
-			continue
-		}
-
-		remote := addr.(*net.UDPAddr)
-		wire := endpoint(control.Dst, int(socket.port))
-
-		n.mu.Lock()
-
-		destination, exists := n.incoming[wire]
-
-		if !exists {
-			n.mu.Unlock()
-
-			continue
-		}
-
-		edge := Edge{From: n.remember(endpoint(remote.IP, remote.Port)), To: destination}
-
-		if buf[0] == packetTransport || buf[0] == packetGossip {
-			n.handleTransport(buf[:size], edge)
-		}
-
-		n.mu.Unlock()
-	}
-}
-
-func (n *Node) handleTransport(packet []byte, edge Edge) {
-	if len(packet) < headerTransport {
-		return
-	}
-
-	s := n.peers[binary.LittleEndian.Uint16(packet[1:])]
-
-	if s == nil {
-		return
-	}
-
-	inner, ok := s.open(packet)
-
-	if !ok {
-		return
-	}
-
-	now := time.Now()
-	_, exists := n.observed[edge]
-
-	n.observed[edge] = now
-	n.discovered[s.peer][edge.From] = now
-
-	if !exists {
-		n.owned[edge] = true
-		n.record(edge, true)
-		n.recompute()
-		n.log.Info("link up", "from", n.addresses[edge.From].string(), "to", n.addresses[edge.To].string())
-	}
-
-	if len(inner) == 0 {
-		return
-	}
-
-	switch inner[0] {
-	case innerData:
-		n.handleData(inner, edge)
-	case innerAd:
-		n.handleAd(inner)
-	}
-}
-
-func (n *Node) handleData(inner []byte, received Edge) {
-	d, ok := decodeData(inner)
-
-	if !ok || d.path[d.cursor] != received {
-		return
-	}
-
-	if d.cursor == len(d.path)-1 {
-		if !validIPv4(d.ip) {
-			return
-		}
-
-		if endpoint(net.IP(d.ip[16:20]), 0).hash() != n.reg.byIndex[n.cfg.Index].endpoint().hash() {
-			return
-		}
-
-		n.tun.write(d.ip)
-
-		return
-	}
-
-	d.cursor++
-	advanceCursor(inner, d.cursor)
-	n.forward(d.path[d.cursor], inner)
-}
-
-func (n *Node) forward(edge Edge, inner []byte) {
-	s := n.peers[n.owners[edge.To]]
-
-	if s == nil {
-		return
-	}
-
-	n.send(s.seal(inner, n.nextPacketID()), edge, s.peer)
-}
-
-func (n *Node) tunLoop() {
-	buf := make([]byte, maxPacket)
-
-	for {
-		ip := n.tun.read(buf)
-
-		if !validIPv4(ip) {
-			continue
-		}
-
-		dst := endpoint(net.IP(ip[16:20]), 0).hash()
-
-		n.mu.Lock()
-
-		if path := n.routes[dst]; len(path) != 0 {
-			n.forward(path[0], encodeData(&Data{path: path, ip: ip}))
-		}
-
-		n.mu.Unlock()
-	}
-}
-
-func (n *Node) timerLoop() {
-	for now := range time.Tick(tickInterval) {
-		n.mu.Lock()
-		n.refresh(now)
-
-		for _, endpoints := range n.discovered {
-			for ep, received := range endpoints {
-				if now.Sub(received) > sessionTimeout {
-					delete(endpoints, ep)
-				}
-			}
-		}
-
-		n.publish()
-		n.mu.Unlock()
-	}
-}
-
 func (n *Node) nextPacketID() uint64 {
 	n.packetID++
 
 	return n.packetID
+}
+
+func (n *Node) session(peer uint16) *Session {
+	return newSession(n.reg.byIndex[n.cfg.Index], n.reg.byIndex[peer], n.key.private)
 }

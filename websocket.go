@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -30,14 +29,17 @@ type WSBinding struct {
 type WSConnection struct {
 	conn   *websocket.Conn
 	edge   Edge
+	source Endpoint
+	target Endpoint
 	peer   uint16
 	origin uint64
 	id     uint64
 	queue  chan []byte
 	ctx    context.Context
 	cancel context.CancelFunc
-	once   sync.Once
 }
+
+type DialResult struct{ conn *WSConnection }
 
 func connectionKey(edge Edge) Edge {
 	if edge.From > edge.To {
@@ -89,6 +91,11 @@ func (n *Node) listenWS(c EndpointConfig) {
 
 func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 	try(func() {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+
+		defer cancel()
+
+		view := n.currentSnapshot(ctx)
 		address := r.Context().Value(http.LocalAddrContextKey).(*net.TCPAddr)
 		host := r.Host
 
@@ -98,17 +105,13 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 
 		destinations := map[uint64]bool{}
 
-		n.mu.Lock()
-
-		for id, local := range n.local {
-			ep := n.addresses[id]
+		for id, local := range view.local {
+			ep := view.addresses[id]
 
 			if local.socket == nil && local.address == endpoint(address.IP, address.Port) && ep.Path == r.URL.RequestURI() && strings.EqualFold(ep.Addr, host) {
 				destinations[id] = true
 			}
 		}
-
-		n.mu.Unlock()
 
 		if len(destinations) == 0 {
 			http.NotFound(w, r)
@@ -116,34 +119,32 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		conn := throw2(websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{protocol}}))
+		socket := throw2(websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{protocol}}))
 
-		defer conn.CloseNow()
+		defer socket.CloseNow()
 
-		conn.SetReadLimit(maxPacket)
+		socket.SetReadLimit(maxPacket)
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-
-		defer cancel()
-
-		packet := readWS(ctx, conn)
-
-		n.mu.Lock()
-
-		session, binding, ok := n.readBinding(packet)
+		packet := readWS(ctx, socket)
+		session, binding, ok := n.readBinding(packet, view)
 
 		if !ok || !destinations[binding.To.hash()] {
-			n.mu.Unlock()
+			return
+		}
+
+		response := bindingPacket(session, binding.To, binding.From, uint64(time.Now().UnixNano()))
+
+		throw(socket.Write(ctx, websocket.MessageBinary, response))
+
+		c := newWSConnection(socket, binding.To, binding.From, session.peer, binding.From.hash(), binary.LittleEndian.Uint64(packet[3:]))
+
+		if !post(n.events, any(c)) {
+			c.stop()
 
 			return
 		}
 
-		edge := Edge{From: n.remember(binding.To), To: n.remember(binding.From)}
-		response := n.bindingPacket(session, edge)
-
-		n.mu.Unlock()
-		throw(conn.Write(ctx, websocket.MessageBinary, response))
-		n.serveWS(conn, edge, session.peer, edge.To, binary.LittleEndian.Uint64(packet[3:]))
+		<-c.ctx.Done()
 	}).catch(func(e *Exception) { n.log.Debug("websocket accept failed", "err", e) })
 }
 
@@ -157,19 +158,20 @@ func readWS(ctx context.Context, conn *websocket.Conn) []byte {
 	return packet
 }
 
-func (n *Node) readBinding(packet []byte) (*Session, WSBinding, bool) {
+func (n *Node) readBinding(packet []byte, view *Snapshot) (*Session, WSBinding, bool) {
 	binding := WSBinding{}
 
 	if len(packet) < headerTransport {
 		return nil, binding, false
 	}
 
-	session := n.peers[binary.LittleEndian.Uint16(packet[1:])]
+	peer := binary.LittleEndian.Uint16(packet[1:])
 
-	if session == nil {
+	if peer == n.cfg.Index || n.reg.byIndex[peer] == nil {
 		return nil, binding, false
 	}
 
+	session := n.session(peer)
 	inner, ok := session.open(packet)
 
 	if !ok || len(inner) == 0 || inner[0] != innerBinding || json.Unmarshal(inner[1:], &binding) != nil {
@@ -183,68 +185,79 @@ func (n *Node) readBinding(packet []byte) (*Session, WSBinding, bool) {
 		return nil, binding, false
 	}
 
-	if owner := n.owners[binding.From.hash()]; owner != 0 && owner != session.peer {
+	if owner := view.owners[binding.From.hash()]; owner != 0 && owner != peer {
 		return nil, binding, false
 	}
 
 	return session, binding, true
 }
 
-func (n *Node) bindingPacket(session *Session, edge Edge) []byte {
-	blob := throw2(json.Marshal(WSBinding{From: n.addresses[edge.From], To: n.addresses[edge.To]}))
+func bindingPacket(session *Session, source, target Endpoint, id uint64) []byte {
+	blob := throw2(json.Marshal(WSBinding{From: source, To: target}))
 
-	return session.seal(append([]byte{innerBinding}, blob...), n.nextPacketID())
+	return session.seal(append([]byte{innerBinding}, blob...), id)
 }
 
-func (n *Node) sendWS(packet []byte, edge Edge, peer uint16) {
-	dst := n.addresses[edge.To]
+func newWSConnection(socket *websocket.Conn, source, target Endpoint, peer uint16, origin, id uint64) *WSConnection {
+	ctx, cancel := context.WithCancel(context.Background())
 
-	if dst.Proto != "ws" && dst.Proto != "wss" {
-		return
-	}
-
-	key := connectionKey(edge)
-
-	if conn := n.ws[key]; conn != nil {
-		select {
-		case conn.queue <- packet:
-		default:
-		}
-
-		return
-	}
-
-	if n.dialing[key] != 0 {
-		return
-	}
-
-	source := n.local[edge.From].address.ip()
-	ca := n.tlsCA[edge.To]
-	first := n.bindingPacket(n.peers[peer], edge)
-
-	n.dialing[key] = binary.LittleEndian.Uint64(first[3:])
-
-	go n.dialWS(edge, peer, source, dst, ca, first)
+	return &WSConnection{conn: socket, edge: Edge{From: source.hash(), To: target.hash()}, source: source, target: target,
+		peer: peer, origin: origin, id: id, queue: make(chan []byte, 64), ctx: ctx, cancel: cancel}
 }
 
-func (n *Node) dialWS(edge Edge, peer uint16, source net.IP, dst Endpoint, ca string, first []byte) {
+func (c *WSConnection) stop() {
+	c.cancel()
+}
+
+func (a *EdgeActor) sendWS(packet []byte) {
+	if a.ws != nil {
+		post(a.ws.queue, packet)
+
+		return
+	}
+
+	if a.dial != nil {
+		return
+	}
+
+	local := a.view.local[a.edge.From]
+
+	if local == nil {
+		return
+	}
+
+	result := make(chan DialResult, 1)
+
+	a.dial = result
+	a.packetID++
+
+	source, target := a.view.addresses[a.edge.From], a.view.addresses[a.edge.To]
+	first := bindingPacket(a.session, source, target, a.packetID)
+	view := a.view
+
+	go a.node.dialWS(result, view, local.address.ip(), source, target, a.peer, first)
+	a.report()
+}
+
+func (n *Node) dialWS(result chan<- DialResult, view *Snapshot, local net.IP, source, target Endpoint, peer uint16, first []byte) {
+	var socket *websocket.Conn
+	var established *WSConnection
+
 	defer func() {
-		n.mu.Lock()
-
-		if n.dialing[connectionKey(edge)] == binary.LittleEndian.Uint64(first[3:]) {
-			delete(n.dialing, connectionKey(edge))
+		if established == nil && socket != nil {
+			socket.CloseNow()
 		}
 
-		n.mu.Unlock()
+		result <- DialResult{conn: established}
 	}()
 
 	try(func() {
-		dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: source}}
+		dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: local}}
 		transport := &http.Transport{DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
 
 		defer transport.CloseIdleConnections()
 
-		if ca != "" {
+		if ca := n.tlsCA[target.hash()]; ca != "" {
 			pool := throw2(x509.SystemCertPool())
 
 			if !pool.AppendCertsFromPEM(throw2(os.ReadFile(ca))) {
@@ -258,96 +271,76 @@ func (n *Node) dialWS(edge Edge, peer uint16, source net.IP, dst Endpoint, ca st
 
 		defer cancel()
 
-		conn, _ := throw3(websocket.Dial(ctx, dst.url(), &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, Subprotocols: []string{protocol}}))
+		socket, _ = throw3(websocket.Dial(ctx, target.url(), &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, Subprotocols: []string{protocol}}))
+		socket.SetReadLimit(maxPacket)
+		throw(socket.Write(ctx, websocket.MessageBinary, first))
 
-		defer conn.CloseNow()
+		packet := readWS(ctx, socket)
+		session, binding, ok := n.readBinding(packet, view)
 
-		conn.SetReadLimit(maxPacket)
-		throw(conn.Write(ctx, websocket.MessageBinary, first))
-
-		packet := readWS(ctx, conn)
-
-		n.mu.Lock()
-
-		session, binding, ok := n.readBinding(packet)
-
-		n.mu.Unlock()
-
-		if !ok || session.peer != peer || binding.From.hash() != edge.To || binding.To.hash() != edge.From {
+		if !ok || session.peer != peer || binding.From.hash() != target.hash() || binding.To.hash() != source.hash() {
 			return
 		}
 
-		n.serveWS(conn, edge, peer, edge.From, binary.LittleEndian.Uint64(first[3:]))
-	}).catch(func(e *Exception) { n.log.Debug("websocket dial failed", "endpoint", dst.string(), "err", e) })
+		established = newWSConnection(socket, source, target, peer, source.hash(), binary.LittleEndian.Uint64(first[3:]))
+	}).catch(func(e *Exception) { n.log.Debug("websocket dial failed", "endpoint", target.string(), "err", e) })
 }
 
-func (c *WSConnection) stop() {
-	c.once.Do(func() { c.cancel(); c.conn.CloseNow() })
-}
+func (a *EdgeActor) attachWS(c *WSConnection) {
+	old := a.ws
 
-func (n *Node) serveWS(socket *websocket.Conn, edge Edge, peer uint16, origin, id uint64) {
-	ctx, cancel := context.WithCancel(context.Background())
-	conn := &WSConnection{conn: socket, edge: edge, peer: peer, origin: origin, id: id, queue: make(chan []byte, 64), ctx: ctx, cancel: cancel}
-
-	defer conn.stop()
-
-	key := connectionKey(edge)
-
-	n.mu.Lock()
-
-	if origin == edge.From && n.dialing[key] == id {
-		delete(n.dialing, key)
-	}
-
-	old := n.ws[key]
-
-	if n.local[edge.From] == nil || (old != nil && (old.origin < origin || (old.origin == origin && old.id >= id))) {
-		n.mu.Unlock()
+	if a.view == nil || a.view.local[a.edge.From] == nil || (old != nil && (old.origin < c.origin || (old.origin == c.origin && old.id >= c.id))) {
+		c.stop()
+		c.conn.CloseNow()
 
 		return
 	}
-
-	n.ws[key] = conn
-	n.mu.Unlock()
 
 	if old != nil {
 		old.stop()
 	}
 
-	defer func() {
-		n.mu.Lock()
+	a.ws = c
 
-		if n.ws[key] == conn {
-			delete(n.ws, key)
-		}
+	input := a.view.actors[Edge{From: a.edge.To, To: a.edge.From}]
 
-		n.mu.Unlock()
+	go c.run(input, a.node)
+	a.report()
+}
+
+func (c *WSConnection) run(input chan any, n *Node) {
+	defer c.conn.CloseNow()
+
+	defer c.stop()
+
+	errors := make(chan *Exception, 2)
+
+	go func() {
+		errors <- try(func() {
+			for {
+				packet := readWS(c.ctx, c.conn)
+
+				post(input, any(Received{packet: packet, at: time.Now(), ws: c}))
+			}
+		})
 	}()
 
 	go func() {
-		defer conn.stop()
-
-		try(func() {
+		errors <- try(func() {
 			for {
 				select {
-				case packet := <-conn.queue:
-					throw(socket.Write(ctx, websocket.MessageBinary, packet))
-				case <-ctx.Done():
+				case packet := <-c.queue:
+					throw(c.conn.Write(c.ctx, websocket.MessageBinary, packet))
+				case <-c.ctx.Done():
 					return
 				}
 			}
-		}).catch(func(e *Exception) { n.log.Debug("websocket writer stopped", "err", e) })
+		})
 	}()
 
-	for {
-		packet := readWS(ctx, socket)
-
-		n.mu.Lock()
-
-		if n.ws[key] == conn && n.local[edge.From] != nil && len(packet) >= headerTransport && binary.LittleEndian.Uint16(packet[1:]) == peer && (packet[0] == packetTransport || packet[0] == packetGossip) {
-			n.handleTransport(packet, Edge{From: edge.To, To: edge.From})
-		}
-
-		n.mu.Unlock()
+	select {
+	case err := <-errors:
+		err.catch(func(e *Exception) { n.log.Debug("websocket stopped", "err", e) })
+	case <-c.ctx.Done():
 	}
 }

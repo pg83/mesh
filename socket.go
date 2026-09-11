@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
+	"golang.org/x/sys/unix"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"golang.org/x/net/ipv4"
 )
@@ -64,8 +67,21 @@ func (c EndpointConfig) description() Endpoint {
 	return (Endpoint{Proto: c.Proto, Addr: c.Addr, Port: uint16(c.Port), Path: c.Path}).canonical()
 }
 
+func reuseUDP(network, address string, raw syscall.RawConn) error {
+	var result error
+
+	err := raw.Control(func(fd uintptr) { result = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1) })
+
+	if err != nil {
+		result = err
+	}
+
+	return result
+}
+
 func newUDPSocket(port uint16) *UDPSocket {
-	udp := throw2(net.ListenUDP("udp4", &net.UDPAddr{Port: int(port)}))
+	lc := net.ListenConfig{Control: reuseUDP}
+	udp := throw2(lc.ListenPacket(context.Background(), "udp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(int(port))))).(*net.UDPConn)
 
 	throw(udp.SetReadBuffer(1 << 20))
 
@@ -74,4 +90,13 @@ func newUDPSocket(port uint16) *UDPSocket {
 	throw(conn.SetControlMessage(ipv4.FlagDst, true))
 
 	return &UDPSocket{conn: conn, port: port}
+}
+
+func connectUDP(local *LocalEndpoint, remote Endpoint) *net.UDPConn {
+	dialer := net.Dialer{LocalAddr: local.address.addr(), Control: reuseUDP}
+	conn := throw2(dialer.Dial("udp4", remote.string())).(*net.UDPConn)
+
+	throw(conn.SetReadBuffer(1 << 20))
+
+	return conn
 }

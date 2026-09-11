@@ -353,6 +353,12 @@ class Lab:
         except BaseException as error:
             self.switch_error = error
 
+    def add_address(self, name, seg, address):
+        node = self.nodes[name]
+        self.nsenter(node, 'ip', 'addr', 'add', f'{address}/24', 'dev', f's{seg}', check=True)
+        with self.lock:
+            self.ports[(seg, socket.inet_aton(address))] = self.ports[(seg, socket.inet_aton(node.addresses[seg]))]
+
     def set_address(self, name, seg, address):
         node = self.nodes[name]
         with self.lock:

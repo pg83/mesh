@@ -38,10 +38,6 @@ func (n *Node) status() *Status {
 	now := time.Now()
 	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Update{}, Vertices: []uint64{}, Routes: map[string][]Edge{}}
 
-	n.mu.Lock()
-
-	defer n.mu.Unlock()
-
 	st.Endpoints = map[uint64]Endpoint{}
 
 	for id, ep := range n.addresses {
@@ -51,8 +47,8 @@ func (n *Node) status() *Status {
 	st.Connections = []WSStatus{}
 	st.Dialing = len(n.dialing)
 
-	for key, c := range n.ws {
-		st.Connections = append(st.Connections, WSStatus{Edge: key, Origin: c.origin, ID: c.id})
+	for _, c := range n.ws {
+		st.Connections = append(st.Connections, c)
 	}
 
 	for edge, received := range n.observed {
@@ -106,7 +102,11 @@ func (n *Node) statusLoop() {
 
 	for {
 		conn := throw2(ln.Accept())
-		out := throw2(json.Marshal(n.status()))
+		reply := make(chan *Status, 1)
+
+		n.events <- reply
+
+		out := throw2(json.Marshal(<-reply))
 
 		conn.Write(append(out, '\n'))
 		conn.Close()

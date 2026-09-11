@@ -115,7 +115,8 @@ func (n *Node) refresh(now time.Time) {
 	n.recompute()
 }
 
-func (n *Node) publish() {
+func (n *Node) advertisements() [][]byte {
+	packets := [][]byte{}
 	updates := []Update{}
 
 	for edge, state := range n.graph {
@@ -152,49 +153,17 @@ func (n *Node) publish() {
 			end++
 		}
 
-		inner := encodeAd(blob, ed25519.Sign(n.sig, blob))
-
-		for index, session := range n.peers {
-			for _, dst := range n.candidates(n.reg.byIndex[index]) {
-				for src := range n.local {
-					n.send(session.seal(inner, n.nextPacketID()), Edge{From: src, To: dst}, session.peer)
-				}
-			}
-		}
-
+		packets = append(packets, encodeAd(blob, ed25519.Sign(n.sig, blob)))
 		start = end
 	}
+
+	return packets
 }
 
-func (n *Node) handleAd(inner []byte) {
-	if len(inner) < 1+ed25519.SignatureSize {
-		return
-	}
-
-	sig, blob := inner[1:1+ed25519.SignatureSize], inner[1+ed25519.SignatureSize:]
-	ad := Ad{}
-
-	if json.Unmarshal(blob, &ad) != nil {
-		return
-	}
-
-	peer := n.reg.byIndex[ad.Index]
-
-	fresh := slices.ContainsFunc(ad.Edges, func(update Update) bool {
-		previous, exists := n.graph[update.Edge]
-
-		return !exists || update.ID > previous.ID
-	})
-
-	if peer == nil || !fresh || !ed25519.Verify(peer.sig, blob, sig) {
-		return
-	}
-
+func (n *Node) handleAd(ad *Ad) {
 	for _, ep := range ad.Endpoints {
 		n.remember(ep)
 	}
-
-	topologyChanged := false
 
 	for _, update := range ad.Edges {
 		if update.ID == 0 || n.addresses[update.From].hash() == 0 || n.addresses[update.To].hash() == 0 || update.From == update.To {
@@ -203,19 +172,9 @@ func (n *Node) handleAd(inner []byte) {
 
 		previous, exists := n.graph[update.Edge]
 
-		if exists && update.ID <= previous.ID {
-			continue
+		if !exists || update.ID > previous.ID {
+			n.graph[update.Edge] = update.State
 		}
-
-		if !exists || previous.Alive != update.Alive {
-			topologyChanged = true
-		}
-
-		n.graph[update.Edge] = update.State
-	}
-
-	if topologyChanged {
-		n.recompute()
 	}
 }
 
