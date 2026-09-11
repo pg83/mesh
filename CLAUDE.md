@@ -17,8 +17,8 @@ gossip map on every node, source routing through any node, IP over TUN.
 - Every e2e test is a topology: nodes in separate network namespaces, wired by
   the userspace switch in `tst/lib.py` (this kernel has no veth; TUN only).
   Tests need unprivileged user namespaces; they re-exec under `unshare -rUn`.
-- Dependencies are vendored. To update: `GOSUMDB=off go get ... && go mod vendor`
-  (the toolchain here ships with an empty `GOSUMDB`).
+- Dependencies are pinned in `go.mod` and `go.sum`; builds use Go modules
+  without a vendor directory.
 - `./build -Dcoverage coverage` writes `.build/coverage.out` from the e2e
   suite: the binary is instrumented and each daemon run gets its own
   `GOCOVERDIR`. A mesh node exits cleanly on SIGTERM so those counters

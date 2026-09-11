@@ -54,7 +54,7 @@ it and it carries its own signature.
 ## Wire format
 
 All multibyte integers in the mesh protocol use little-endian order,
-including handshake timestamps, session IDs, transport counters and route
+including handshake attempt IDs, session IDs, transport counters and route
 indexes. Encapsulated IP packets retain their standard network format.
 The Noise prologue is `mesh/2`; this wire format requires all nodes to be
 upgraded together from `mesh/1`.
@@ -63,7 +63,7 @@ Outer packet, first byte is the type:
 
 | Type | Layout |
 |---|---|
-| init | `1`, sender id (4), Noise IK message 1 with an 8-byte timestamp payload |
+| init | `1`, sender id (4), Noise IK message 1 with an 8-byte attempt ID payload |
 | response | `2`, receiver id (4), sender id (4), Noise IK message 2 |
 | transport | `3`, receiver id (4), counter (8), ChaCha20-Poly1305 over the inner packet, header as associated data |
 
@@ -72,6 +72,9 @@ advertisement. Data carries src index (2), hop count (1), the path as indexes
 (2 each), the cursor (1), then the IP packet. A relay checks that the cursor
 points at itself, advances it, and hands the packet to the session of the
 next index. An advertisement carries a 64-byte signature and the JSON body.
+
+The attempt counter is initialized from Unix nanoseconds when the node starts
+and incremented once for every init, across all peers and endpoints.
 
 ## Map
 
@@ -104,7 +107,8 @@ never dialed: the overlay must not run over itself.
 - Dialing knocks on every known address of every peer without a session, with
   per-address backoff from 1 s to 5 min. Crossed handshakes: the larger index
   gives up its own attempt. An init from a peer that already has a session
-  replaces it; a replayed init is rejected by its timestamp.
+  replaces it; an init whose attempt ID is not greater than the last accepted
+  ID from that peer is rejected.
 - Replay protection on transport counters with a 1024-slot window.
 
 ## Development

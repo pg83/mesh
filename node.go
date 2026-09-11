@@ -44,6 +44,7 @@ type Node struct {
 	byID     map[uint32]*Session
 	pending  map[uint32]*Handshake
 	lastInit map[uint16]uint64
+	initID   uint64
 	attempts map[string]*Attempt
 	sig      ed25519.PrivateKey
 	ads      map[uint16]*Known
@@ -74,6 +75,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		byID:     map[uint32]*Session{},
 		pending:  map[uint32]*Handshake{},
 		lastInit: map[uint16]uint64{},
+		initID:   uint64(time.Now().UnixNano()),
 		attempts: map[string]*Attempt{},
 	}
 
@@ -508,8 +510,10 @@ func (n *Node) candidates(peer *Peer) []*net.UDPAddr {
 }
 
 func (n *Node) sendInit(peer *Peer, addr *net.UDPAddr, now time.Time) {
+	n.initID++
+
 	hs := n.handshakeState(true, peer.pub)
-	stamp := binary.LittleEndian.AppendUint64(nil, uint64(now.UnixNano()))
+	stamp := binary.LittleEndian.AppendUint64(nil, n.initID)
 	msg, _, _, err := hs.WriteMessage(nil, stamp)
 
 	if err != nil {

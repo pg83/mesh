@@ -49,7 +49,7 @@ jobs:
       - name: Vet
         run: go vet ./...
         env:
-          GOFLAGS: -mod=vendor
+          GOFLAGS: -mod=readonly
 
       - name: Build and test
         run: ./build -j 4 test

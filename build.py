@@ -1,9 +1,6 @@
 import build
 import os
 
-from pathlib import Path
-
-
 build.flags.allow({
     "coverage": {
         "descr": "instrument the binary; `./build -Dcoverage coverage` writes $(B)/coverage.out",
@@ -26,18 +23,6 @@ def mkdir(path):
     ]
 
 
-ROOT = Path(__file__).parent
-
-
-def source_files(directory):
-    root = ROOT / directory
-    return [
-        "$(S)/" + path.relative_to(ROOT).as_posix()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    ]
-
-
 def touch(path):
     return [
         "python3",
@@ -54,12 +39,11 @@ GO_INPUTS = [
     *GO_SOURCES,
     "$(S)/go.mod",
     "$(S)/go.sum",
-    *source_files("vendor"),
 ]
 
 GO_ENV = {
     "CGO_ENABLED": "0",
-    "GOFLAGS": "-mod=vendor -buildvcs=false",
+    "GOFLAGS": "-mod=readonly -buildvcs=false",
     "GOTOOLCHAIN": "local",
     "GOWORK": "off",
 }
