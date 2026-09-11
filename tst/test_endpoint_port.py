@@ -5,11 +5,11 @@ import workload
 
 
 def test():
-    with lib.Lab(['a', 'b'], {1: ['a', 'b']}) as lab:
+    with lib.Lab(['a', 'b'], {1: ['a', 'b']}, statics=['a']) as lab:
         lab.wait_ping('a', 'b')
         stream = workload.SshServer(lab, 'b').stream('a')
         lab.stop_node('b')
-        lab.configs['b'] = dict(port=7001)
+        lab.configs['b'] = dict(endpoint=[dict(proto="udp", addr="0.0.0.0", port=7001)])
         lab.start_node('b')
         lab.wait(lambda: lab.selected_endpoint('a', 'b') == '10.1.0.2:7001', 'new destination port')
         sent = lab.intercept('b', 'a', 'copy', kind=3, count=-1)

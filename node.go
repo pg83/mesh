@@ -19,11 +19,24 @@ const (
 	sessionTimeout = 5 * time.Second
 )
 
+type UDPSocket struct {
+	conn *ipv4.PacketConn
+	port uint16
+}
+
+type LocalEndpoint struct {
+	socket  *UDPSocket
+	address Endpoint
+	iface   int
+}
+
 type Node struct {
 	cfg        *Config
 	reg        *Registry
 	key        DHKey
-	conn       *ipv4.PacketConn
+	sockets    map[uint16]*UDPSocket
+	endpoints  []SocketEndpoint
+	incoming   map[Endpoint]Endpoint
 	tun        *Tun
 	log        *slog.Logger
 	mu         sync.Mutex
@@ -33,7 +46,7 @@ type Node struct {
 	graph      map[Edge]*Update
 	owned      map[Edge]bool
 	observed   map[Edge]time.Time
-	local      map[Endpoint]int
+	local      map[Endpoint]*LocalEndpoint
 	discovered map[uint16]map[Endpoint]time.Time
 	owners     map[Endpoint]uint16
 	routes     map[Endpoint][]Edge
@@ -74,8 +87,35 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	}
 
 	_, n.subnet = throw3(net.ParseCIDR(cfg.Subnet))
-	n.conn = ipv4.NewPacketConn(throw2(net.ListenUDP("udp4", &net.UDPAddr{Port: cfg.Port})))
-	throw(n.conn.SetControlMessage(ipv4.FlagDst, true))
+	n.sockets = map[uint16]*UDPSocket{}
+
+	for _, config := range append(append([]EndpointConfig{}, cfg.Endpoint...), me.endpoints...) {
+		config.validate()
+
+		if config.Proto != "udp" {
+			throwFmt("transport %s is not implemented", config.Proto)
+		}
+
+		addr := config.address()
+		bind := config.binding()
+
+		if addr.IP.To4() == nil || bind.IP.To4() == nil {
+			continue
+		}
+
+		local := endpoint(bind.IP, bind.Port)
+
+		if n.sockets[local.Port] == nil {
+			n.sockets[local.Port] = newUDPSocket(local.Port)
+		}
+
+		n.endpoints = append(n.endpoints, SocketEndpoint{public: endpoint(addr.IP, addr.Port), bind: local})
+	}
+
+	if len(n.sockets) == 0 {
+		throwFmt("no UDP endpoints configured")
+	}
+
 	n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
 	n.refresh(time.Now())
 
@@ -83,7 +123,10 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 }
 
 func (n *Node) run() {
-	go n.loop("recv", n.recvLoop)
+	for _, socket := range n.sockets {
+		go n.loop("recv", func() { n.recvLoop(socket) })
+	}
+
 	go n.loop("tun", n.tunLoop)
 	go n.loop("status", n.statusLoop)
 	go n.loop("signal", n.signalLoop)
@@ -108,20 +151,20 @@ func (n *Node) loop(name string, body func()) {
 }
 
 func (n *Node) send(packet []byte, edge Edge) {
-	iface := n.local[edge.From]
+	local := n.local[edge.From]
 
-	if iface == 0 {
+	if local == nil {
 		return
 	}
 
-	n.conn.WriteTo(packet, &ipv4.ControlMessage{Src: edge.From.ip(), IfIndex: iface}, edge.To.addr())
+	local.socket.conn.WriteTo(packet, &ipv4.ControlMessage{Src: local.address.ip(), IfIndex: local.iface}, edge.To.addr())
 }
 
-func (n *Node) recvLoop() {
+func (n *Node) recvLoop(socket *UDPSocket) {
 	buf := make([]byte, maxPacket)
 
 	for {
-		size, control, addr, err := n.conn.ReadFrom(buf)
+		size, control, addr, err := socket.conn.ReadFrom(buf)
 
 		throw(err)
 
@@ -130,9 +173,19 @@ func (n *Node) recvLoop() {
 		}
 
 		remote := addr.(*net.UDPAddr)
-		edge := Edge{From: endpoint(remote.IP, remote.Port), To: endpoint(control.Dst, n.cfg.Port)}
+		wire := endpoint(control.Dst, int(socket.port))
 
 		n.mu.Lock()
+
+		destination, exists := n.incoming[wire]
+
+		if !exists {
+			n.mu.Unlock()
+
+			continue
+		}
+
+		edge := Edge{From: endpoint(remote.IP, remote.Port), To: destination}
 
 		if buf[0] == packetTransport || buf[0] == packetGossip {
 			n.handleTransport(buf[:size], edge)

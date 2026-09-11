@@ -21,8 +21,9 @@ func encodeAd(blob, sig []byte) []byte {
 	return append(out, blob...)
 }
 
-func (n *Node) scanLocal() map[Endpoint]int {
-	local := map[Endpoint]int{}
+func (n *Node) scanLocal() map[Endpoint]*LocalEndpoint {
+	local := map[Endpoint]*LocalEndpoint{}
+	incoming := map[Endpoint]Endpoint{}
 
 	for _, iface := range throw2(net.Interfaces()) {
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 || iface.Name == n.cfg.Tun {
@@ -36,9 +37,34 @@ func (n *Node) scanLocal() map[Endpoint]int {
 				continue
 			}
 
-			local[endpoint(ip, n.cfg.Port)] = iface.Index
+			for _, config := range n.endpoints {
+				wire := endpoint(ip, int(config.bind.Port))
+
+				if config.bind.IP != 0 && config.bind.IP != wire.IP {
+					continue
+				}
+
+				public := config.public
+
+				if public.IP == 0 {
+					public.IP = wire.IP
+				}
+
+				if previous, exists := incoming[wire]; exists && previous != public {
+					throwFmt("ambiguous endpoint binding: %s", wire.string())
+				}
+
+				if previous := local[public]; previous != nil && previous.address != wire {
+					throwFmt("ambiguous public endpoint: %s", public.string())
+				}
+
+				incoming[wire] = public
+				local[public] = &LocalEndpoint{socket: n.sockets[wire.Port], address: wire, iface: iface.Index}
+			}
 		}
 	}
+
+	n.incoming = incoming
 
 	return local
 }
@@ -153,11 +179,7 @@ func (n *Node) handleAd(inner []byte) {
 func (n *Node) candidates(peer *Peer) []Endpoint {
 	addrs := []Endpoint{}
 
-	for _, addr := range peer.static {
-		if ep := endpoint(addr.IP, addr.Port); ep.IP != 0 {
-			addrs = append(addrs, ep)
-		}
-	}
+	addrs = append(addrs, peer.addresses...)
 
 	for ep, index := range n.owners {
 		if index == peer.index && ep.Port != 0 && !n.subnet.Contains(ep.ip()) {

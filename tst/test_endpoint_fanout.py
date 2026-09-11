@@ -7,7 +7,7 @@ import workload
 class ManyEndpoints(lib.Lab):
     def registry(self):
         registry = super().registry()
-        registry[1]['static'] = [f'10.1.0.{i}:7000' for i in range(100, 132)] + registry[1]['static']
+        registry[1]['endpoint'] = [dict(proto='udp', addr=f'10.1.0.{i}', port=7000) for i in range(100, 132)] + registry[1]['endpoint']
         return registry
 
 

@@ -28,7 +28,7 @@ func main() {
 	dh, sig := deriveKeys(decodeKey(cfg.Key))
 	session := newSession(reg.byIndex[cfg.Index], peer, dh.private)
 	packetID := uint64(time.Now().UnixNano())
-	conn := throw2(net.ListenUDP("udp4", &net.UDPAddr{Port: cfg.Port}))
+	conn := throw2(net.ListenUDP("udp4", cfg.Endpoint[0].binding()))
 
 	defer conn.Close()
 

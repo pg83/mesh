@@ -6,7 +6,7 @@ import workload
 class StaticAddresses(lib.Lab):
     def registry(self):
         registry = super().registry()
-        registry[1]['static'] = ['[2001:db8::1]:7000', ':7000'] + registry[1]['static']
+        registry[1]['endpoint'] = [dict(proto='udp', addr=addr, port=7000) for addr in ['2001:db8::1', '']] + registry[1]['endpoint']
         return registry
 
 

@@ -94,6 +94,7 @@ class Lab:
         self.lock = threading.RLock()
         self.rules = []
         self.blocked = set()
+        self.forwards = {}  # public UDP pair -> (node name, segment, local IP bytes, local port)
         self.counts = collections.Counter()
         self.delayed = []
         self.serial = 0
@@ -170,10 +171,11 @@ class Lab:
                 self.blocked.discard((dst, src, seg))
 
     def intercept(self, src, dst, action, count=1, kind=None, seg=None,
-                  min_size=0, max_size=None, every=1, delay=0, rate=None, source_ip=None, target_ip=None):
+                  min_size=0, max_size=None, every=1, delay=0, rate=None, source_ip=None, target_ip=None, source_port=None, target_port=None):
         rule = dict(src=src, dst=dst, action=action, count=count, kind=kind,
                     seg=seg, min_size=min_size, max_size=max_size, every=every, delay=delay,
-                    rate=rate, source_ip=source_ip, target_ip=target_ip, next=0, seen=0, hits=0, held=[])
+                    rate=rate, source_ip=source_ip, target_ip=target_ip,
+                    source_port=source_port, target_port=target_port, next=0, seen=0, hits=0, held=[])
         with self.lock:
             self.rules.append(rule)
         return rule
@@ -221,6 +223,40 @@ class Lab:
         os.write(out, packet)
         self.counts[(*key, 'sent')] += 1
 
+    def forward(self, name, seg, public_addr, public_port, bind_port):
+        """The router translates both directions of a fixed UDP port mapping."""
+        with self.lock:
+            self.forwards[(socket.inet_aton(public_addr), public_port)] = (
+                name, seg, socket.inet_aton(self.nodes[name].addresses[seg]), bind_port)
+
+    def route_packet(self, source, seg, packet):
+        out = self.ports.get((seg, packet[16:20]))
+        head = (packet[0] & 15) * 4
+        if packet[9] != 17 or len(packet) < head + 8:
+            return out, packet
+        source_port, target_port = struct.unpack_from('!HH', packet, head)
+        target = self.forwards.get((packet[16:20], target_port))
+        origin = next((public for public, local in self.forwards.items()
+                       if local == (source, seg, packet[12:16], source_port)), None)
+        if target is None and origin is None:
+            return out, packet
+        packet = bytearray(packet)
+        if target is not None:
+            _, target_seg, target_addr, target_port = target
+            out = self.ports[(target_seg, target_addr)]
+            packet[16:20] = target_addr
+            struct.pack_into('!H', packet, head + 2, target_port)
+        if origin is not None:
+            packet[12:16] = origin[0]
+            struct.pack_into('!H', packet, head, origin[1])
+        packet[head + 6:head + 8] = b'\0\0'
+        packet[10:12] = b'\0\0'
+        checksum = sum(struct.unpack('!' + 'H' * (head // 2), packet[:head]))
+        while checksum >> 16:
+            checksum = (checksum & 0xffff) + (checksum >> 16)
+        struct.pack_into('!H', packet, 10, ~checksum & 0xffff)
+        return out, bytes(packet)
+
     def switch(self):
         try:
             fds = list(self.tuns)
@@ -236,7 +272,7 @@ class Lab:
                         if len(packet) < 20 or packet[0] >> 4 != 4:
                             continue
                         seg, src = self.tuns[fd]
-                        out = self.ports.get((seg, packet[16:20]))
+                        out, packet = self.route_packet(src.name, seg, packet)
                         if out is None or out == fd:
                             continue
                         dst = self.tuns[out][1]
@@ -250,6 +286,8 @@ class Lab:
                             if (rule['src'] != src.name or rule['dst'] != dst.name
                                     or (rule['source_ip'] is not None and packet[12:16] != socket.inet_aton(rule['source_ip']))
                                     or (rule['target_ip'] is not None and packet[16:20] != socket.inet_aton(rule['target_ip']))
+                                    or (rule['source_port'] is not None and (packet[9] != 17 or struct.unpack_from('!H', packet, head)[0] != rule['source_port']))
+                                    or (rule['target_port'] is not None and (packet[9] != 17 or struct.unpack_from('!H', packet, head + 2)[0] != rule['target_port']))
                                     or rule['count'] == 0
                                     or rule['seg'] not in (None, seg)
                                     or len(payload) < rule['min_size']
@@ -357,13 +395,13 @@ class Lab:
         for node in self.nodes.values():
             static = []
             if node.name in self.statics:
-                static = [f"{node.addresses[seg]}:{PORT}" for seg in node.segments]
+                static = [dict(proto="udp", addr=node.addresses[seg], port=PORT) for seg in node.segments]
             reg.append({
                 "index": node.index,
                 "pub": node.keys["pub"],
                 "sig": node.keys["sig"],
                 "intip": intip(node.index),
-                "static": static,
+                "endpoint": static,
             })
         return reg
 
@@ -371,7 +409,7 @@ class Lab:
         cfg = {
             "index": node.index,
             "key": node.keys["key"],
-            "port": PORT,
+            "endpoint": [dict(proto="udp", addr="0.0.0.0", port=PORT)],
             "subnet": SUBNET,
             "status": STATUS,
             "registry": self.registry(),

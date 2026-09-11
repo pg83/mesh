@@ -7,11 +7,12 @@ import (
 )
 
 type Peer struct {
-	index  uint16
-	pub    []byte
-	sig    ed25519.PublicKey
-	intip  [4]byte
-	static []*net.UDPAddr
+	index     uint16
+	pub       []byte
+	sig       ed25519.PublicKey
+	intip     [4]byte
+	endpoints []EndpointConfig
+	addresses []Endpoint
 }
 
 type Registry struct {
@@ -61,8 +62,18 @@ func newRegistry(peers []PeerConfig) *Registry {
 			intip: parseIntip(pc.Intip),
 		}
 
-		for _, s := range pc.Static {
-			p.static = append(p.static, parseUDPAddr(s))
+		p.endpoints = pc.Endpoint
+
+		for _, config := range pc.Endpoint {
+			config.validate()
+
+			if config.Proto == "udp" {
+				addr := config.address()
+
+				if ep := endpoint(addr.IP, addr.Port); ep.IP != 0 {
+					p.addresses = append(p.addresses, ep)
+				}
+			}
 		}
 
 		if _, dup := r.byIndex[p.index]; dup {

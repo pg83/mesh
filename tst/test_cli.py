@@ -25,7 +25,8 @@ def test():
         config = json.loads((lab.dir / 'a.json').read_text())
         def bad(change, expected):
             cfg = copy.deepcopy(config)
-            cfg['port'] = 7900
+            cfg['endpoint'] = [dict(proto='udp', addr='0.0.0.0', port=7900)]
+            cfg['registry'][0]['endpoint'] = []
             cfg['tun'] = 'invalid-test'
             cfg['status'] = ''
             change(cfg)
@@ -46,9 +47,22 @@ def test():
         bad(lambda c: c['registry'][0].update(sig=lab.nodes['b'].keys['sig']), 'signing key does not match')
         bad(lambda c: c['registry'].append(c['registry'][0]), 'duplicate index')
         bad(lambda c: c['registry'][0].update(intip='bad'), 'bad intip')
-        bad(lambda c: c['registry'][0].update(static=['bad']), 'missing port')
+        bad(lambda c: c['endpoint'][0].update(proto='bad'), 'bad endpoint proto')
+        bad(lambda c: c['endpoint'][0].update(port=0), 'bad endpoint port')
+        bad(lambda c: c['endpoint'][0].update(port=65536), 'bad endpoint port')
+        bad(lambda c: c['endpoint'][0].update(bind_port=-1), 'bad endpoint port')
+        bad(lambda c: c['endpoint'][0].update(bind_port=65536), 'bad endpoint port')
+        bad(lambda c: c['endpoint'][0].update(proto='ws', path='/mesh'), 'transport ws is not implemented')
+        bad(lambda c: c.update(endpoint=[]), 'no UDP endpoints configured')
+        bad(lambda c: c['endpoint'][0].update(bind_addr='::1'), 'no UDP endpoints configured')
+        bad(lambda c: c['endpoint'].append(dict(proto='udp', addr='203.0.113.1', port=17001,
+                                              bind_addr='10.1.0.1', bind_port=7900)), 'ambiguous endpoint binding')
+        bad(lambda c: c['endpoint'].extend([
+            dict(proto='udp', addr='203.0.113.1', port=17001, bind_addr='10.1.0.1', bind_port=7901),
+            dict(proto='udp', addr='203.0.113.1', port=17001, bind_addr='10.1.0.1', bind_port=7902),
+        ]), 'ambiguous public endpoint')
         bad(lambda c: c.update(subnet='bad'), 'CIDR')
-        bad(lambda c: c.update(port=7000), 'address already in use')
+        bad(lambda c: c['endpoint'][0].update(port=7000), 'address already in use')
         bad(lambda c: c.update(status='/' + 'x' * 110), 'status socket path')
         path = lab.dir / 'bad.json'
         path.write_text('{')

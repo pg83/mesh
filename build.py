@@ -124,7 +124,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
 
     e2e_tests.append(command(
         name=f"e2e_{test_name}",
-        inputs=[test_path, "$(S)/tst/lib.py", "$(S)/tst/workload.py", "$(S)/tst/program.py"],
+        inputs=[test_path, "$(S)/tst/lib.py", "$(S)/tst/workload.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat") else [])],
         outputs=outputs,
         deps=[mesh, probe] if test_name in ("protocol", "gossip_stale", "graph_exchange", "route_attachment") else [mesh, quic] if test_name.startswith("quic") else [mesh],
         cmd=[

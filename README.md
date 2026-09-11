@@ -29,12 +29,12 @@ Config is JSON:
 {
   "index": 1,
   "key": "<base64 private key>",
-  "port": 7000,
+  "endpoint": [{"proto": "udp", "addr": "0.0.0.0", "port": 7000}],
   "subnet": "10.77.0.0/24",
   "status": "/run/mesh/status.sock",
   "registry": [
-    {"index": 1, "pub": "<x25519>", "sig": "<ed25519>", "intip": "10.77.0.1", "static": ["5.188.103.251:7064"]},
-    {"index": 2, "pub": "<x25519>", "sig": "<ed25519>", "intip": "10.77.0.2", "static": []}
+    {"index": 1, "pub": "<x25519>", "sig": "<ed25519>", "intip": "10.77.0.1", "endpoint": [{"proto": "udp", "addr": "203.0.113.10", "port": 17001, "bind_addr": "192.168.1.20", "bind_port": 7001}]},
+    {"index": 2, "pub": "<x25519>", "sig": "<ed25519>", "intip": "10.77.0.2", "endpoint": []}
   ]
 }
 ```
@@ -46,6 +46,49 @@ A node without static
 endpoints is never dialed by a node that has not heard of it; it dials, and
 its own advertised addresses let others dial it back later. `tun` (default
 `mesh0`) and `mtu` (default 1380) are optional.
+
+Both the host and registry use the same flat `endpoint` objects. The node
+opens the union of its host list and its own registry list. Other nodes
+use only the advertised `addr` and `port` from that registry entry.
+There is no global `port`, separate `static` list, or `forwards` section.
+Old configurations must be converted to this format.
+
+| Field | Meaning |
+|---|---|
+| `proto` | Transport: `udp`; `ws` and `wss` are reserved for the next transport |
+| `addr`, `port` | Address and port advertised to peers |
+| `bind_addr`, `bind_port` | Local address and port; omitted values default to `addr` and `port` |
+| `path` | WebSocket request path, reserved for the future WS/WSS transport |
+
+For UDP, `addr: "0.0.0.0"` expands to eligible IPv4 interface addresses
+on this host, refreshed every second. A concrete address selects that
+interface address. Loopback, link-local and mesh-subnet addresses are excluded.
+Multiple entries can use the same local port; a socket is shared, with its
+source IP and interface selected per packet. Reception accepts only configured
+local address/port pairs. Each local pair must map to one advertised pair,
+and each advertised pair to one local pair. Exact duplicate entries are harmless.
+
+The example above uses two different addresses and two different ports:
+
+```text
+203.0.113.10:17001  <->  192.168.1.20:7001
+       public                 local
+```
+
+The router forwards inbound UDP to `192.168.1.20:7001` and translates
+outbound packets from that pair to `203.0.113.10:17001`. Configure that
+mapping on the router separately; mesh does not configure NAT. Correct
+outbound translation matters too: peers must observe the advertised source
+pair. The dedicated local port distinguishes this mapping from ordinary
+LAN traffic on port 7000. The graph uses the public pair for this socket;
+its private pair is used only to send and receive packets. To use the LAN
+address directly too, keep the separate port-7000 entry shown above.
+
+The same shape accommodates WebSockets without URL parsing or another
+config section, for example
+`{"proto":"wss","addr":"mesh.example.net","port":443,"path":"/mesh","bind_addr":"192.168.1.20","bind_port":8080}`.
+Only UDP transport is implemented now. Configuring a local WS/WSS endpoint
+fails explicitly; remote WS/WSS entries are retained but are not dialed as UDP.
 
 The TUN interface persists across daemon exits, so a restart does not remove
 the application's local address and route. The next process reattaches to
@@ -100,13 +143,13 @@ Forwarding a graph record preserves its ID and alive flag.
 The graph is a map of directed endpoint pairs. A vertex is `(IP, port)`;
 registry indexes identify encryption keys, not graph vertices. An internal
 mesh address is represented as `(meshIP, 0)`. Each host supplies both edges
-between that vertex and each of its actual local UDP endpoints. It withdraws
+between that vertex and each of its advertised UDP endpoints with an active local binding. It withdraws
 its obsolete local attachments, including those learned after a restart. Static
 registry addresses are discovery candidates, not evidence of a live edge.
 
 Receiving an authenticated packet observes precisely its UDP
 source and destination pair. The destination comes from socket packet
-metadata. That incoming edge remains locally alive while packets arrive,
+metadata and is translated to the configured public pair for a forwarded endpoint. That incoming edge remains locally alive while packets arrive,
 and is withdrawn after five seconds of silence. The reverse edge is
 independent. Any accepted data or gossip packet refreshes the observation.
 
@@ -135,7 +178,7 @@ rebuild routes.
 
 Status exposes incoming endpoint pairs, the live graph, its vertices, and
 routes keyed by destination endpoint. The runtime keeps one state mutex and
-the existing receive, TUN, timer, status, and signal loops. Crypto keys stay
+one receive goroutine per local UDP port, plus TUN, timer, status, and signal loops. Crypto keys stay
 shared across a peer's endpoints and survive local link expiry. Transport duplicate detection is not implemented.
 
 ## Development
@@ -213,6 +256,11 @@ against the instrumented daemon and enforces 95% statement coverage. Each
 individual daemon run has a separate counter directory; shutdown waits for
 all processes and missing daemon counters fail the run. CLI coverage is
 merged too. Codecov receives that same profile and requires 95% coverage.
+
+NAT scenarios translate both IPv4 addresses and UDP ports in the test router.
+They exercise two isolated private networks, failure of one forwarded port,
+and the same SSH and QUIC connections migrating from LAN to a public endpoint
+and then to a second forwarded port. These tests do not verify a physical Xiaomi router.
 
 The additional twenty protocol and application scenarios are listed in
 [tst/SCENARIOS.md](tst/SCENARIOS.md).
