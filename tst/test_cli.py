@@ -34,6 +34,7 @@ def test():
             result = lab.run('a', [lib.MESH, 'run', '-c', path], check=False, timeout=10)
             assert result.returncode != 0
             assert expected in result.stderr, result.stderr
+            lab.run('a', ['ip', 'link', 'del', 'invalid-test'], check=False)
         bad(lambda c: c.update(index=99), 'not in registry')
         bad(lambda c: c.update(index=0), 'not in registry')
         bad(lambda c: c['registry'][0].update(index=0), 'index 0 is reserved')
@@ -56,6 +57,7 @@ def test():
 
         # Exercise the filesystem socket as well as the usual abstract one.
         lab.stop_node('a')
+        lab.run('a', ['ip', 'link', 'del', 'mesh0'])
         sock = lab.dir / 'status.sock'
         # Run from a short relative path; checkout/build TMPDIR can be arbitrarily long.
         lab.configs['a'] = {'status': 'status.sock', 'tun': 'mesh-test', 'mtu': 1280}
@@ -71,6 +73,7 @@ def test():
         lab.nodes['a'].proc.send_signal(signal.SIGINT)
         assert lab.nodes['a'].proc.wait(timeout=10) == 0
         lab.nodes['a'].proc = None
+        lab.run('a', ['ip', 'link', 'del', 'mesh-test'])
         lab.configs['a'] = {}
         lab.start_node('a')
         lab.wait_ping('a', 'b')

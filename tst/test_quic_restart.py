@@ -21,6 +21,7 @@ def test():
         client.start()
         client.progress()
         lab.stop_node('a')
+        assert lab.run('a', ['ip', '-j', 'link', 'show', 'mesh0']).returncode == 0
         lab.start_node('a')
         lab.wait_ping('a', 'b', timeout=4)
         client.progress()

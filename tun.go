@@ -24,9 +24,10 @@ func openTun(name string, intip [4]byte, subnet string, mtu int) *Tun {
 
 	link := throw2(netlink.LinkByName(name))
 
-	throw(netlink.AddrAdd(link, &netlink.Addr{IPNet: ipnet}))
+	throw(netlink.AddrReplace(link, &netlink.Addr{IPNet: ipnet}))
 	throw(netlink.LinkSetMTU(link, mtu))
 	throw(netlink.LinkSetUp(link))
+	throw(unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 1))
 
 	return &Tun{fd: fd}
 }

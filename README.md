@@ -47,6 +47,11 @@ endpoints is never dialed by a node that has not heard of it; it dials, and
 its own advertised addresses let others dial it back later. `tun` (default
 `mesh0`) and `mtu` (default 1380) are optional.
 
+The TUN interface persists across daemon exits, so a restart does not remove
+the application's local address and route. The next process reattaches to
+that interface. When changing the configured TUN name or removing mesh,
+remove the old interface explicitly with `ip link del <name>`.
+
 `key` is one 32-byte seed. The X25519 static keypair (`pub`) and the
 advertisement signing keypair (`sig`) are both derived from it: an
 advertisement travels past its author, so the link cipher cannot vouch for
