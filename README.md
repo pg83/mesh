@@ -222,7 +222,7 @@ Discovery does not depend on an existing route or a reverse connection.
 Gossip merges each directed pair independently. An omitted pair is unchanged;
 a newer record replaces an older version of that pair. Receiving gossip updates
 the graph without sending a reply or forwarding it immediately. The next
-one-second publication includes the updated graph.
+periodic gossip send includes the updated graph snapshot.
 Records have no age-based expiry. A newer `alive=false` record withdraws an
 edge; older versions cannot restore it. Automatic cleanup of unreachable
 parts of the graph is not implemented.
