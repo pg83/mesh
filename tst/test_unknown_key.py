@@ -18,7 +18,7 @@ def test():
         lab.wait_links('b', ['a'], timeout=30)
         lab.wait_links('a', ['b'], timeout=30)
         assert lab.links('c') == set()
-        # More keepalives from the changed identity must remain rejected.
+        # More gossips from the changed identity must remain rejected.
         until = time.monotonic() + 6
         while time.monotonic() < until:
             assert lab.links('c') == set()

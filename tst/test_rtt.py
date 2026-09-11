@@ -1,4 +1,4 @@
-"""A 20-second RTT carries a continuous keepalive stream and real UDP traffic."""
+"""A 20-second RTT carries a continuous gossip stream and real UDP traffic."""
 
 import time
 

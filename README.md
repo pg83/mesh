@@ -12,7 +12,7 @@ source picks the whole path and relays only follow it; IP rides on top over a
 TUN device.
 
 This is the first version: registry, links, TUN, gossip, the routing map,
-relaying, and periodic keepalives over the full address closure. Link metrics,
+relaying, and periodic gossip over the full address closure. Link metrics,
 retransmits and additional transports come later.
 
 ## Usage
@@ -74,8 +74,7 @@ The entire header is authenticated as associated data. A fresh random nonce
 for every packet avoids encryption nonce reuse under the static key across
 process restarts.
 
-Inner packet, first byte is the type: `0` keepalive, `1` data, `2`
-advertisement. Data carries src index (2), hop count (1), the path as indexes
+Inner packet, first byte is the type: `1` data, `2` advertisement. Data carries src index (2), hop count (1), the path as indexes
 (2 each), the cursor (1), then the IP packet. A relay checks that the cursor
 points at itself, advances it, and hands the packet to the session of the
 next index. An advertisement carries a 64-byte signature and the JSON body.
@@ -99,11 +98,11 @@ the whole database at once.
 
 Routes are a breadth-first search by hop count over the advertised graph,
 recomputed whenever it changes. An edge is usable only while both nodes
-advertise each other; receiving keepalives alone does not prove that the
+advertise each other; receiving packets alone does not prove that the
 opposite direction works. The source puts the whole path into the
 packet, so relays make no decisions and loops cannot form.
 
-Every second, a node sends a keepalive to every known endpoint of every
+Every second, a node sends its signed advertisement to every known endpoint of every
 peer: static registry addresses, advertised addresses learned through gossip,
 and the last authenticated source address. A peer reachable only through a
 relay can become directly reachable as soon as an endpoint works. Learned
@@ -112,13 +111,13 @@ are used as configured.
 
 ## Behaviour
 
-- No handshake, retries or exponential backoff. Keepalives go to every
-  endpoint once per second, regardless of data traffic or link state.
+- No handshake, separate keepalive or exponential backoff. Own gossip goes
+  to every endpoint once per second, regardless of data traffic or link state.
 - Any authenticated, non-replayed packet refreshes the peer's activity and
   updates its remote endpoint, so a peer can roam.
 - A link becomes alive on the first accepted packet and expires after five
   seconds without accepted packets, checked by the one-second timer.
-- Advertisement every 10 s and on every link change, expired after 40 s.
+- Advertisement every second and on every link change, expired after 40 s.
 - Replay protection on packet IDs with a 1024-slot window. Derived keys and
   replay state survive link expiry within the running process; a receiver
   restart resets its replay history.
@@ -172,8 +171,8 @@ Other scenarios transfer and hash files through scp and curl while cutting
 the active path, synchronize trees with rsync, and run iperf3 TCP/UDP streams
 with deterministic loss and delay. UDP probes check packet sizes, replay,
 reordering and packets older than the replay window. Separate tests check
-keepalives on every endpoint during SSH traffic, data keeping a link alive
-when keepalives are dropped, five-second expiry, replay after expiry, and a
+gossip on every endpoint during UDP traffic, data keeping a link alive
+when gossip is dropped, five-second expiry, replay after expiry, and a
 20-second RTT carrying UDP traffic without link flaps. Gossip expiry, unknown
 keys, CLI errors and malformed packets also have separate tests. `mesh-probe` is built only with the `meshprobe` tag for the
 protocol test; it sends authenticated malformed messages to real mesh nodes.

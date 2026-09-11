@@ -4,7 +4,6 @@ import "encoding/binary"
 
 const (
 	packetTransport = 3
-	innerKeepalive  = 0
 	innerData       = 1
 	innerAd         = 2
 	nonceSize       = 24

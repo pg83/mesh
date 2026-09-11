@@ -60,8 +60,8 @@ def test():
         probe.stdin.close()
         assert probe.wait(timeout=10) == 0
         lab.wait_links('b', ['c'], timeout=30)
-        probe_attempt = lab.intercept('b', 'a', 'copy', kind=3, min_size=52, max_size=52)
-        lab.wait(lambda: probe_attempt['hits'] == 1, 'keepalive to the expired peer')
+        probe_attempt = lab.intercept('b', 'a', 'copy', kind=3, min_size=116, max_size=899)
+        lab.wait(lambda: probe_attempt['hits'] == 1, 'gossip to the expired peer')
         lab.wait_ping('b', 'c')
 
 

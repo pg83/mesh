@@ -33,7 +33,6 @@ type Node struct {
 	ads      map[uint16]*Known
 	routes   map[uint16][]uint16
 	subnet   *net.IPNet
-	lastAd   time.Time
 }
 
 func newNode(cfg *Config, log *slog.Logger) *Node {
@@ -264,15 +263,7 @@ func (n *Node) tick(now time.Time) {
 
 	n.expire(now)
 
-	if now.Sub(n.lastAd) >= adInterval {
-		n.publish(now)
-	}
-
-	for index, s := range n.peers {
-		for _, addr := range n.candidates(n.reg.byIndex[index]) {
-			n.send(s.seal([]byte{innerKeepalive}, n.nextPacketID()), addr)
-		}
-	}
+	n.publish(now)
 }
 
 func (n *Node) candidates(peer *Peer) []*net.UDPAddr {

@@ -9,10 +9,7 @@ import (
 	"time"
 )
 
-const (
-	adInterval = 10 * time.Second
-	adTimeout  = 40 * time.Second
-)
+const adTimeout = 40 * time.Second
 
 type Ad struct {
 	Index     uint16   `json:"index"`
@@ -104,8 +101,14 @@ func (n *Node) publish(now time.Time) {
 	}
 
 	n.ads[n.cfg.Index] = known
-	n.lastAd = now
-	n.flood(known, 0)
+
+	inner := encodeAd(known.blob, known.sig)
+
+	for index, s := range n.peers {
+		for _, addr := range n.candidates(n.reg.byIndex[index]) {
+			n.send(s.seal(inner, n.nextPacketID()), addr)
+		}
+	}
 }
 
 func (n *Node) flood(known *Known, from uint16) {

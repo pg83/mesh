@@ -9,7 +9,7 @@ def test():
         lab.wait_ping('a', 'b')
         log = workload.udp_server(lab, 'b')
         client = workload.UdpClient(lab, 'a', 'b')
-        # Large application datagrams distinguish data from keepalives and ads
+        # Large application datagrams distinguish data from gossip
         # without decrypting mesh packets in the switch.
         def payload(label):
             return label.encode().ljust(900, b'.')
