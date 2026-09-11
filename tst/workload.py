@@ -172,8 +172,8 @@ class UdpClient:
         return bytes.fromhex(data) if data is not None else None
 
 
-def udp_server(lab, name, port=9000):
-    proc = lab.spawn(name, [sys.executable, PROGRAM, 'udp-server', address(lab, name), port], 'udp-server-' + name)
+def udp_server(lab, name, port=9000, host=None):
+    proc = lab.spawn(name, [sys.executable, PROGRAM, 'udp-server', host or address(lab, name), port], 'udp-server-' + name)
     log = lab.dir / ('udp-server-' + name + '.log')
     def ready():
         assert proc.poll() is None, 'UDP server exited'

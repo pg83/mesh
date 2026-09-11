@@ -53,6 +53,9 @@ func main() {
 		case "short-transport":
 			out = binary.LittleEndian.AppendUint16([]byte{packetTransport}, cfg.Index)
 			out = binary.LittleEndian.AppendUint64(out, packetID)
+		case "short-tag":
+			out = session.seal(nil, packetID)
+			out = out[:len(out)-1]
 		case "ad":
 			key := sig
 
