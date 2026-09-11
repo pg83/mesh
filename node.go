@@ -18,8 +18,9 @@ const (
 )
 
 type UDPSocket struct {
-	conn *ipv4.PacketConn
-	port uint16
+	guard net.Listener
+	conn  *ipv4.PacketConn
+	port  uint16
 }
 
 type LocalEndpoint struct {
@@ -142,7 +143,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 }
 
 func (n *Node) run() {
-	n.publishSnapshot(true)
+	n.publishSnapshot()
 
 	for _, listener := range n.listeners {
 		go n.loop("websocket listener", func() { throw(listener.server.Serve(listener.conn)) })

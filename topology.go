@@ -27,7 +27,7 @@ func (n *Node) edgePair(edge Edge, peer uint16) *EdgeActor {
 	return actor
 }
 
-func (n *Node) publishSnapshot(repack bool) {
+func (n *Node) publishSnapshot() {
 	n.recompute()
 
 	enabled := map[Edge]bool{}
@@ -60,12 +60,7 @@ func (n *Node) publishSnapshot(repack bool) {
 	view := &Snapshot{graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local), owners: maps.Clone(n.owners),
 		routes: n.routes, actors: actors, enabled: enabled}
 
-	if repack || n.snapshot == nil {
-		view.gossip = n.advertisements()
-	} else {
-		view.gossip = n.snapshot.gossip
-	}
-
+	view.gossip = n.advertisements()
 	n.snapshot = view
 
 	for _, actor := range n.actors {
@@ -136,7 +131,7 @@ func (n *Node) graphLoop() {
 				edge := Edge{From: remote, To: local}
 
 				n.observe(EdgeReport{edge: edge, peer: v.peer, seen: v.received.at})
-				n.publishSnapshot(false)
+				n.publishSnapshot()
 				post(n.actors[edge].inbox, any(v.received))
 			case *WSConnection:
 				if n.local[v.edge.From] == nil {
@@ -152,7 +147,7 @@ func (n *Node) graphLoop() {
 				actor := n.edgePair(v.edge, v.peer)
 
 				n.discovered[v.peer][v.edge.To] = time.Now()
-				n.publishSnapshot(false)
+				n.publishSnapshot()
 
 				if !post(actor.inbox, any(v)) {
 					v.stop()
@@ -174,11 +169,11 @@ func (n *Node) graphLoop() {
 				}
 			}
 
-			n.publishSnapshot(true)
+			n.publishSnapshot()
 			dirty = false
 		case <-updates.C:
 			if dirty {
-				n.publishSnapshot(false)
+				n.publishSnapshot()
 				dirty = false
 			}
 		}

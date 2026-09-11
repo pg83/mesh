@@ -92,8 +92,14 @@ func (a *EdgeActor) run() {
 		case msg := <-a.inbox:
 			switch v := msg.(type) {
 			case *Snapshot:
+				first := a.view == nil
+
 				a.view = v
 				a.updateTransport()
+
+				if first {
+					a.gossip()
+				}
 			case Received:
 				a.receive(v)
 			case Outbound:
@@ -115,13 +121,17 @@ func (a *EdgeActor) run() {
 		case <-ticker.C:
 			a.report()
 
-			if a.outgoing && a.view != nil && a.view.enabled[a.edge] {
-				a.updateTransport()
+			a.gossip()
+		}
+	}
+}
 
-				for _, inner := range a.view.gossip {
-					a.send(inner)
-				}
-			}
+func (a *EdgeActor) gossip() {
+	if a.outgoing && a.view != nil && a.view.enabled[a.edge] {
+		a.updateTransport()
+
+		for _, inner := range a.view.gossip {
+			a.send(inner)
 		}
 	}
 }
