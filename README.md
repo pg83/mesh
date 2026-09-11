@@ -142,10 +142,10 @@ there is no separate advertisement signature or signing key.
 
 All multibyte integers in the mesh protocol use little-endian order.
 Encapsulated IP packets retain their standard network format. The key
-context is `mesh/7`; older wire formats are incompatible.
+context is `mesh/8`; older wire formats are incompatible.
 
 Each registered pair derives a shared secret with X25519 and directional
-keys with HKDF-SHA256. The context contains `mesh/7`, the sender's public key
+keys with HKDF-SHA256. The context contains `mesh/8`, the sender's public key
 and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
@@ -162,15 +162,21 @@ hops are allowed. A relay checks the receiving pair against the route,
 advances the cursor, and sends from the exact next source endpoint to the
 exact next destination. Local delivery verifies the destination mesh IP.
 
-Inner gossip starts with `2`, followed directly by a JSON object containing
-`endpoints` and `edges`. Endpoint descriptions contain
-`proto`, `addr`, `port`, and optional `path`. Edges contain `from` and `to`
-64-bit hashes, `id`, and `alive`. Descriptions appear once per message;
-each message includes the descriptions referenced by its edges. Publications
-split at eight records or roughly 1000 JSON bytes; a single large endpoint
-record can exceed that target. There is no dependency on an earlier gossip
-message arriving first. Other nodes can use these descriptions to open new
-direct connections.
+Inner gossip starts with `2`, edge count (2), and endpoint count (2), followed
+by the edges and then the endpoint descriptions. Each edge is 25 bytes:
+source hash (8), destination hash (8), record ID (8), and alive (1, either 0
+or 1). Endpoint descriptions start with protocol (1: UDP=1, WS=2, WSS=3) and
+port (2). UDP then carries four IPv4 octets. WS/WSS carry the address and path
+as two strings, each prefixed by its byte length (2). Strings use UTF-8.
+
+Counts and lengths are checked against the remaining packet before allocating
+or reading. Truncated packets, unknown protocol codes, invalid alive values,
+and trailing bytes are rejected as a whole. Descriptions appear once per
+message; each message includes the descriptions referenced by its edges.
+Publications split at eight records or roughly 1000 inner bytes; a single
+large endpoint record can exceed that target. There is no dependency on an
+earlier gossip message arriving first. Other nodes can use these descriptions
+to open new direct connections.
 
 The authenticated sender may transmit any part of the graph, including records learned
 from other members. An omitted pair is unchanged; a newer record replaces

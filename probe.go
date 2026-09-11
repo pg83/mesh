@@ -97,7 +97,11 @@ func main() {
 			out = session.seal(nil, packetID)
 			out = out[:len(out)-1]
 		case "ad":
-			out = session.seal(encodeAd(command.Body), packetID)
+			ad := &Ad{}
+
+			throw(json.Unmarshal(command.Body, ad))
+
+			out = session.seal(encodeAd(ad), packetID)
 		default:
 			throwFmt("unknown probe command %q", command.Op)
 		}

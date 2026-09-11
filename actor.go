@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"golang.org/x/net/ipv4"
 	"net"
@@ -263,9 +262,9 @@ func (a *EdgeActor) receive(r Received) {
 }
 
 func (a *EdgeActor) advertisement(inner []byte) {
-	ad := &Ad{}
+	ad, ok := decodeAd(inner)
 
-	if json.Unmarshal(inner[1:], ad) != nil {
+	if !ok {
 		return
 	}
 

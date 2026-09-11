@@ -20,8 +20,7 @@ def test():
         captured = lab.intercept('r', 'a', 'hold', kind=4)
         probe.send(op='ad', body=dict(edges=[xy]))
         lab.wait(lambda: len(captured['held']) == 1, 'unsigned gossip captured')
-        body_size = len(json.dumps(lib.wire_ad(dict(edges=[xy]))).encode())
-        assert len(captured['held'][0][1]) == 20 + 8 + 35 + 16 + 1 + body_size
+        assert len(captured['held'][0][1]) == 20 + 8 + 35 + 16 + 5 + 25 + 2 * 7
         lab.clear(captured)
         lab.replay(captured, transform=lambda packet: packet[:-1] + bytes([packet[-1] ^ 1]))
         probe.send(op='ad', body=dict(edges=[yz]))

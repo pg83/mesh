@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net"
 	"slices"
 	"time"
@@ -12,10 +11,6 @@ const gossipBatchSize = 8
 type Ad struct {
 	Edges     []Update   `json:"edges"`
 	Endpoints []Endpoint `json:"endpoints"`
-}
-
-func encodeAd(blob []byte) []byte {
-	return append([]byte{innerAd}, blob...)
 }
 
 func (n *Node) scanLocal() map[uint64]*LocalEndpoint {
@@ -122,12 +117,8 @@ func (n *Node) advertisements() [][]byte {
 	slices.SortFunc(updates, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
 
 	for start := 0; start < len(updates); {
-		end := start
-
-		var blob []byte
-
-		for end < len(updates) && end-start < gossipBatchSize {
-			ad := Ad{Edges: updates[start : end+1]}
+		for size := min(gossipBatchSize, len(updates)-start); ; size-- {
+			ad := Ad{Edges: updates[start : start+size]}
 			seen := map[uint64]bool{}
 
 			for _, u := range ad.Edges {
@@ -139,18 +130,15 @@ func (n *Node) advertisements() [][]byte {
 				}
 			}
 
-			candidate := throw2(json.Marshal(ad))
+			packet := encodeAd(&ad)
 
-			if len(candidate) > 1000 && end > start {
+			if len(packet) <= 1000 || size == 1 {
+				packets = append(packets, packet)
+				start += size
+
 				break
 			}
-
-			blob = candidate
-			end++
 		}
-
-		packets = append(packets, encodeAd(blob))
-		start = end
 	}
 
 	return packets
