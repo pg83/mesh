@@ -65,7 +65,11 @@ func (c EndpointConfig) description() Endpoint {
 }
 
 func newUDPSocket(port uint16) *UDPSocket {
-	conn := ipv4.NewPacketConn(throw2(net.ListenUDP("udp4", &net.UDPAddr{Port: int(port)})))
+	udp := throw2(net.ListenUDP("udp4", &net.UDPAddr{Port: int(port)}))
+
+	throw(udp.SetReadBuffer(1 << 20))
+
+	conn := ipv4.NewPacketConn(udp)
 
 	throw(conn.SetControlMessage(ipv4.FlagDst, true))
 
