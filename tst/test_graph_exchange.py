@@ -1,5 +1,6 @@
 """Gossip merges arbitrary endpoint pairs and relays preserve their versions."""
 import time
+import json
 import lib
 import workload
 
@@ -16,7 +17,14 @@ def test():
         yz = lib.edge(y, z, ident)
         def present(name, src, dst):
             return any(e['from'] == src and e['to'] == dst for e in lab.status(name)['graph'])
-        probe.send(op='ad', body=dict(index=2, edges=[xy, yz]))
+        incomplete = lib.wire_ad(dict(index=2, edges=[xy]))
+        incomplete['endpoints'] = []
+        probe.proc.stdin.write(json.dumps(dict(op='ad', body=incomplete)).encode() + b'\n')
+        assert probe.read()['sent']
+        time.sleep(.1)
+        probe.send(op='ad', body=dict(index=2, edges=[xy]))
+        lab.wait(lambda: present('a', x, y), 'same version accepted once descriptors arrive')
+        probe.send(op='ad', body=dict(index=2, edges=[yz]))
         lab.wait(lambda: present('c', x, y) and present('c', y, z), 'third-party graph reaches another peer')
         assert not present('a', y, x), 'reverse edge was invented'
         assert x != y, 'ports distinguish graph vertices'

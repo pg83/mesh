@@ -75,10 +75,21 @@ Old configurations must be converted to this format.
 For UDP, `addr: "0.0.0.0"` expands to eligible IPv4 interface addresses
 on this host, refreshed every second. A concrete address selects that
 interface address. Loopback, link-local and mesh-subnet addresses are excluded.
-Multiple entries can use the same local port; a socket is shared, with its
-source IP and interface selected per packet. Reception accepts only configured
+Multiple entries can use the same local port. Each endpoint pair has a connected
+UDP socket and its own receive queue; a listener on the same port handles
+authenticated packets from previously unknown endpoints. Outgoing packets select
+the configured source IP and interface. Reception accepts only configured
 local address/port pairs. Each local pair must map to one advertised pair,
 and each advertised pair to one local pair. Exact duplicate entries are harmless.
+
+Each directed transport edge has a goroutine and a buffered mailbox. Edge actors
+handle authentication, gossip and forwarding directly to the next edge actor;
+inactive candidates remain available for rediscovery. One graph goroutine merges
+observations and advertisements and periodically publishes a shared immutable
+snapshot, including routes, to the actors and TUN. Mailbox sends are nonblocking:
+full queues drop messages, and snapshots and link observations are repeated.
+Socket reads run independently of mailbox processing. There is no shared mutex
+around graph updates or packet forwarding.
 
 The example above uses two different addresses and two different ports:
 
@@ -171,8 +182,9 @@ this binding with the existing derived keys; no new session keys are negotiated.
 Subsequent messages carry the existing data and gossip packets. The receiving
 endpoint comes from this authenticated binding, not the proxy's TCP address.
 
-One counter starts at Unix nanoseconds on process startup and increments
-for every locally generated graph record and outgoing transport packet.
+The graph owner and each outgoing edge have separate counters initialized
+from Unix nanoseconds. The graph counter versions local records; an edge's
+counter identifies its outgoing transport packets and WebSocket attempts.
 Forwarding a graph record preserves its ID and alive flag.
 
 ## Map and routing
@@ -194,8 +206,9 @@ its obsolete local attachments, including those learned after a restart. Static
 registry addresses are discovery candidates, not evidence of a live edge.
 
 Receiving an authenticated packet observes precisely its UDP
-source and destination pair. The destination comes from socket packet
-metadata and is translated to the configured public pair for a forwarded endpoint. That incoming edge remains locally alive while packets arrive,
+source and destination pair. Connected sockets identify the pair directly;
+discovery uses socket packet metadata. The local address is translated to the
+configured public pair for a forwarded endpoint. That incoming edge remains locally alive while packets arrive,
 and is withdrawn after five seconds of silence. The reverse edge is
 independent. Any accepted data or gossip packet refreshes the observation.
 
@@ -223,8 +236,9 @@ endpoint selector. Graph changes and the one-second local observation pass
 rebuild routes.
 
 Status exposes incoming endpoint pairs, the live graph, its vertices, and
-routes keyed by destination endpoint. The runtime keeps one state mutex and
-one receive goroutine per local UDP port, plus TUN, timer, status, and signal loops.
+routes keyed by destination endpoint. Each edge reports its latest observation
+periodically; the graph owner publishes immutable snapshots through the same
+bounded mailboxes used for packets.
 WS connections are indexed by an unordered endpoint pair, so incoming and
 outgoing routes use one connection. Simultaneous dials prefer the connection
 initiated by the smaller endpoint hash; duplicate attempts from that same
@@ -233,7 +247,7 @@ open regardless of initiator. There is at most one pending dial per pair,
 and a new timer tick never restarts that attempt. Each WS connection has a
 reader and writer, with a bounded outgoing queue; a full queue drops packets
 rather than blocking other transports. Dial, HTTP upgrade, authentication
-exchange, and socket writes run outside the graph mutex. Old connection
+exchange, and socket writes run independently of graph updates. Old connection
 cleanup cannot remove its replacement. Five seconds of silence withdraws
 incoming liveness independently of TCP connection state.
 Status also shows selected WS connections (pair, initiator, first-packet ID)

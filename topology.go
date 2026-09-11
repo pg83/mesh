@@ -11,7 +11,7 @@ func (n *Node) edgeActor(edge Edge, peer uint16, outgoing bool) *EdgeActor {
 
 	if actor == nil {
 		actor = &EdgeActor{node: n, edge: edge, peer: peer, outgoing: outgoing, inbox: make(chan any, 64),
-			session: n.session(peer), packetID: uint64(time.Now().UnixNano()), ads: map[Edge]uint64{}}
+			session: n.session(peer), packetID: uint64(time.Now().UnixNano())}
 		n.actors[edge] = actor
 		go n.loop("edge", actor.run)
 	}

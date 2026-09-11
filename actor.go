@@ -62,7 +62,6 @@ type EdgeActor struct {
 	session  *Session
 	packetID uint64
 	seen     time.Time
-	ads      map[Edge]uint64
 	udp      *UDPLink
 	ws       *WSConnection
 	dial     <-chan DialResult
@@ -279,7 +278,7 @@ func (a *EdgeActor) advertisement(inner []byte) {
 	fresh := false
 
 	for _, u := range ad.Edges {
-		if u.ID > a.view.graph[u.Edge].ID && u.ID > a.ads[u.Edge] {
+		if u.ID > a.view.graph[u.Edge].ID {
 			fresh = true
 
 			break
@@ -290,11 +289,7 @@ func (a *EdgeActor) advertisement(inner []byte) {
 		return
 	}
 
-	if post(a.node.events, any(ad)) {
-		for _, u := range ad.Edges {
-			a.ads[u.Edge] = max(a.ads[u.Edge], u.ID)
-		}
-	}
+	post(a.node.events, any(ad))
 }
 
 func (a *EdgeActor) forward(inner []byte) {
