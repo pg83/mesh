@@ -61,83 +61,79 @@ it and it carries its own signature.
 
 All multibyte integers in the mesh protocol use little-endian order.
 Encapsulated IP packets retain their standard network format. The key
-context is `mesh/4`; older wire formats are incompatible, so upgrade all
-nodes together.
+context is `mesh/5`; older wire formats are incompatible.
 
-Each pair derives a shared secret with X25519 and directional encryption
-keys with HKDF-SHA256. The HKDF context contains `mesh/4`, the sender's public
-key and the receiver's public key, in that order. There is no handshake and
-no forward secrecy.
-
-The only outer packet type is transport:
+Each registered pair derives a shared secret with X25519 and directional
+keys with HKDF-SHA256. The context contains `mesh/5`, the sender's public key
+and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
 |---|---|
-| transport | `3`, sender index (2), packet ID (8), random nonce (24), XChaCha20-Poly1305 ciphertext and tag (16) |
+| data transport | `3`, sender index (2), packet ID (8), random nonce (24), XChaCha20-Poly1305 ciphertext and tag (16) |
+| gossip transport | `4`, the same remaining header and encryption |
 
-The entire header is authenticated as associated data. A fresh random nonce
-for every packet avoids encryption nonce reuse under the static key across
-process restarts.
+The header is authenticated as associated data. Every packet gets a fresh
+random nonce, including after a process restart.
 
-Inner packet, first byte is the type: `1` data, `2` advertisement. Data carries src index (2), hop count (1), the path as indexes
-(2 each), the cursor (1), then the IP packet. A relay checks that the cursor
-points at itself, advances it, and hands the packet to the session of the
-next index. An advertisement carries a destination length (2), the destination
-string, a 64-byte signature and the JSON body. Own probes identify the endpoint
-being tried; forwarded advertisements use an empty destination. The destination
-is authenticated by the transport AEAD; the signature covers the JSON body.
+Inner data starts with `1`, hop count (1), cursor (1), then the route. Each
+hop is a pair of endpoints: source IP (4), source port (2), destination IP
+(4), destination port (2). The original IP packet follows. At most 16 UDP
+hops are allowed. A relay checks the receiving pair against the route,
+advances the cursor, and sends from the exact next source endpoint to the
+exact next destination. Local delivery verifies the destination mesh IP.
 
-One packet counter is initialized from Unix nanoseconds when the node starts.
-Every outgoing transport packet and every locally authored advertisement
-increments that same counter, across all peers and endpoints. Forwarded
-advertisements retain their author's ID inside a fresh transport packet.
+Inner gossip starts with `2`, an Ed25519 signature (64), and a JSON object
+containing the signer's registry index and an `edges` list. Each record has
+`from` and `to` endpoints (`ip` integer and `port`), an `id`, an `alive` flag,
+and remaining `ttl` in milliseconds. Gossip is split into batches of up to
+six records to keep control packets below the physical MTU used by the lab.
+The signer may transmit any part of the graph, including records learned
+from other members; the signature authenticates the transmitting member's
+report. It does not claim that every reported edge touches that member.
 
-## Map
+One counter starts at Unix nanoseconds on process startup and increments
+for every locally generated graph record and outgoing transport packet.
+Forwarding a graph record preserves its ID and reduces its remaining TTL.
 
-Every node floods one advertisement about itself: its index, a packet ID in
-the `ts` field, the addresses it offers, and the peers it currently has a link
-with. Its `seen` map also lists, for each peer, the destinations named in
-that peer's own gossip received during the last five seconds. These receipts
-let the sender distinguish a working outgoing endpoint from an incoming-only
-one. The destination travels in the authenticated envelope, so one signed
-announcement and one advertisement ID still serve all endpoints.
-Advertisement IDs are only compared with another advertisement of the
-same node; expiry runs on local arrival time instead. A newer
-advertisement is stored and passed on to peers with an observed endpoint,
-except the one it came from, so it stops spreading on its own. This includes
-a peer whose incoming traffic has timed out: the outgoing direction can
-still deliver the update about the lost link. A link coming up hands the new peer
-the whole database at once.
+## Map and routing
 
-Routes are a breadth-first search by hop count over the advertised graph,
-recomputed whenever it changes. An edge is usable only while both nodes
-advertise each other; receiving packets alone does not prove that the
-opposite direction works. The source puts the whole path into the
-packet, so relays make no decisions and loops cannot form.
+The graph is a map of directed endpoint pairs. A vertex is `(IP, port)`;
+registry indexes identify encryption keys, not graph vertices. An internal
+mesh address is represented as `(meshIP, 0)`. Each host supplies both edges
+between that vertex and each of its actual local UDP endpoints. Static
+registry addresses are discovery candidates, not evidence of a live edge.
 
-Every second, a node sends its signed advertisement to every known endpoint of every
-peer: static registry addresses, advertised addresses learned through gossip,
-and the source address from the highest accepted packet ID. A peer reachable only through a
-relay can become directly reachable as soon as an endpoint works. Learned
-addresses inside the mesh subnet are filtered; static registry addresses
-are used as configured.
+Receiving an authenticated, non-replayed packet observes precisely its UDP
+source and destination pair. The destination comes from socket packet
+metadata. That incoming edge remains locally alive while packets arrive,
+and is withdrawn after five seconds of silence. The reverse edge is
+independent. Any accepted data or gossip packet refreshes the observation.
 
-## Behaviour
+Every second each host sends its known graph through all combinations of
+local endpoints and candidate remote endpoints. Candidates come from the
+registry, graph endpoint ownership, and authenticated source addresses.
+Learned addresses within the mesh subnet are filtered. Sending uses the
+selected source address and interface through UDP socket control metadata.
+Discovery does not depend on an existing route or a reverse connection.
 
-- No handshake, separate keepalive or exponential backoff. Own gossip goes
-  to every endpoint once per second, regardless of data traffic or link state.
-- Any authenticated, non-replayed packet refreshes the peer's activity. Only
-  a higher packet ID updates its observed source address, so delayed packets
-  cannot undo roaming. Data prefers an endpoint confirmed by the peer's fresh
-  gossip, using the observed address until confirmation is available.
-- A link becomes alive on the first accepted packet and expires after five
-  seconds without accepted packets, checked by the one-second timer.
-- Advertisement every second and on every link change, expired after 40 s.
-  The highest accepted advertisement ID remains remembered until process
-  exit, preventing superseded announcements from returning after expiry.
-- Replay protection on packet IDs with a 1024-slot window. Derived keys and
-  replay state survive link expiry within the running process; a receiver
-  restart resets its replay history.
+Gossip merges each directed pair independently. An omitted pair is unchanged;
+a newer record replaces an older version of that pair. Newly learned versions
+are forwarded promptly. Relaying or repeating the same version never refreshes
+its local expiry. Records live for at most five seconds from receipt; their
+highest versions remain remembered after expiry to reject stale reintroduction.
+Local observations generate fresh versions each second.
+
+BFS follows the directed endpoint graph, with stable endpoint ordering for
+identical path lengths. The resulting path is compiled into concrete UDP
+hops; movements between endpoints on the same host require no packet. The
+return path is computed independently. There is no separate per-host
+endpoint selector. Changes and the one-second expiry pass rebuild routes.
+
+Status exposes incoming endpoint pairs, the live graph, its vertices, and
+routes keyed by destination endpoint. The runtime keeps one state mutex and
+the existing receive, TUN, timer, status, and signal loops. Crypto keys and
+the 1024-slot receive window stay shared across a peer's endpoints and survive
+link expiry; restarting a receiver resets its replay history.
 
 ## Development
 

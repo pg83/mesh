@@ -9,7 +9,7 @@ import workload
 def test():
     with lib.Lab(['a', 'b'], {1: ['a', 'b'], 2: ['a', 'b']}) as lab:
         lab.wait_ping('a', 'b')
-        workload.udp_server(lab, 'b')
+        log = workload.udp_server(lab, 'b')
         client = workload.UdpClient(lab, 'a', 'b')
         def traffic(seconds):
             deadline = time.monotonic() + seconds
@@ -18,17 +18,27 @@ def test():
                 client.send(payload)
                 assert client.recv() == payload
                 time.sleep(.1)
-        # Gossip fits below 900 bytes here; application datagrams exceed it.
-        probes = [lab.intercept('a', 'b', 'copy', kind=3, seg=seg, count=-1,
-                                min_size=116, max_size=899) for seg in (1, 2)]
+        # Gossip and data have distinct authenticated outer packet types.
+        probes = [lab.intercept('a', 'b', 'copy', kind=4, seg=seg, count=-1,
+                                max_size=899) for seg in (1, 2)]
         before = [rule['hits'] for rule in probes]
         traffic(3.2)
         assert all(rule['hits'] - start >= 3 for rule, start in zip(probes, before)), probes
         for rule in probes:
             lab.clear(rule)
-        dropped = lab.intercept('a', 'b', 'drop', kind=3, count=-1, max_size=899)
+        dropped = lab.intercept('a', 'b', 'drop', kind=4, count=-1)
         up_before = (lab.dir / 'b.log').read_text().count('link up')
-        traffic(6.2)
+        # Only the incoming edge is proven by data. Send without requiring the
+        # reverse route, whose graph announcements are deliberately suppressed.
+        delivered = []
+        deadline = time.monotonic() + 6.2
+        while time.monotonic() < deadline:
+            payload = str(time.monotonic_ns()).encode().ljust(900, b'.')
+            client.send(payload)
+            delivered.append(payload.hex())
+            time.sleep(.1)
+        lines = log.read_text().splitlines()
+        assert all(payload in lines for payload in delivered)
         assert lab.status('b')['links'][0]['idle'] < 2
         assert (lab.dir / 'b.log').read_text().count('link up') == up_before
         assert dropped['hits'] >= 6

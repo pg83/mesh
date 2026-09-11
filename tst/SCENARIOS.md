@@ -16,13 +16,17 @@ inside the nodes' network namespaces.
 | 8 | restart_all | Simultaneous mesh restart preserves an existing SSH application |
 | 9 | partition_merge | Independent topology changes converge after partitions merge |
 | 10 | route_stale | Delayed gossip and an obsolete in-flight source route |
-| 11 | route_asymmetric | Different forward and return paths |
+| 11 | route_asymmetric | Different forward and return paths with reverse directions blocked |
 | 12 | gossip_cycles | Bounded flooding despite cycles and duplicate delivery |
 | 13 | gossip_stale_after_expiry | Expiry does not allow a superseded announcement back |
-| 14 | gossip_lost_withdrawal | Periodic gossip repairs a lost link-down announcement |
+| 14 | gossip_lost_withdrawal | Lost withdrawals cannot preserve stale directed edges |
 | 15 | endpoint_fanout | Working endpoint after 32 unreachable candidates |
 | 16 | packet_id_poison | Unauthenticated maximum ID cannot poison the receive window |
 | 17 | packet_binding | Reflection and cross-peer ciphertext injection |
 | 18 | packet_replay_endpoint | Replay rejection across physical endpoints |
 | 19 | quic_noise | SSH and QUIC survive a bounded stream of invalid UDP packets |
 | 20 | route_limit | Full-size data at 16 hops; no route at 17 hops |
+
+The endpoint graph refactor also checks two source IPs sharing one destination,
+SSH migration after a UDP port change, and third-party graph batches with
+independent pair updates and expiry across relays.

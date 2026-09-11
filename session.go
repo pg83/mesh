@@ -6,8 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"io"
-	"net"
-	"time"
 
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/curve25519"
@@ -15,18 +13,11 @@ import (
 )
 
 type Session struct {
-	local    uint16
-	peer     uint16
-	send     cipher.AEAD
-	recv     cipher.AEAD
-	window   Window
-	observed *net.UDPAddr
-	endpoint *net.UDPAddr
-	received map[string]time.Time
-	seen     []string
-	seenAt   time.Time
-	created  time.Time
-	lastRecv time.Time
+	local  uint16
+	peer   uint16
+	send   cipher.AEAD
+	recv   cipher.AEAD
+	window Window
 }
 
 func sessionCipher(shared, sender, receiver []byte) cipher.AEAD {
@@ -45,11 +36,10 @@ func newSession(local, peer *Peer, private []byte) *Session {
 	shared := throw2(curve25519.X25519(private, peer.pub))
 
 	return &Session{
-		local:    local.index,
-		peer:     peer.index,
-		send:     sessionCipher(shared, local.pub, peer.pub),
-		recv:     sessionCipher(shared, peer.pub, local.pub),
-		received: map[string]time.Time{},
+		local: local.index,
+		peer:  peer.index,
+		send:  sessionCipher(shared, local.pub, peer.pub),
+		recv:  sessionCipher(shared, peer.pub, local.pub),
 	}
 }
 
@@ -57,6 +47,11 @@ func (s *Session) seal(inner []byte, id uint64) []byte {
 	out := make([]byte, headerTransport, headerTransport+len(inner)+s.send.Overhead())
 
 	out[0] = packetTransport
+
+	if len(inner) > 0 && inner[0] == innerAd {
+		out[0] = packetGossip
+	}
+
 	binary.LittleEndian.PutUint16(out[1:], s.local)
 	binary.LittleEndian.PutUint64(out[3:], id)
 	throw2(rand.Read(out[11:headerTransport]))

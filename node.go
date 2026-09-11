@@ -7,10 +7,11 @@ import (
 	"net"
 	"os"
 	"os/signal"
-	"slices"
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/net/ipv4"
 )
 
 const (
@@ -19,21 +20,24 @@ const (
 )
 
 type Node struct {
-	cfg      *Config
-	reg      *Registry
-	key      DHKey
-	conn     *net.UDPConn
-	tun      *Tun
-	log      *slog.Logger
-	mu       sync.Mutex
-	sessions map[uint16]*Session
-	peers    map[uint16]*Session
-	packetID uint64
-	sig      ed25519.PrivateKey
-	ads      map[uint16]*Known
-	adIDs    map[uint16]uint64
-	routes   map[uint16][]uint16
-	subnet   *net.IPNet
+	cfg        *Config
+	reg        *Registry
+	key        DHKey
+	conn       *ipv4.PacketConn
+	tun        *Tun
+	log        *slog.Logger
+	mu         sync.Mutex
+	peers      map[uint16]*Session
+	packetID   uint64
+	sig        ed25519.PrivateKey
+	graph      map[Edge]*Record
+	owned      map[Edge]bool
+	observed   map[Edge]time.Time
+	local      map[Endpoint]int
+	discovered map[uint16]map[Endpoint]time.Time
+	owners     map[Endpoint]uint16
+	routes     map[Endpoint][]Edge
+	subnet     *net.IPNet
 }
 
 func newNode(cfg *Config, log *slog.Logger) *Node {
@@ -47,16 +51,10 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	dh, sig := deriveKeys(decodeKey(cfg.Key))
 
 	n := &Node{
-		cfg:      cfg,
-		reg:      reg,
-		key:      dh,
-		sig:      sig,
-		log:      log,
-		ads:      map[uint16]*Known{},
-		adIDs:    map[uint16]uint64{},
-		routes:   map[uint16][]uint16{},
-		sessions: map[uint16]*Session{},
-		peers:    map[uint16]*Session{},
+		cfg: cfg, reg: reg, key: dh, sig: sig, log: log,
+		graph: map[Edge]*Record{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
+		discovered: map[uint16]map[Endpoint]time.Time{}, owners: map[Endpoint]uint16{},
+		routes: map[Endpoint][]Edge{}, peers: map[uint16]*Session{},
 		packetID: uint64(time.Now().UnixNano()),
 	}
 
@@ -71,13 +69,15 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	for index, peer := range reg.byIndex {
 		if index != cfg.Index {
 			n.peers[index] = newSession(me, peer, dh.private)
+			n.discovered[index] = map[Endpoint]time.Time{}
 		}
 	}
 
 	_, n.subnet = throw3(net.ParseCIDR(cfg.Subnet))
-
-	n.conn = throw2(net.ListenUDP("udp", &net.UDPAddr{Port: cfg.Port}))
+	n.conn = ipv4.NewPacketConn(throw2(net.ListenUDP("udp4", &net.UDPAddr{Port: cfg.Port})))
+	throw(n.conn.SetControlMessage(ipv4.FlagDst, true))
 	n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
+	n.refresh(time.Now())
 
 	return n
 }
@@ -107,50 +107,42 @@ func (n *Node) loop(name string, body func()) {
 	})
 }
 
-func (n *Node) send(packet []byte, addr *net.UDPAddr) {
-	n.conn.WriteToUDP(packet, addr)
-}
+func (n *Node) send(packet []byte, edge Edge) {
+	iface := n.local[edge.From]
 
-func (n *Node) install(s *Session) {
-	n.sessions[s.peer] = s
-	s.created = s.lastRecv
-	n.log.Info("link up", "peer", s.peer, "endpoint", s.endpoint)
+	if iface == 0 {
+		return
+	}
 
-	n.recompute()
-	n.syncTo(s.peer)
-	n.publish(time.Now())
-}
-
-func (n *Node) remove(s *Session, why string) {
-	delete(n.sessions, s.peer)
-	n.log.Info("link down", "peer", s.peer, "why", why)
-
-	n.recompute()
-	n.publish(time.Now())
+	n.conn.WriteTo(packet, &ipv4.ControlMessage{Src: edge.From.ip(), IfIndex: iface}, edge.To.addr())
 }
 
 func (n *Node) recvLoop() {
 	buf := make([]byte, maxPacket)
 
 	for {
-		size, addr := throw3(n.conn.ReadFromUDP(buf))
-		packet := buf[:size]
+		size, control, addr, err := n.conn.ReadFrom(buf)
 
-		if size == 0 {
+		throw(err)
+
+		if size == 0 || control == nil || control.Dst == nil {
 			continue
 		}
 
+		remote := addr.(*net.UDPAddr)
+		edge := Edge{From: endpoint(remote.IP, remote.Port), To: endpoint(control.Dst, n.cfg.Port)}
+
 		n.mu.Lock()
 
-		if packet[0] == packetTransport {
-			n.handleTransport(packet, addr)
+		if buf[0] == packetTransport || buf[0] == packetGossip {
+			n.handleTransport(buf[:size], edge)
 		}
 
 		n.mu.Unlock()
 	}
 }
 
-func (n *Node) handleTransport(packet []byte, addr *net.UDPAddr) {
+func (n *Node) handleTransport(packet []byte, edge Edge) {
 	if len(packet) < headerTransport {
 		return
 	}
@@ -167,20 +159,17 @@ func (n *Node) handleTransport(packet []byte, addr *net.UDPAddr) {
 		return
 	}
 
-	if binary.LittleEndian.Uint64(packet[3:]) == s.window.top {
-		changed := s.observed == nil || s.observed.String() != addr.String()
+	now := time.Now()
+	_, exists := n.observed[edge]
 
-		s.observed = addr
+	n.observed[edge] = now
+	n.discovered[s.peer][edge.From] = now
 
-		if changed {
-			n.chooseEndpoint(s)
-		}
-	}
-
-	s.lastRecv = time.Now()
-
-	if n.sessions[s.peer] != s {
-		n.install(s)
+	if !exists {
+		n.owned[edge] = true
+		n.record(edge, true, now)
+		n.recompute(now)
+		n.log.Info("link up", "from", edge.From.string(), "to", edge.To.string())
 	}
 
 	if len(inner) == 0 {
@@ -189,21 +178,25 @@ func (n *Node) handleTransport(packet []byte, addr *net.UDPAddr) {
 
 	switch inner[0] {
 	case innerData:
-		n.handleData(inner)
+		n.handleData(inner, edge)
 	case innerAd:
-		n.handleAd(inner, s.peer, binary.LittleEndian.Uint64(packet[3:]) == s.window.top)
+		n.handleAd(inner, s.peer)
 	}
 }
 
-func (n *Node) handleData(inner []byte) {
+func (n *Node) handleData(inner []byte, received Edge) {
 	d, ok := decodeData(inner)
 
-	if !ok || d.path[d.cursor] != n.cfg.Index {
+	if !ok || d.path[d.cursor] != received {
 		return
 	}
 
 	if d.cursor == len(d.path)-1 {
 		if !validIPv4(d.ip) {
+			return
+		}
+
+		if endpoint(net.IP(d.ip[16:20]), 0) != n.reg.byIndex[n.cfg.Index].endpoint() {
 			return
 		}
 
@@ -217,46 +210,14 @@ func (n *Node) handleData(inner []byte) {
 	n.forward(d.path[d.cursor], inner)
 }
 
-func (n *Node) forward(peer uint16, inner []byte) {
-	s := n.peers[peer]
+func (n *Node) forward(edge Edge, inner []byte) {
+	s := n.peers[n.owners[edge.To]]
 
-	if s == nil || s.endpoint == nil {
+	if s == nil {
 		return
 	}
 
-	n.send(s.seal(inner, n.nextPacketID()), s.endpoint)
-}
-
-func (n *Node) chooseEndpoint(s *Session) {
-	if s.observed == nil {
-		return
-	}
-
-	if time.Since(s.seenAt) < sessionTimeout {
-		seen := s.seen
-
-		if slices.Contains(seen, s.observed.String()) {
-			s.endpoint = s.observed
-
-			return
-		}
-
-		if s.endpoint != nil && slices.Contains(seen, s.endpoint.String()) {
-			return
-		}
-
-		if len(seen) > 0 {
-			for _, addr := range n.candidates(n.reg.byIndex[s.peer]) {
-				if slices.Contains(seen, addr.String()) {
-					s.endpoint = addr
-
-					return
-				}
-			}
-		}
-	}
-
-	s.endpoint = s.observed
+	n.send(s.seal(inner, n.nextPacketID()), edge)
 }
 
 func (n *Node) tunLoop() {
@@ -265,81 +226,38 @@ func (n *Node) tunLoop() {
 	for {
 		ip := n.tun.read(buf)
 
-		if len(ip) < 20 || ip[0]>>4 != 4 {
+		if !validIPv4(ip) {
 			continue
 		}
 
-		peer := n.reg.byIntip[[4]byte(ip[16:20])]
-
-		if peer == nil || peer.index == n.cfg.Index {
-			continue
-		}
+		dst := endpoint(net.IP(ip[16:20]), 0)
 
 		n.mu.Lock()
 
-		if path := n.route(peer.index); path != nil {
-			n.forward(path[0], encodeData(&Data{src: n.cfg.Index, path: path, ip: ip}))
+		if path := n.routes[dst]; len(path) != 0 {
+			n.forward(path[0], encodeData(&Data{path: path, ip: ip}))
 		}
 
 		n.mu.Unlock()
 	}
-}
-
-func (n *Node) route(dst uint16) []uint16 {
-	return n.routes[dst]
 }
 
 func (n *Node) timerLoop() {
 	for now := range time.Tick(tickInterval) {
 		n.mu.Lock()
-		n.tick(now)
+		n.refresh(now)
+
+		for _, endpoints := range n.discovered {
+			for ep, received := range endpoints {
+				if now.Sub(received) > adTimeout {
+					delete(endpoints, ep)
+				}
+			}
+		}
+
+		n.publish(now)
 		n.mu.Unlock()
 	}
-}
-
-func (n *Node) tick(now time.Time) {
-	for _, s := range n.sessions {
-		if now.Sub(s.lastRecv) >= sessionTimeout {
-			n.remove(s, "timeout")
-		}
-	}
-
-	n.expire(now)
-
-	for _, peer := range n.peers {
-		n.chooseEndpoint(peer)
-	}
-
-	n.publish(now)
-}
-
-func (n *Node) candidates(peer *Peer) []*net.UDPAddr {
-	addrs := slices.Clone(peer.static)
-	texts := []string{}
-
-	if known := n.ads[peer.index]; known != nil {
-		texts = append(texts, known.ad.Addrs...)
-	}
-
-	if addr := n.peers[peer.index].observed; addr != nil {
-		texts = append(texts, addr.String())
-	}
-
-	for _, text := range texts {
-		addr, err := net.ResolveUDPAddr("udp", text)
-
-		if err != nil || n.subnet.Contains(addr.IP) {
-			continue
-		}
-
-		same := func(a *net.UDPAddr) bool { return a.String() == addr.String() }
-
-		if !slices.ContainsFunc(addrs, same) {
-			addrs = append(addrs, addr)
-		}
-	}
-
-	return addrs
 }
 
 func (n *Node) nextPacketID() uint64 {

@@ -13,13 +13,12 @@ def test():
         stream = workload.SshServer(lab, 'b').stream('a')
         lab.set_address('b', 1, '10.1.0.99')
         stream.progress()
-        lab.wait(lambda: lab.status('a')['links'][0]['endpoint'] == '10.1.0.99:7000', 'endpoint roaming')
+        lab.wait(lambda: lab.selected_endpoint('a', 'b') == '10.1.0.99:7000', 'endpoint roaming')
         lab.unblock('a', 'b', seg=2)
         lab.block('a', 'b', seg=1)
         before = stream.replies
         def second_endpoint():
-            links = lab.status('a')['links']
-            return bool(links) and links[0]['endpoint'] == '10.2.0.2:7000'
+            return lab.selected_endpoint('a', 'b') == '10.2.0.2:7000'
         lab.wait(second_endpoint, 'second endpoint', timeout=40)
         stream.progress(after=before + 2)
         assert lab.traffic('a', 'b', seg=2) > 0

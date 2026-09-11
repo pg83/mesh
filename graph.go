@@ -1,42 +1,65 @@
 package main
 
-import "slices"
+import (
+	"slices"
+	"time"
+)
 
-func (n *Node) advertisedNeighbors(index uint16) []uint16 {
-	if index == n.cfg.Index {
-		return n.neighbors()
-	}
-
-	if known := n.ads[index]; known != nil {
-		return known.ad.Neighbors
-	}
-
-	return nil
+type Update struct {
+	Edge
+	ID    uint64 `json:"id"`
+	Alive bool   `json:"alive"`
+	TTL   uint32 `json:"ttl"`
 }
 
-func (n *Node) edges(index uint16) []uint16 {
-	peers := []uint16{}
+type Record struct {
+	Update
+	expires time.Time
+}
 
-	for _, peer := range n.advertisedNeighbors(index) {
-		if slices.Contains(n.advertisedNeighbors(peer), index) {
-			peers = append(peers, peer)
+func (r *Record) alive(now time.Time) bool {
+	return r.Alive && now.Before(r.expires)
+}
+
+func (n *Node) record(edge Edge, alive bool, now time.Time) {
+	n.graph[edge] = &Record{Update: Update{Edge: edge, ID: n.nextPacketID(), Alive: alive}, expires: now.Add(adTimeout)}
+}
+
+func (n *Node) recompute(now time.Time) {
+	adjacency := map[Endpoint][]Endpoint{}
+	owners := map[Endpoint]uint16{}
+
+	for index, peer := range n.reg.byIndex {
+		owners[peer.endpoint()] = index
+	}
+
+	for edge, record := range n.graph {
+		if !record.alive(now) {
+			continue
+		}
+
+		adjacency[edge.From] = append(adjacency[edge.From], edge.To)
+
+		if index := owners[edge.From]; edge.From.Port == 0 && index != 0 && edge.To.Port != 0 {
+			owners[edge.To] = index
 		}
 	}
 
-	return peers
-}
+	for _, neighbors := range adjacency {
+		slices.SortFunc(neighbors, compareEndpoint)
+	}
 
-func (n *Node) recompute() {
-	prev := map[uint16]uint16{}
-	seen := map[uint16]bool{n.cfg.Index: true}
-	queue := []uint16{n.cfg.Index}
+	source := n.reg.byIndex[n.cfg.Index].endpoint()
+	prev := map[Endpoint]Endpoint{}
+	seen := map[Endpoint]bool{source: true}
+	queue := []Endpoint{source}
 
 	for len(queue) > 0 {
 		cur := queue[0]
 
 		queue = queue[1:]
 
-		for _, next := range n.edges(cur) {
+		for _, next := range adjacency[cur] {
 			if seen[next] {
 				continue
 			}
@@ -47,33 +70,27 @@ func (n *Node) recompute() {
 		}
 	}
 
-	routes := make(map[uint16][]uint16, len(seen))
+	routes := map[Endpoint][]Edge{}
 
 	for dst := range seen {
-		if path := walkBack(prev, n.cfg.Index, dst); path != nil {
-			routes[dst] = path
+		path := []Edge{}
+
+		for cur := dst; cur != source; cur = prev[cur] {
+			from := prev[cur]
+
+			if owners[from] != owners[cur] {
+				path = append(path, Edge{From: from, To: cur})
+			}
 		}
+
+		if len(path) == 0 || len(path) > maxHops {
+			continue
+		}
+
+		slices.Reverse(path)
+		routes[dst] = path
 	}
 
+	n.owners = owners
 	n.routes = routes
-}
-
-func walkBack(prev map[uint16]uint16, src, dst uint16) []uint16 {
-	path := []uint16{}
-
-	for cur := dst; cur != src; cur = prev[cur] {
-		path = append(path, cur)
-
-		if len(path) > maxHops {
-			return nil
-		}
-	}
-
-	if len(path) == 0 {
-		return nil
-	}
-
-	slices.Reverse(path)
-
-	return path
 }

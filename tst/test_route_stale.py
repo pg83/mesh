@@ -10,7 +10,7 @@ def test():
         lab.wait_route('b', 'a', ['r1', 'a'])
         log = workload.udp_server(lab, 'b')
         udp = workload.UdpClient(lab, 'a', 'b')
-        ads = lab.intercept('r1', 'a', 'hold', kind=3, min_size=116, max_size=899, count=2)
+        ads = lab.intercept('r1', 'a', 'hold', kind=4, count=2)
         lab.wait(lambda: ads['hits'] == 2, 'old route advertisements held')
         data = lab.intercept('a', 'r1', 'hold', kind=3, min_size=900)
         old = b'obsolete-route'.ljust(900, b'.')

@@ -11,7 +11,7 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-const protocol = "mesh/4"
+const protocol = "mesh/5"
 
 type DHKey struct {
 	private []byte

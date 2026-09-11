@@ -51,6 +51,18 @@ def intip(index):
     return f"10.77.0.{index}"
 
 
+def endpoint(address, port=PORT):
+    return dict(ip=int.from_bytes(socket.inet_aton(address), 'little'), port=port)
+
+
+def endpoint_address(ep):
+    return socket.inet_ntoa(ep['ip'].to_bytes(4, 'little'))
+
+
+def edge(source, target, ident, alive=True, ttl=5000):
+    return dict(**{'from': source, 'to': target}, id=ident, alive=alive, ttl=ttl)
+
+
 def segaddr(seg, index):
     return f"10.{seg}.0.{index}"
 
@@ -158,10 +170,10 @@ class Lab:
                 self.blocked.discard((dst, src, seg))
 
     def intercept(self, src, dst, action, count=1, kind=None, seg=None,
-                  min_size=0, max_size=None, every=1, delay=0, rate=None):
+                  min_size=0, max_size=None, every=1, delay=0, rate=None, source_ip=None, target_ip=None):
         rule = dict(src=src, dst=dst, action=action, count=count, kind=kind,
                     seg=seg, min_size=min_size, max_size=max_size, every=every, delay=delay,
-                    rate=rate, next=0, seen=0, hits=0, held=[])
+                    rate=rate, source_ip=source_ip, target_ip=target_ip, next=0, seen=0, hits=0, held=[])
         with self.lock:
             self.rules.append(rule)
         return rule
@@ -236,6 +248,8 @@ class Lab:
                         payload = packet[head + 8:] if packet[9] == 17 else b''
                         for rule in self.rules:
                             if (rule['src'] != src.name or rule['dst'] != dst.name
+                                    or (rule['source_ip'] is not None and packet[12:16] != socket.inet_aton(rule['source_ip']))
+                                    or (rule['target_ip'] is not None and packet[16:20] != socket.inet_aton(rule['target_ip']))
                                     or rule['count'] == 0
                                     or rule['seg'] not in (None, seg)
                                     or len(payload) < rule['min_size']
@@ -485,7 +499,9 @@ class Lab:
         return json.loads(r.stdout)
 
     def links(self, name):
-        return {link["peer"] for link in self.status(name)["links"]}
+        by_address = {address:node.index for node in self.nodes.values() for address in node.addresses.values()}
+        return {by_address[endpoint_address(link['from'])] for link in self.status(name)['links']
+                if endpoint_address(link['from']) in by_address}
 
     def wait_links(self, name, peers, timeout=15):
         want = {self.nodes[p].index for p in peers}
@@ -516,9 +532,20 @@ class Lab:
 
     def route(self, src, dst):
         """The hop list src currently uses towards dst, node names."""
-        by_index = {node.index: name for name, node in self.nodes.items()}
-        path = self.status(src)["routes"].get(str(self.nodes[dst].index))
-        return [by_index[hop] for hop in path] if path else None
+        by_address = {address:name for name,node in self.nodes.items() for address in node.addresses.values()}
+        path = self.endpoint_route(src, dst)
+        return [by_address[endpoint_address(hop['to'])] for hop in path] if path else None
+
+    def endpoint_route(self, src, dst):
+        return self.status(src)['routes'].get(intip(self.nodes[dst].index) + ':0')
+
+    def selected_endpoint(self, src, dst):
+        path = self.endpoint_route(src, dst)
+        return endpoint_address(path[0]['to']) + ':' + str(path[0]['to']['port']) if path else None
+
+    def known_nodes(self, name):
+        vertices = self.status(name)['vertices']
+        return sorted(node.index for node in self.nodes.values() if endpoint(intip(node.index), 0) in vertices)
 
     def wait_route(self, src, dst, hops, timeout=30):
         deadline = time.time() + timeout
@@ -536,12 +563,12 @@ class Lab:
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
-                if self.status(name)["nodes"] == want:
+                if self.known_nodes(name) == want:
                     return
             except (OSError, json.JSONDecodeError):
                 pass
             time.sleep(0.2)
-        raise AssertionError(f"{name}: knows {self.status(name)['nodes']}, want {want}")
+        raise AssertionError(f"{name}: knows {self.known_nodes(name)}, want {want}")
 
 
 def main(test):

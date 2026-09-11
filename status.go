@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -14,50 +13,56 @@ import (
 const sockPathMax = 108
 
 type LinkStatus struct {
-	Peer     uint16 `json:"peer"`
-	Endpoint string `json:"endpoint"`
-	Age      int    `json:"age"`
-	Idle     int    `json:"idle"`
+	Edge
+	Idle int `json:"idle"`
 }
 
 type Status struct {
-	Index  uint16              `json:"index"`
-	Links  []LinkStatus        `json:"links"`
-	Nodes  []uint16            `json:"nodes"`
-	Routes map[string][]uint16 `json:"routes"`
+	Index    uint16            `json:"index"`
+	Links    []LinkStatus      `json:"links"`
+	Graph    []Update          `json:"graph"`
+	Vertices []Endpoint        `json:"vertices"`
+	Routes   map[string][]Edge `json:"routes"`
 }
 
 func (n *Node) status() *Status {
 	now := time.Now()
-
-	st := &Status{
-		Index:  n.cfg.Index,
-		Links:  []LinkStatus{},
-		Nodes:  []uint16{},
-		Routes: map[string][]uint16{},
-	}
+	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Update{}, Vertices: []Endpoint{}, Routes: map[string][]Edge{}}
 
 	n.mu.Lock()
 
 	defer n.mu.Unlock()
 
-	for _, s := range n.sessions {
-		st.Links = append(st.Links, LinkStatus{
-			Peer:     s.peer,
-			Endpoint: s.endpoint.String(),
-			Age:      int(now.Sub(s.created).Seconds()),
-			Idle:     int(now.Sub(s.lastRecv).Seconds()),
-		})
+	for edge, received := range n.observed {
+		st.Links = append(st.Links, LinkStatus{Edge: edge, Idle: int(now.Sub(received).Seconds())})
 	}
 
-	for index := range n.ads {
-		st.Nodes = append(st.Nodes, index)
+	vertices := map[Endpoint]bool{}
+
+	for edge, record := range n.graph {
+		if !record.alive(now) {
+			continue
+		}
+
+		update := record.Update
+
+		update.TTL = uint32(record.expires.Sub(now) / time.Millisecond)
+		st.Graph = append(st.Graph, update)
+
+		vertices[edge.From] = true
+		vertices[edge.To] = true
 	}
 
-	slices.Sort(st.Nodes)
+	for ep := range vertices {
+		st.Vertices = append(st.Vertices, ep)
+	}
+
+	slices.SortFunc(st.Vertices, compareEndpoint)
+	slices.SortFunc(st.Graph, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
+	slices.SortFunc(st.Links, func(a, b LinkStatus) int { return compareEdge(a.Edge, b.Edge) })
 
 	for dst, path := range n.routes {
-		st.Routes[strconv.Itoa(int(dst))] = path
+		st.Routes[dst.string()] = path
 	}
 
 	return st

@@ -7,7 +7,10 @@ def test():
     names = ['a', 'r1', 'r4', 'r2', 'r3', 'b']
     segments = {1: ['a', 'r1'], 2: ['r1', 'r2'], 3: ['r2', 'b'],
                 4: ['a', 'r3'], 5: ['r3', 'r4'], 6: ['r4', 'b']}
-    with lib.Lab(names, segments) as lab:
+    lab = lib.Lab(names, segments)
+    for src, dst in [('r1', 'a'), ('r2', 'r1'), ('b', 'r2'), ('r3', 'r4'), ('r4', 'b'), ('a', 'r3')]:
+        lab.block(src, dst, both=False)
+    with lab:
         lab.wait_route('a', 'b', ['r1', 'r2', 'b'])
         lab.wait_route('b', 'a', ['r4', 'r3', 'a'])
         stream = workload.SshServer(lab, 'b').stream('a')

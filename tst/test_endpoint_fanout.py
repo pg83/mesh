@@ -15,8 +15,8 @@ def test():
     with ManyEndpoints(['a', 'b'], {1: ['a', 'b']}, statics=['b']) as lab:
         lab.wait_ping('a', 'b', timeout=4)
         stream = workload.SshServer(lab, 'b').stream('a')
-        probes = lab.intercept('b', 'a', 'observe', kind=3, min_size=600, max_size=2000, count=-1)
-        # The large advertisement includes the bad static endpoints too.
+        probes = lab.intercept('b', 'a', 'observe', kind=4, count=-1)
+        # The working endpoint continues receiving periodic graph updates.
         for _ in range(4):
             time.sleep(1)
             stream.progress(timeout=5)

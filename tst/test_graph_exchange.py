@@ -1,0 +1,37 @@
+"""Gossip merges arbitrary endpoint pairs and relays preserve their versions and expiry."""
+import time
+import lib
+import workload
+
+
+def test():
+    with lib.Lab(['a', 'r', 'c'], {1: ['a', 'r', 'c']}) as lab:
+        lab.wait_ping('a', 'c')
+        probe = workload.Probe(lab, 'r', 'a')
+        x = lib.endpoint('192.0.2.1', 8000)
+        y = lib.endpoint('192.0.2.1', 8001)
+        z = lib.endpoint('192.0.2.2', 8000)
+        ident = time.time_ns()
+        xy = lib.edge(x, y, ident, ttl=2000)
+        yz = lib.edge(y, z, ident, ttl=5000)
+        def present(name, src, dst):
+            return any(e['from'] == src and e['to'] == dst for e in lab.status(name)['graph'])
+        probe.send(op='ad', body=dict(index=2, edges=[xy, yz]))
+        lab.wait(lambda: present('c', x, y) and present('c', y, z), 'third-party graph reaches another peer')
+        assert not present('a', y, x), 'reverse edge was invented'
+        assert x != y, 'ports distinguish graph vertices'
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            # Same old pair inside freshly signed gossip from a different member.
+            probe.send(op='ad', body=dict(index=3, edges=[xy]), key=lab.nodes['c'].keys['key'])
+            time.sleep(.2)
+        assert not present('a', x, y), 'relay refreshed an old record'
+        assert not present('c', x, y), 'forwarding cycle refreshed an old record'
+        assert present('a', y, z), 'an omitted pair was removed'
+        probe.send(op='ad', body=dict(index=2, edges=[dict(yz, id=ident+1, alive=False)]))
+        lab.wait(lambda: not present('c', y, z), 'explicit pair withdrawal propagates')
+        lab.wait_ping('a', 'c')
+        probe.finish()
+
+
+lib.main(test)

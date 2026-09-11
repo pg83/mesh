@@ -4,6 +4,7 @@ import "encoding/binary"
 
 const (
 	packetTransport = 3
+	packetGossip    = 4
 	innerData       = 1
 	innerAd         = 2
 	nonceSize       = 24
@@ -13,61 +14,59 @@ const (
 )
 
 type Data struct {
-	src    uint16
-	path   []uint16
+	path   []Edge
 	cursor int
 	ip     []byte
 }
 
+func appendEndpoint(out []byte, ep Endpoint) []byte {
+	out = binary.LittleEndian.AppendUint32(out, ep.IP)
+
+	return binary.LittleEndian.AppendUint16(out, ep.Port)
+}
+
+func readEndpoint(packet []byte) Endpoint {
+	return Endpoint{IP: binary.LittleEndian.Uint32(packet), Port: binary.LittleEndian.Uint16(packet[4:])}
+}
+
 func encodeData(d *Data) []byte {
-	out := make([]byte, 0, 1+2+1+2*len(d.path)+1+len(d.ip))
+	out := make([]byte, 0, 3+12*len(d.path)+len(d.ip))
 
-	out = append(out, innerData)
-	out = binary.LittleEndian.AppendUint16(out, d.src)
-	out = append(out, byte(len(d.path)))
+	out = append(out, innerData, byte(len(d.path)), byte(d.cursor))
 
-	for _, hop := range d.path {
-		out = binary.LittleEndian.AppendUint16(out, hop)
+	for _, edge := range d.path {
+		out = appendEndpoint(out, edge.From)
+		out = appendEndpoint(out, edge.To)
 	}
 
-	out = append(out, byte(d.cursor))
-	out = append(out, d.ip...)
-
-	return out
+	return append(out, d.ip...)
 }
 
 func decodeData(inner []byte) (*Data, bool) {
-	if len(inner) < 4 {
+	if len(inner) < 3 {
 		return nil, false
 	}
 
-	hops := int(inner[3])
-	head := 4 + 2*hops + 1
+	hops := int(inner[1])
+	head := 3 + 12*hops
 
-	if hops == 0 || hops > maxHops || len(inner) < head {
+	if hops == 0 || hops > maxHops || len(inner) < head || int(inner[2]) >= hops {
 		return nil, false
 	}
 
-	d := &Data{
-		src:    binary.LittleEndian.Uint16(inner[1:3]),
-		path:   make([]uint16, hops),
-		cursor: int(inner[head-1]),
-		ip:     inner[head:],
-	}
+	d := &Data{path: make([]Edge, hops), cursor: int(inner[2]), ip: inner[head:]}
 
 	for i := range d.path {
-		d.path[i] = binary.LittleEndian.Uint16(inner[4+2*i:])
-	}
+		start := 3 + 12*i
 
-	if d.cursor >= hops {
-		return nil, false
+		d.path[i] = Edge{From: readEndpoint(inner[start:]), To: readEndpoint(inner[start+6:])}
 	}
 
 	return d, true
 }
 
 func advanceCursor(inner []byte, cursor int) {
-	inner[4+2*int(inner[3])] = byte(cursor)
+	inner[2] = byte(cursor)
 }
 
 func validIPv4(packet []byte) bool {

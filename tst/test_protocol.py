@@ -1,21 +1,16 @@
-"""A test-only authenticated peer exercises malformed inner packets and gossip."""
-
+"""Authenticated malformed packets and independent directed graph record merging."""
 import json
 import os
 import select
 import struct
 import subprocess
 import time
-from pathlib import Path
-
 import lib
 
 
 def test():
-    lab = lib.Lab(['a', 'b', 'c'], {1: ['a', 'b', 'c']})
-    with lab:
-        lab.wait_links('b', ['a', 'c'])
-        lab.wait_links('c', ['a', 'b'])
+    with lib.Lab(['a', 'b', 'c'], {1: ['a', 'b', 'c']}) as lab:
+        lab.wait_ping('b', 'c')
         lab.stop_node('a')
         probe = lab.spawn('a', [os.environ['MESH_TEST_PROBE'], lab.dir / 'a.json', '10.1.0.2:7000', '2'],
                           'protocol-probe', stdin=subprocess.PIPE, stdout=subprocess.PIPE)
@@ -30,39 +25,39 @@ def test():
         def inner(data):
             send('inner', hex=data.hex())
         def data(path, cursor=0, payload=b''):
-            return b'\x01\x01\x00' + bytes([len(path)]) + b''.join(struct.pack('<H', p) for p in path) + bytes([cursor]) + payload
-        for packet in [b'', b'\xff', b'\x01', b'\x01\1\0\0', b'\x01\1\0\x11',
-                       data([2], cursor=1), data([3]), data([2, 99]), b'\x02', b'\x02\xff\xff', b'\x02' + b'\0' * 66 + b'{']:
+            return bytes([1, len(path), cursor]) + b''.join(struct.pack('<IH', ep['ip'], ep['port'])
+                     for edge in path for ep in edge) + payload
+        a, b, c = [lib.endpoint(f'10.1.0.{i}') for i in (1, 2, 3)]
+        for packet in [b'', b'\xff', b'\x01', b'\x01\0\0', b'\x01\x11\0',
+                       data([(a,b)], cursor=1), data([(a,c)]), data([(a,b),(b,lib.endpoint('10.1.0.99'))]),
+                       b'\x02', b'\x02' + b'\0' * 64 + b'{']:
             inner(packet)
         send('short-transport')
-        now = time.time_ns() + 1_000_000_000
-        body = dict(index=1, ts=now, addrs=['invalid', '10.77.0.1:7000'], neighbors=[])
+        ident = time.time_ns() + 1_000_000_000
+        mesh_a = lib.endpoint(lib.intip(1), 0)
+        records = [lib.edge(mesh_a, a, ident), lib.edge(a, mesh_a, ident), lib.edge(b, a, ident)]
+        body = dict(index=1, edges=records)
         send('ad', body=body)
-        lab.wait(lambda: lab.nodes['a'].index in lab.links('b'), 'probe peer alive')
-        send('ad', body=body)  # same announcement must not flood again
-        send('ad', body=dict(body, index=99, ts=now + 1))
-        send('ad', body=dict(body, index=3, ts=now + 2))  # signature belongs to a, not c
-        # Routing requires both endpoints to advertise the link.
-        send('ad', body=dict(body, ts=now + 3, neighbors=[2]))
-        lab.wait(lambda: lab.status('b')['routes'].get('1') == [1], 'mutual link advertised')
+        lab.wait_route('b', 'a', ['a'])
         send('ad', body=body)
-        # Keep the real b/c application route healthy after all malformed traffic.
-        lab.wait_ping('b', 'c')
-        lab.wait_ping('c', 'b')
-        assert lab.status('b')['routes']['1'] == [1]
-        assert '99' not in lab.status('b')['routes']
-        assert 99 not in lab.status('b')['nodes']
-        # Delivery with a valid route but invalid IP payload must not kill a node.
+        send('ad', body=dict(body, index=99))
+        send('ad', body=dict(body, index=3))
+        # Reject malformed graph entries without discarding independent valid pairs.
+        for change in [dict(id=0), dict(ttl=0), dict(ttl=5001), {'from':lib.endpoint('0.0.0.0')}, {'to':b}]:
+            send('ad', body=dict(index=1, edges=[dict(records[2], **dict(id=ident+1) | change)]))
+        # An update to one pair does not remove another pair omitted from this batch.
+        send('ad', body=dict(index=1, edges=[dict(records[0], id=ident+2)]))
+        assert lab.route('b', 'a') == ['a']
         for ip in (b'bad', b'\x65' + b'\0' * 19, b'\x44' + b'\0' * 19,
                    b'\x4f' + b'\0' * 19, b'\x45' + b'\0' * 19):
-            inner(data([2], payload=ip))
+            inner(data([(a,b)], payload=ip))
+        lab.wait_ping('b', 'c')
         lab.wait_ping('c', 'b')
         probe.stdin.close()
         assert probe.wait(timeout=10) == 0
-        lab.wait_links('b', ['c'], timeout=30)
-        probe_attempt = lab.intercept('b', 'a', 'copy', kind=3, min_size=116, max_size=899)
-        lab.wait(lambda: probe_attempt['hits'] == 1, 'gossip to the expired peer')
-        lab.wait_ping('b', 'c')
+        lab.wait_links('b', ['c'])
+        attempt = lab.intercept('b', 'a', 'copy', kind=4)
+        lab.wait(lambda: attempt['hits'] == 1, 'gossip to expired endpoint')
 
 
 lib.main(test)
