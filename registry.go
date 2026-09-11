@@ -67,12 +67,8 @@ func newRegistry(peers []PeerConfig) *Registry {
 		for _, config := range pc.Endpoint {
 			config.validate()
 
-			if config.Proto == "udp" {
-				addr := config.address()
-
-				if ep := endpoint(addr.IP, addr.Port); ep.IP != 0 {
-					p.addresses = append(p.addresses, ep)
-				}
+			if ep := config.description(); ep.hash() != 0 {
+				p.addresses = append(p.addresses, ep)
 			}
 		}
 

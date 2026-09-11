@@ -32,7 +32,7 @@ jobs:
       - name: Install application test dependencies
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client openssh-server rsync curl iperf3 iproute2 util-linux
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client openssh-server rsync curl iperf3 iproute2 util-linux openssl
           echo /usr/sbin >> "$GITHUB_PATH"
           echo "MESH_TEST_ARTIFACTS=$RUNNER_TEMP/mesh-artifacts" >> "$GITHUB_ENV"
 
@@ -79,7 +79,7 @@ jobs:
       - name: Install application test dependencies
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y gcc openssh-client openssh-server rsync curl iperf3 iproute2 util-linux
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y gcc openssh-client openssh-server rsync curl iperf3 iproute2 util-linux openssl
           echo /usr/sbin >> "$GITHUB_PATH"
           echo "MESH_TEST_ARTIFACTS=$RUNNER_TEMP/mesh-artifacts" >> "$GITHUB_ENV"
 
@@ -116,7 +116,7 @@ jobs:
       - name: Install application test dependencies
         run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client openssh-server rsync curl iperf3 iproute2 util-linux
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-client openssh-server rsync curl iperf3 iproute2 util-linux openssl
           echo /usr/sbin >> "$GITHUB_PATH"
           echo "MESH_TEST_ARTIFACTS=$RUNNER_TEMP/mesh-artifacts" >> "$GITHUB_ENV"
 

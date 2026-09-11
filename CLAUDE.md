@@ -1,6 +1,6 @@
 # mesh
 
-Private overlay network: closed set of nodes with known keys, UDP links,
+Private overlay network: closed set of nodes with known keys, UDP and WS/WSS links,
 gossip map on every node, source routing through any node, IP over TUN.
 
 ## Conventions
@@ -27,7 +27,7 @@ gossip map on every node, source routing through any node, IP over TUN.
   actually reach disk; killing it with SIGKILL loses them.
 - `./lint.sh` before committing style-sensitive changes.
 
-- Application tests require ssh/sshd/ssh-keygen/scp, rsync, curl and iperf3
+- Application tests require ssh/sshd/ssh-keygen/scp, rsync, curl, iperf3 and openssl
   (CI installs these explicitly). Python 3.12+ is needed for os.setns.
 - Test network faults belong in tst/lib.py's switch. No daemon control API.
 - probe.go is a test-only authenticated peer behind the meshprobe build tag;

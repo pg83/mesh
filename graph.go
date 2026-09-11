@@ -2,22 +2,26 @@ package main
 
 import "slices"
 
-type Update struct {
-	Edge
+type State struct {
 	ID    uint64 `json:"id"`
 	Alive bool   `json:"alive"`
 }
 
+type Update struct {
+	Edge
+	State
+}
+
 func (n *Node) record(edge Edge, alive bool) {
-	n.graph[edge] = &Update{Edge: edge, ID: n.nextPacketID(), Alive: alive}
+	n.graph[edge] = State{ID: n.nextPacketID(), Alive: alive}
 }
 
 func (n *Node) recompute() {
-	adjacency := map[Endpoint][]Endpoint{}
-	owners := map[Endpoint]uint16{}
+	adjacency := map[uint64][]uint64{}
+	owners := map[uint64]uint16{}
 
 	for index, peer := range n.reg.byIndex {
-		owners[peer.endpoint()] = index
+		owners[peer.endpoint().hash()] = index
 	}
 
 	for edge, record := range n.graph {
@@ -27,23 +31,23 @@ func (n *Node) recompute() {
 
 		adjacency[edge.From] = append(adjacency[edge.From], edge.To)
 
-		if index := owners[edge.From]; edge.From.Port == 0 && index != 0 && edge.To.Port != 0 {
+		if index := owners[edge.From]; n.addresses[edge.From].Port == 0 && index != 0 && n.addresses[edge.To].Port != 0 {
 			owners[edge.To] = index
 		}
 
-		if index := owners[edge.To]; edge.To.Port == 0 && index != 0 && edge.From.Port != 0 {
+		if index := owners[edge.To]; n.addresses[edge.To].Port == 0 && index != 0 && n.addresses[edge.From].Port != 0 {
 			owners[edge.From] = index
 		}
 	}
 
 	for _, neighbors := range adjacency {
-		slices.SortFunc(neighbors, compareEndpoint)
+		slices.SortFunc(neighbors, func(a, b uint64) int { return compareEndpoint(n.addresses[a], n.addresses[b]) })
 	}
 
-	source := n.reg.byIndex[n.cfg.Index].endpoint()
-	prev := map[Endpoint]Endpoint{}
-	seen := map[Endpoint]bool{source: true}
-	queue := []Endpoint{source}
+	source := n.reg.byIndex[n.cfg.Index].endpoint().hash()
+	prev := map[uint64]uint64{}
+	seen := map[uint64]bool{source: true}
+	queue := []uint64{source}
 
 	for len(queue) > 0 {
 		cur := queue[0]
@@ -61,7 +65,7 @@ func (n *Node) recompute() {
 		}
 	}
 
-	routes := map[Endpoint][]Edge{}
+	routes := map[uint64][]Edge{}
 
 	for dst := range seen {
 		path := []Edge{}

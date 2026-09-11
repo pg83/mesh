@@ -11,8 +11,9 @@ import (
 const gossipBatchSize = 8
 
 type Ad struct {
-	Index uint16   `json:"index"`
-	Edges []Update `json:"edges"`
+	Index     uint16     `json:"index"`
+	Edges     []Update   `json:"edges"`
+	Endpoints []Endpoint `json:"endpoints"`
 }
 
 func encodeAd(blob, sig []byte) []byte {
@@ -21,9 +22,9 @@ func encodeAd(blob, sig []byte) []byte {
 	return append(out, blob...)
 }
 
-func (n *Node) scanLocal() map[Endpoint]*LocalEndpoint {
-	local := map[Endpoint]*LocalEndpoint{}
-	incoming := map[Endpoint]Endpoint{}
+func (n *Node) scanLocal() map[uint64]*LocalEndpoint {
+	local := map[uint64]*LocalEndpoint{}
+	incoming := map[Endpoint]uint64{}
 
 	for _, iface := range throw2(net.Interfaces()) {
 		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 || iface.Name == n.cfg.Tun {
@@ -40,26 +41,37 @@ func (n *Node) scanLocal() map[Endpoint]*LocalEndpoint {
 			for _, config := range n.endpoints {
 				wire := endpoint(ip, int(config.bind.Port))
 
-				if config.bind.IP != 0 && config.bind.IP != wire.IP {
+				if config.bind.Addr != "0.0.0.0" && config.bind.Addr != wire.Addr {
 					continue
 				}
 
 				public := config.public
 
-				if public.IP == 0 {
-					public.IP = wire.IP
+				if public.Addr == "0.0.0.0" {
+					public.Addr = wire.Addr
 				}
 
-				if previous, exists := incoming[wire]; exists && previous != public {
+				if previous, exists := incoming[wire]; public.Proto == "udp" && exists && previous != public.hash() {
 					throwFmt("ambiguous endpoint binding: %s", wire.string())
 				}
 
-				if previous := local[public]; previous != nil && previous.address != wire {
+				if previous := local[public.hash()]; previous != nil && previous.address != wire {
 					throwFmt("ambiguous public endpoint: %s", public.string())
 				}
 
-				incoming[wire] = public
-				local[public] = &LocalEndpoint{socket: n.sockets[wire.Port], address: wire, iface: iface.Index}
+				if public.Proto == "udp" {
+					incoming[wire] = n.remember(public)
+				} else {
+					n.remember(public)
+				}
+
+				binding := &LocalEndpoint{address: wire, iface: iface.Index}
+
+				if public.Proto == "udp" {
+					binding.socket = n.sockets[wire.Port]
+				}
+
+				local[public.hash()] = binding
 			}
 		}
 	}
@@ -73,7 +85,7 @@ func (n *Node) refresh(now time.Time) {
 	n.local = n.scanLocal()
 
 	desired := map[Edge]bool{}
-	me := n.reg.byIndex[n.cfg.Index].endpoint()
+	me := n.reg.byIndex[n.cfg.Index].endpoint().hash()
 
 	for ep := range n.local {
 		desired[Edge{From: me, To: ep}] = true
@@ -83,7 +95,7 @@ func (n *Node) refresh(now time.Time) {
 	for edge, received := range n.observed {
 		if now.Sub(received) >= sessionTimeout {
 			delete(n.observed, edge)
-			n.log.Info("link down", "from", edge.From.string(), "to", edge.To.string())
+			n.log.Info("link down", "from", n.addresses[edge.From].string(), "to", n.addresses[edge.To].string())
 		} else {
 			desired[edge] = true
 		}
@@ -106,24 +118,51 @@ func (n *Node) refresh(now time.Time) {
 func (n *Node) publish() {
 	updates := []Update{}
 
-	for _, record := range n.graph {
-		updates = append(updates, *record)
+	for edge, state := range n.graph {
+		updates = append(updates, Update{Edge: edge, State: state})
 	}
 
 	slices.SortFunc(updates, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
 
-	for start := 0; start < len(updates); start += gossipBatchSize {
-		ad := Ad{Index: n.cfg.Index, Edges: updates[start:min(start+gossipBatchSize, len(updates))]}
-		blob := throw2(json.Marshal(ad))
+	for start := 0; start < len(updates); {
+		end := start
+
+		var blob []byte
+
+		for end < len(updates) && end-start < gossipBatchSize {
+			ad := Ad{Index: n.cfg.Index, Edges: updates[start : end+1]}
+			seen := map[uint64]bool{}
+
+			for _, u := range ad.Edges {
+				for _, id := range []uint64{u.From, u.To} {
+					if !seen[id] {
+						ad.Endpoints = append(ad.Endpoints, n.addresses[id])
+						seen[id] = true
+					}
+				}
+			}
+
+			candidate := throw2(json.Marshal(ad))
+
+			if len(candidate) > 1000 && end > start {
+				break
+			}
+
+			blob = candidate
+			end++
+		}
+
 		inner := encodeAd(blob, ed25519.Sign(n.sig, blob))
 
 		for index, session := range n.peers {
 			for _, dst := range n.candidates(n.reg.byIndex[index]) {
 				for src := range n.local {
-					n.send(session.seal(inner, n.nextPacketID()), Edge{From: src, To: dst})
+					n.send(session.seal(inner, n.nextPacketID()), Edge{From: src, To: dst}, session.peer)
 				}
 			}
 		}
+
+		start = end
 	}
 }
 
@@ -142,33 +181,37 @@ func (n *Node) handleAd(inner []byte) {
 	peer := n.reg.byIndex[ad.Index]
 
 	fresh := slices.ContainsFunc(ad.Edges, func(update Update) bool {
-		previous := n.graph[update.Edge]
+		previous, exists := n.graph[update.Edge]
 
-		return previous == nil || update.ID > previous.ID
+		return !exists || update.ID > previous.ID
 	})
 
 	if peer == nil || !fresh || !ed25519.Verify(peer.sig, blob, sig) {
 		return
 	}
 
+	for _, ep := range ad.Endpoints {
+		n.remember(ep)
+	}
+
 	topologyChanged := false
 
 	for _, update := range ad.Edges {
-		if update.ID == 0 || update.From.IP == 0 || update.To.IP == 0 || update.From == update.To {
+		if update.ID == 0 || n.addresses[update.From].hash() == 0 || n.addresses[update.To].hash() == 0 || update.From == update.To {
 			continue
 		}
 
-		previous := n.graph[update.Edge]
+		previous, exists := n.graph[update.Edge]
 
-		if previous != nil && update.ID <= previous.ID {
+		if exists && update.ID <= previous.ID {
 			continue
 		}
 
-		if previous == nil || previous.Alive != update.Alive {
+		if !exists || previous.Alive != update.Alive {
 			topologyChanged = true
 		}
 
-		n.graph[update.Edge] = &update
+		n.graph[update.Edge] = update.State
 	}
 
 	if topologyChanged {
@@ -176,24 +219,30 @@ func (n *Node) handleAd(inner []byte) {
 	}
 }
 
-func (n *Node) candidates(peer *Peer) []Endpoint {
-	addrs := []Endpoint{}
+func (n *Node) candidates(peer *Peer) []uint64 {
+	addrs := []uint64{}
 
-	addrs = append(addrs, peer.addresses...)
+	for _, ep := range peer.addresses {
+		if id := n.remember(ep); id != 0 {
+			addrs = append(addrs, id)
+		}
+	}
 
-	for ep, index := range n.owners {
+	for id, index := range n.owners {
+		ep := n.addresses[id]
+
 		if index == peer.index && ep.Port != 0 && !n.subnet.Contains(ep.ip()) {
-			addrs = append(addrs, ep)
+			addrs = append(addrs, id)
 		}
 	}
 
-	for ep := range n.discovered[peer.index] {
-		if !n.subnet.Contains(ep.ip()) {
-			addrs = append(addrs, ep)
+	for id := range n.discovered[peer.index] {
+		if !n.subnet.Contains(n.addresses[id].ip()) {
+			addrs = append(addrs, id)
 		}
 	}
 
-	slices.SortFunc(addrs, compareEndpoint)
+	slices.Sort(addrs)
 
 	return slices.Compact(addrs)
 }

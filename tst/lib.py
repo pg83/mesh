@@ -11,6 +11,7 @@ under `unshare -rUn` and spawns one `unshare -n` holder per node.
 import collections
 import fcntl
 import heapq
+import hashlib
 import json
 import os
 import shutil
@@ -52,11 +53,24 @@ def intip(index):
 
 
 def endpoint(address, port=PORT):
-    return dict(ip=int.from_bytes(socket.inet_aton(address), 'little'), port=port)
+    return dict(proto='udp', addr=address, port=port)
 
 
 def endpoint_address(ep):
-    return socket.inet_ntoa(ep['ip'].to_bytes(4, 'little'))
+    return ep['addr']
+
+
+def endpoint_hash(ep):
+    if ep['addr'] in ('', '0.0.0.0'):
+        return 0
+    value = '\0'.join([ep['proto'], ep['addr'].lower(), str(ep['port']), ep.get('path', '')])
+    return int.from_bytes(hashlib.sha256(value.encode()).digest()[:8], 'little')
+
+
+def wire_ad(ad):
+    descriptors = {endpoint_hash(e[k]): e[k] for e in ad['edges'] for k in ('from', 'to')}
+    return dict(ad, endpoints=list(descriptors.values()),
+                edges=[dict(e, **{k: endpoint_hash(e[k]) for k in ('from', 'to')}) for e in ad['edges']])
 
 
 def edge(source, target, ident, alive=True):
@@ -171,11 +185,11 @@ class Lab:
                 self.blocked.discard((dst, src, seg))
 
     def intercept(self, src, dst, action, count=1, kind=None, seg=None,
-                  min_size=0, max_size=None, every=1, delay=0, rate=None, source_ip=None, target_ip=None, source_port=None, target_port=None):
+                  min_size=0, max_size=None, every=1, delay=0, rate=None, source_ip=None, target_ip=None, source_port=None, target_port=None, syn=False):
         rule = dict(src=src, dst=dst, action=action, count=count, kind=kind,
                     seg=seg, min_size=min_size, max_size=max_size, every=every, delay=delay,
                     rate=rate, source_ip=source_ip, target_ip=target_ip,
-                    source_port=source_port, target_port=target_port, next=0, seen=0, hits=0, held=[])
+                    source_port=source_port, target_port=target_port, syn=syn, next=0, seen=0, hits=0, held=[])
         with self.lock:
             self.rules.append(rule)
         return rule
@@ -286,8 +300,9 @@ class Lab:
                             if (rule['src'] != src.name or rule['dst'] != dst.name
                                     or (rule['source_ip'] is not None and packet[12:16] != socket.inet_aton(rule['source_ip']))
                                     or (rule['target_ip'] is not None and packet[16:20] != socket.inet_aton(rule['target_ip']))
-                                    or (rule['source_port'] is not None and (packet[9] != 17 or struct.unpack_from('!H', packet, head)[0] != rule['source_port']))
-                                    or (rule['target_port'] is not None and (packet[9] != 17 or struct.unpack_from('!H', packet, head + 2)[0] != rule['target_port']))
+                                    or (rule['syn'] and (packet[9] != 6 or len(packet) < head+20 or packet[head+13] & 0x12 != 0x02))
+                                    or (rule['source_port'] is not None and (packet[9] not in (6, 17) or struct.unpack_from('!H', packet, head)[0] != rule['source_port']))
+                                    or (rule['target_port'] is not None and (packet[9] not in (6, 17) or struct.unpack_from('!H', packet, head + 2)[0] != rule['target_port']))
                                     or rule['count'] == 0
                                     or rule['seg'] not in (None, seg)
                                     or len(payload) < rule['min_size']
@@ -536,7 +551,15 @@ class Lab:
                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         if r.returncode != 0:
             raise OSError(f"{name}: status failed")
-        return json.loads(r.stdout)
+        status = json.loads(r.stdout)
+        descriptors = status['endpoints']
+        def decode(edge):
+            return dict(edge, **{k: descriptors[str(edge[k])] for k in ('from', 'to')})
+        status['vertices'] = [descriptors[str(i)] for i in status['vertices']]
+        for key in ('links', 'graph'):
+            status[key] = [decode(edge) for edge in status[key]]
+        status['routes'] = {key: [decode(edge) for edge in path] for key, path in status['routes'].items()}
+        return status
 
     def links(self, name):
         by_address = {address:node.index for node in self.nodes.values() for address in node.addresses.values()}

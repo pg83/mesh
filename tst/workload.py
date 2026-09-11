@@ -280,6 +280,8 @@ class Probe:
         return json.loads(self.proc.stdout.readline())
 
     def send(self, **command):
+        if command.get('op') == 'ad':
+            command['body'] = lib.wire_ad(command['body'])
         self.proc.stdin.write(json.dumps(command).encode() + b'\n')
         assert self.read()['sent']
 

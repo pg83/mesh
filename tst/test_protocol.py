@@ -22,13 +22,15 @@ def test():
             return json.loads(probe.stdout.readline())
         assert response()['ready']
         def send(op, **fields):
+            if op == 'ad':
+                fields['body'] = lib.wire_ad(fields['body'])
             probe.stdin.write(json.dumps(dict(op=op, **fields)).encode() + b'\n')
             probe.stdin.flush()
             assert response()['sent']
         def inner(data):
             send('inner', hex=data.hex())
         def data(path, cursor=0, payload=b''):
-            return bytes([1, len(path), cursor]) + b''.join(struct.pack('<IH', ep['ip'], ep['port'])
+            return bytes([1, len(path), cursor]) + b''.join(struct.pack('<Q', lib.endpoint_hash(ep))
                      for edge in path for ep in edge) + payload
         a, b, c = [lib.endpoint(f'10.1.0.{i}') for i in (1, 2, 3)]
         for packet in [b'', b'\xff', b'\x01', b'\x01\0\0', b'\x01\x11\0',

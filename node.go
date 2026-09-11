@@ -31,25 +31,30 @@ type LocalEndpoint struct {
 }
 
 type Node struct {
+	ws         map[Edge]*WSConnection
+	dialing    map[Edge]uint64
+	listeners  map[string]*WSListener
+	tlsCA      map[uint64]string
 	cfg        *Config
 	reg        *Registry
 	key        DHKey
 	sockets    map[uint16]*UDPSocket
 	endpoints  []SocketEndpoint
-	incoming   map[Endpoint]Endpoint
+	incoming   map[Endpoint]uint64
+	addresses  map[uint64]Endpoint
 	tun        *Tun
 	log        *slog.Logger
 	mu         sync.Mutex
 	peers      map[uint16]*Session
 	packetID   uint64
 	sig        ed25519.PrivateKey
-	graph      map[Edge]*Update
+	graph      map[Edge]State
 	owned      map[Edge]bool
 	observed   map[Edge]time.Time
-	local      map[Endpoint]*LocalEndpoint
-	discovered map[uint16]map[Endpoint]time.Time
-	owners     map[Endpoint]uint16
-	routes     map[Endpoint][]Edge
+	local      map[uint64]*LocalEndpoint
+	discovered map[uint16]map[uint64]time.Time
+	owners     map[uint64]uint16
+	routes     map[uint64][]Edge
 	subnet     *net.IPNet
 }
 
@@ -65,10 +70,11 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 
 	n := &Node{
 		cfg: cfg, reg: reg, key: dh, sig: sig, log: log,
-		graph: map[Edge]*Update{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
-		discovered: map[uint16]map[Endpoint]time.Time{}, owners: map[Endpoint]uint16{},
-		routes: map[Endpoint][]Edge{}, peers: map[uint16]*Session{},
-		packetID: uint64(time.Now().UnixNano()),
+		graph: map[Edge]State{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
+		discovered: map[uint16]map[uint64]time.Time{}, owners: map[uint64]uint16{},
+		routes: map[uint64][]Edge{}, peers: map[uint16]*Session{},
+		packetID: uint64(time.Now().UnixNano()), addresses: map[uint64]Endpoint{},
+		ws: map[Edge]*WSConnection{}, dialing: map[Edge]uint64{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
 	}
 
 	if string(n.key.public) != string(me.pub) {
@@ -80,9 +86,21 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	}
 
 	for index, peer := range reg.byIndex {
+		n.remember(peer.endpoint())
+
+		for _, config := range peer.endpoints {
+			if config.TLSCA != "" {
+				n.tlsCA[config.description().hash()] = config.TLSCA
+			}
+		}
+
+		for _, ep := range peer.addresses {
+			n.remember(ep)
+		}
+
 		if index != cfg.Index {
 			n.peers[index] = newSession(me, peer, dh.private)
-			n.discovered[index] = map[Endpoint]time.Time{}
+			n.discovered[index] = map[uint64]time.Time{}
 		}
 	}
 
@@ -92,28 +110,28 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	for _, config := range append(append([]EndpointConfig{}, cfg.Endpoint...), me.endpoints...) {
 		config.validate()
 
-		if config.Proto != "udp" {
-			throwFmt("transport %s is not implemented", config.Proto)
-		}
-
-		addr := config.address()
+		public := config.description()
 		bind := config.binding()
 
-		if addr.IP.To4() == nil || bind.IP.To4() == nil {
+		if public.Addr == "" || bind.IP.To4() == nil {
 			continue
 		}
 
 		local := endpoint(bind.IP, bind.Port)
 
-		if n.sockets[local.Port] == nil {
-			n.sockets[local.Port] = newUDPSocket(local.Port)
+		if config.Proto == "udp" {
+			if n.sockets[local.Port] == nil {
+				n.sockets[local.Port] = newUDPSocket(local.Port)
+			}
+		} else {
+			n.listenWS(config)
 		}
 
-		n.endpoints = append(n.endpoints, SocketEndpoint{public: endpoint(addr.IP, addr.Port), bind: local})
+		n.endpoints = append(n.endpoints, SocketEndpoint{public: public, bind: local})
 	}
 
-	if len(n.sockets) == 0 {
-		throwFmt("no UDP endpoints configured")
+	if len(n.endpoints) == 0 {
+		throwFmt("no endpoints configured")
 	}
 
 	n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
@@ -123,6 +141,10 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 }
 
 func (n *Node) run() {
+	for _, listener := range n.listeners {
+		go n.loop("websocket listener", func() { throw(listener.server.Serve(listener.conn)) })
+	}
+
 	for _, socket := range n.sockets {
 		go n.loop("recv", func() { n.recvLoop(socket) })
 	}
@@ -150,14 +172,24 @@ func (n *Node) loop(name string, body func()) {
 	})
 }
 
-func (n *Node) send(packet []byte, edge Edge) {
+func (n *Node) send(packet []byte, edge Edge, peer uint16) {
 	local := n.local[edge.From]
 
 	if local == nil {
 		return
 	}
 
-	local.socket.conn.WriteTo(packet, &ipv4.ControlMessage{Src: local.address.ip(), IfIndex: local.iface}, edge.To.addr())
+	if local.socket == nil {
+		n.sendWS(packet, edge, peer)
+
+		return
+	}
+
+	if n.addresses[edge.To].Proto != "udp" {
+		return
+	}
+
+	local.socket.conn.WriteTo(packet, &ipv4.ControlMessage{Src: local.address.ip(), IfIndex: local.iface}, n.addresses[edge.To].addr())
 }
 
 func (n *Node) recvLoop(socket *UDPSocket) {
@@ -185,7 +217,7 @@ func (n *Node) recvLoop(socket *UDPSocket) {
 			continue
 		}
 
-		edge := Edge{From: endpoint(remote.IP, remote.Port), To: destination}
+		edge := Edge{From: n.remember(endpoint(remote.IP, remote.Port)), To: destination}
 
 		if buf[0] == packetTransport || buf[0] == packetGossip {
 			n.handleTransport(buf[:size], edge)
@@ -222,7 +254,7 @@ func (n *Node) handleTransport(packet []byte, edge Edge) {
 		n.owned[edge] = true
 		n.record(edge, true)
 		n.recompute()
-		n.log.Info("link up", "from", edge.From.string(), "to", edge.To.string())
+		n.log.Info("link up", "from", n.addresses[edge.From].string(), "to", n.addresses[edge.To].string())
 	}
 
 	if len(inner) == 0 {
@@ -249,7 +281,7 @@ func (n *Node) handleData(inner []byte, received Edge) {
 			return
 		}
 
-		if endpoint(net.IP(d.ip[16:20]), 0) != n.reg.byIndex[n.cfg.Index].endpoint() {
+		if endpoint(net.IP(d.ip[16:20]), 0).hash() != n.reg.byIndex[n.cfg.Index].endpoint().hash() {
 			return
 		}
 
@@ -270,7 +302,7 @@ func (n *Node) forward(edge Edge, inner []byte) {
 		return
 	}
 
-	n.send(s.seal(inner, n.nextPacketID()), edge)
+	n.send(s.seal(inner, n.nextPacketID()), edge, s.peer)
 }
 
 func (n *Node) tunLoop() {
@@ -283,7 +315,7 @@ func (n *Node) tunLoop() {
 			continue
 		}
 
-		dst := endpoint(net.IP(ip[16:20]), 0)
+		dst := endpoint(net.IP(ip[16:20]), 0).hash()
 
 		n.mu.Lock()
 

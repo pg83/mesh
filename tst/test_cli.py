@@ -52,9 +52,16 @@ def test():
         bad(lambda c: c['endpoint'][0].update(port=65536), 'bad endpoint port')
         bad(lambda c: c['endpoint'][0].update(bind_port=-1), 'bad endpoint port')
         bad(lambda c: c['endpoint'][0].update(bind_port=65536), 'bad endpoint port')
-        bad(lambda c: c['endpoint'][0].update(proto='ws', path='/mesh'), 'transport ws is not implemented')
-        bad(lambda c: c.update(endpoint=[]), 'no UDP endpoints configured')
-        bad(lambda c: c['endpoint'][0].update(bind_addr='::1'), 'no UDP endpoints configured')
+        bad(lambda c: c['endpoint'][0].update(proto='ws', bind_proto='udp'), 'bad bind_proto')
+        bad(lambda c: c['endpoint'][0].update(proto='ws', path='relative'), 'bad websocket path')
+        bad(lambda c: c['endpoint'][0].update(proto='ws', path='/%zz'), 'bad websocket path')
+        bad(lambda c: c['endpoint'].extend([
+            dict(proto='ws', addr='0.0.0.0', port=7901),
+            dict(proto='wss', addr='0.0.0.0', port=7901),
+        ]), 'conflicting listener protocols')
+        bad(lambda c: c['endpoint'][0].update(proto='wss', tls_cert='/absent'), 'no such file')
+        bad(lambda c: c.update(endpoint=[]), 'no endpoints configured')
+        bad(lambda c: c['endpoint'][0].update(bind_addr='::1'), 'no endpoints configured')
         bad(lambda c: c['endpoint'].append(dict(proto='udp', addr='203.0.113.1', port=17001,
                                               bind_addr='10.1.0.1', bind_port=7900)), 'ambiguous endpoint binding')
         bad(lambda c: c['endpoint'].extend([

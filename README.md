@@ -6,14 +6,14 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Private overlay network for a closed set of nodes. Every node knows every
-public key; UDP links use keys derived from those static keys and carry
+public key; UDP and WS/WSS links use keys derived from those static keys and carry
 authenticated encrypted packets; a gossip map on each node describes who can reach whom; the
 source picks the whole path and relays only follow it; IP rides on top over a
 TUN device.
 
 This is the first version: registry, links, TUN, gossip, the routing map,
 relaying, and periodic gossip over the full address closure. Link metrics,
-retransmits and additional transports come later.
+and retransmits come later.
 
 ## Usage
 
@@ -55,10 +55,10 @@ Old configurations must be converted to this format.
 
 | Field | Meaning |
 |---|---|
-| `proto` | Transport: `udp`; `ws` and `wss` are reserved for the next transport |
+| `proto` | Transport: `udp`, `ws`, or `wss` |
 | `addr`, `port` | Address and port advertised to peers |
 | `bind_addr`, `bind_port` | Local address and port; omitted values default to `addr` and `port` |
-| `path` | WebSocket request path, reserved for the future WS/WSS transport |
+| `path` | WebSocket request path including query, default `/` |
 
 For UDP, `addr: "0.0.0.0"` expands to eligible IPv4 interface addresses
 on this host, refreshed every second. A concrete address selects that
@@ -84,11 +84,25 @@ LAN traffic on port 7000. The graph uses the public pair for this socket;
 its private pair is used only to send and receive packets. To use the LAN
 address directly too, keep the separate port-7000 entry shown above.
 
-The same shape accommodates WebSockets without URL parsing or another
-config section, for example
-`{"proto":"wss","addr":"mesh.example.net","port":443,"path":"/mesh","bind_addr":"192.168.1.20","bind_port":8080}`.
-Only UDP transport is implemented now. Configuring a local WS/WSS endpoint
-fails explicitly; remote WS/WSS entries are retained but are not dialed as UDP.
+WS/WSS uses the same endpoint shape. Each connection carries both directions.
+For native TLS, set `tls_cert` and `tls_key` on the local endpoint. The client
+checks the certificate and advertised hostname/IP against system trust roots;
+`tls_ca` on a registry endpoint adds a private CA bundle. TLS files are local
+paths and are never advertised through gossip. Multiple paths can share a
+TCP listener; different paths remain different endpoints.
+
+For TLS termination at a reverse proxy, configure the public WSS endpoint
+and explicitly select plaintext WS on the local binding:
+
+```json
+{"proto":"wss","addr":"mesh.example.net","port":443,"path":"/mesh",
+ "bind_proto":"ws","bind_addr":"192.168.1.20","bind_port":8080}
+```
+
+The proxy must preserve the public HTTP Host and request path and support
+WebSocket upgrades. `bind_proto` defaults to `proto`. UDP and TCP may use the
+same port. WS and native WSS need different TCP ports. Mesh authenticates
+and encrypts its packets even when TLS terminates at a proxy.
 
 The TUN interface persists across daemon exits, so a restart does not remove
 the application's local address and route. The next process reattaches to
@@ -104,10 +118,10 @@ it and it carries its own signature.
 
 All multibyte integers in the mesh protocol use little-endian order.
 Encapsulated IP packets retain their standard network format. The key
-context is `mesh/5`; older wire formats are incompatible.
+context is `mesh/6`; older wire formats are incompatible.
 
 Each registered pair derives a shared secret with X25519 and directional
-keys with HKDF-SHA256. The context contains `mesh/5`, the sender's public key
+keys with HKDF-SHA256. The context contains `mesh/6`, the sender's public key
 and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
@@ -119,20 +133,31 @@ The header is authenticated as associated data. Every packet gets a fresh
 random nonce, including after a process restart.
 
 Inner data starts with `1`, hop count (1), cursor (1), then the route. Each
-hop is a pair of endpoints: source IP (4), source port (2), destination IP
-(4), destination port (2). The original IP packet follows. At most 16 UDP
+hop is a pair of endpoints: source endpoint hash (8), destination endpoint hash (8). The original IP packet follows. At most 16 transport
 hops are allowed. A relay checks the receiving pair against the route,
 advances the cursor, and sends from the exact next source endpoint to the
 exact next destination. Local delivery verifies the destination mesh IP.
 
 Inner gossip starts with `2`, an Ed25519 signature (64), and a JSON object
-containing the signer's registry index and an `edges` list. Each record has
-`from` and `to` endpoints (`ip` integer and `port`), an `id`, and an `alive`
-flag. Gossip is split into batches of up to eight records: even with maximum-width fields the IPv4/UDP packet stays below
-1200 bytes.
+containing `index`, `endpoints`, and `edges`. Endpoint descriptions contain
+`proto`, `addr`, `port`, and optional `path`. Edges contain `from` and `to`
+64-bit hashes, `id`, and `alive`. Descriptions appear once per message;
+each message includes the descriptions referenced by its edges. Publications
+split at eight records or roughly 1000 JSON bytes; a single large endpoint
+record can exceed that target. There is no dependency on an earlier gossip
+message arriving first. Other nodes can use these descriptions to open new
+direct connections.
+
 The signer may transmit any part of the graph, including records learned
-from other members; the signature authenticates the transmitting member's
-report. It does not claim that every reported edge touches that member.
+from other members. An omitted pair is unchanged; a newer record replaces
+an older one. Gossip remains periodic, once per second.
+
+A WebSocket binary message contains one mesh transport packet. The first
+packet on a connection contains inner type `3` followed by a JSON object
+with the source and destination endpoint descriptions. Both ends validate
+this binding with the existing derived keys; no new session keys are negotiated.
+Subsequent messages carry the existing data and gossip packets. The receiving
+endpoint comes from this authenticated binding, not the proxy's TCP address.
 
 One counter starts at Unix nanoseconds on process startup and increments
 for every locally generated graph record and outgoing transport packet.
@@ -140,10 +165,19 @@ Forwarding a graph record preserves its ID and alive flag.
 
 ## Map and routing
 
-The graph is a map of directed endpoint pairs. A vertex is `(IP, port)`;
+Endpoints live in `map[uint64]Endpoint`; the graph key is a pair of uint64
+hashes and the value contains only record ID and alive state. Routes carry
+the same hashes. Full addresses are resolved only by the local transport.
+The hash is the first eight SHA-256 bytes interpreted as a little-endian
+uint64, over `proto + NUL + addr + NUL + decimal-port + NUL + path`.
+Hostnames are lowercased, IPs normalized, and an empty WS path becomes `/`.
+UDP path is empty. Local bind and TLS settings are excluded. Conflicting
+descriptions with the same hash fail explicitly.
+
+The graph remains a map of directed endpoint pairs;
 registry indexes identify encryption keys, not graph vertices. An internal
 mesh address is represented as `(meshIP, 0)`. Each host supplies both edges
-between that vertex and each of its advertised UDP endpoints with an active local binding. It withdraws
+between that vertex and each of its advertised transport endpoints with an active local binding. It withdraws
 its obsolete local attachments, including those learned after a restart. Static
 registry addresses are discovery candidates, not evidence of a live edge.
 
@@ -170,7 +204,7 @@ parts of the graph is not implemented.
 Local observations generate fresh versions each second.
 
 BFS follows the directed endpoint graph, with stable endpoint ordering for
-identical path lengths. The resulting path is compiled into concrete UDP
+identical path lengths. The resulting path is compiled into concrete transport
 hops; movements between endpoints on the same host require no packet. The
 return path is computed independently. There is no separate per-host
 endpoint selector. Graph changes and the one-second local observation pass
@@ -178,7 +212,20 @@ rebuild routes.
 
 Status exposes incoming endpoint pairs, the live graph, its vertices, and
 routes keyed by destination endpoint. The runtime keeps one state mutex and
-one receive goroutine per local UDP port, plus TUN, timer, status, and signal loops. Crypto keys stay
+one receive goroutine per local UDP port, plus TUN, timer, status, and signal loops.
+WS connections are indexed by an unordered endpoint pair, so incoming and
+outgoing routes use one connection. Simultaneous dials prefer the connection
+initiated by the smaller endpoint hash; duplicate attempts from that same
+endpoint prefer the larger first-packet ID. A sole working connection stays
+open regardless of initiator. There is at most one pending dial per pair,
+and a new timer tick never restarts that attempt. Each WS connection has a
+reader and writer, with a bounded outgoing queue; a full queue drops packets
+rather than blocking other transports. Dial, HTTP upgrade, authentication
+exchange, and socket writes run outside the graph mutex. Old connection
+cleanup cannot remove its replacement. Five seconds of silence withdraws
+incoming liveness independently of TCP connection state.
+Status also shows selected WS connections (pair, initiator, first-packet ID)
+and the number of pending dials. Crypto keys stay
 shared across a peer's endpoints and survive local link expiry. Transport duplicate detection is not implemented.
 
 ## Development
@@ -261,6 +308,13 @@ NAT scenarios translate both IPv4 addresses and UDP ports in the test router.
 They exercise two isolated private networks, failure of one forwarded port,
 and the same SSH and QUIC connections migrating from LAN to a public endpoint
 and then to a second forwarded port. These tests do not verify a physical Xiaomi router.
+
+WS tests force simultaneous TCP SYNs, count established kernel sockets,
+verify bidirectional traffic through an accepted connection, distinguish paths
+on a shared listener, reject unauthenticated or misbound connections, and
+exercise native WSS trust checks and a real TLS reverse proxy. A slow writer
+must not block status or another UDP peer. SSH and QUIC migrate UDP/WSS/UDP
+without reconnecting their application processes.
 
 The additional twenty protocol and application scenarios are listed in
 [tst/SCENARIOS.md](tst/SCENARIOS.md).

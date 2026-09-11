@@ -6,12 +6,16 @@ import (
 )
 
 type EndpointConfig struct {
-	Proto    string `json:"proto"`
-	Addr     string `json:"addr"`
-	Port     int    `json:"port"`
-	BindAddr string `json:"bind_addr,omitempty"`
-	BindPort int    `json:"bind_port,omitempty"`
-	Path     string `json:"path,omitempty"`
+	Proto     string `json:"proto"`
+	Addr      string `json:"addr"`
+	Port      int    `json:"port"`
+	BindAddr  string `json:"bind_addr,omitempty"`
+	BindPort  int    `json:"bind_port,omitempty"`
+	Path      string `json:"path,omitempty"`
+	BindProto string `json:"bind_proto,omitempty"`
+	TLSCert   string `json:"tls_cert,omitempty"`
+	TLSKey    string `json:"tls_key,omitempty"`
+	TLSCA     string `json:"tls_ca,omitempty"`
 }
 
 type PeerConfig struct {

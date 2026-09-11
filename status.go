@@ -17,34 +17,56 @@ type LinkStatus struct {
 	Idle int `json:"idle"`
 }
 
+type WSStatus struct {
+	Edge
+	Origin uint64 `json:"origin"`
+	ID     uint64 `json:"id"`
+}
+
 type Status struct {
-	Index    uint16            `json:"index"`
-	Links    []LinkStatus      `json:"links"`
-	Graph    []Update          `json:"graph"`
-	Vertices []Endpoint        `json:"vertices"`
-	Routes   map[string][]Edge `json:"routes"`
+	Connections []WSStatus          `json:"connections"`
+	Dialing     int                 `json:"dialing"`
+	Endpoints   map[uint64]Endpoint `json:"endpoints"`
+	Index       uint16              `json:"index"`
+	Links       []LinkStatus        `json:"links"`
+	Graph       []Update            `json:"graph"`
+	Vertices    []uint64            `json:"vertices"`
+	Routes      map[string][]Edge   `json:"routes"`
 }
 
 func (n *Node) status() *Status {
 	now := time.Now()
-	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Update{}, Vertices: []Endpoint{}, Routes: map[string][]Edge{}}
+	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Update{}, Vertices: []uint64{}, Routes: map[string][]Edge{}}
 
 	n.mu.Lock()
 
 	defer n.mu.Unlock()
 
+	st.Endpoints = map[uint64]Endpoint{}
+
+	for id, ep := range n.addresses {
+		st.Endpoints[id] = ep
+	}
+
+	st.Connections = []WSStatus{}
+	st.Dialing = len(n.dialing)
+
+	for key, c := range n.ws {
+		st.Connections = append(st.Connections, WSStatus{Edge: key, Origin: c.origin, ID: c.id})
+	}
+
 	for edge, received := range n.observed {
 		st.Links = append(st.Links, LinkStatus{Edge: edge, Idle: int(now.Sub(received).Seconds())})
 	}
 
-	vertices := map[Endpoint]bool{}
+	vertices := map[uint64]bool{}
 
 	for edge, record := range n.graph {
 		if !record.Alive {
 			continue
 		}
 
-		st.Graph = append(st.Graph, *record)
+		st.Graph = append(st.Graph, Update{Edge: edge, State: record})
 
 		vertices[edge.From] = true
 		vertices[edge.To] = true
@@ -54,12 +76,12 @@ func (n *Node) status() *Status {
 		st.Vertices = append(st.Vertices, ep)
 	}
 
-	slices.SortFunc(st.Vertices, compareEndpoint)
+	slices.Sort(st.Vertices)
 	slices.SortFunc(st.Graph, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
 	slices.SortFunc(st.Links, func(a, b LinkStatus) int { return compareEdge(a.Edge, b.Edge) })
 
 	for dst, path := range n.routes {
-		st.Routes[dst.string()] = path
+		st.Routes[n.addresses[dst].string()] = path
 	}
 
 	return st

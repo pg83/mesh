@@ -7,6 +7,7 @@ const (
 	packetGossip    = 4
 	innerData       = 1
 	innerAd         = 2
+	innerBinding    = 3
 	nonceSize       = 24
 	headerTransport = 1 + 2 + 8 + nonceSize
 	maxPacket       = 65535
@@ -19,24 +20,14 @@ type Data struct {
 	ip     []byte
 }
 
-func appendEndpoint(out []byte, ep Endpoint) []byte {
-	out = binary.LittleEndian.AppendUint32(out, ep.IP)
-
-	return binary.LittleEndian.AppendUint16(out, ep.Port)
-}
-
-func readEndpoint(packet []byte) Endpoint {
-	return Endpoint{IP: binary.LittleEndian.Uint32(packet), Port: binary.LittleEndian.Uint16(packet[4:])}
-}
-
 func encodeData(d *Data) []byte {
-	out := make([]byte, 0, 3+12*len(d.path)+len(d.ip))
+	out := make([]byte, 0, 3+16*len(d.path)+len(d.ip))
 
 	out = append(out, innerData, byte(len(d.path)), byte(d.cursor))
 
 	for _, edge := range d.path {
-		out = appendEndpoint(out, edge.From)
-		out = appendEndpoint(out, edge.To)
+		out = binary.LittleEndian.AppendUint64(out, edge.From)
+		out = binary.LittleEndian.AppendUint64(out, edge.To)
 	}
 
 	return append(out, d.ip...)
@@ -48,7 +39,7 @@ func decodeData(inner []byte) (*Data, bool) {
 	}
 
 	hops := int(inner[1])
-	head := 3 + 12*hops
+	head := 3 + 16*hops
 
 	if hops == 0 || hops > maxHops || len(inner) < head || int(inner[2]) >= hops {
 		return nil, false
@@ -57,9 +48,9 @@ func decodeData(inner []byte) (*Data, bool) {
 	d := &Data{path: make([]Edge, hops), cursor: int(inner[2]), ip: inner[head:]}
 
 	for i := range d.path {
-		start := 3 + 12*i
+		start := 3 + 16*i
 
-		d.path[i] = Edge{From: readEndpoint(inner[start:]), To: readEndpoint(inner[start+6:])}
+		d.path[i] = Edge{From: binary.LittleEndian.Uint64(inner[start:]), To: binary.LittleEndian.Uint64(inner[start+8:])}
 	}
 
 	return d, true
