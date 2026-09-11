@@ -9,6 +9,7 @@ def test():
     with lib.Lab(names, segments) as lab:
         lab.wait_nodes('n0', names, timeout=60)
         lab.wait_route('n0', 'n16', names[1:17], timeout=60)
+        lab.wait_route('n16', 'n0', list(reversed(names[:16])), timeout=60)
         lab.wait_route('n0', 'n17', None)
         workload.udp_server(lab, 'n16')
         udp = workload.UdpClient(lab, 'n0', 'n16')
@@ -22,6 +23,7 @@ def test():
         assert too_far.recv(.5) is None
         assert 'unreachable'.encode().hex() not in log.read_text()
         lab.wait_route('n17', 'n1', list(reversed(names[1:17])))
+        lab.wait_route('n1', 'n17', names[2:])
         workload.udp_server(lab, 'n1')
         reverse = workload.UdpClient(lab, 'n17', 'n1')
         reverse.send(b'y' * 1352)

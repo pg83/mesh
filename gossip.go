@@ -140,6 +140,7 @@ func (n *Node) handleAd(inner []byte, from uint16) {
 
 	now := time.Now()
 	changed := []Update{}
+	topologyChanged := false
 
 	for _, update := range ad.Edges {
 		if update.ID == 0 || update.TTL == 0 || update.TTL > uint32(adTimeout/time.Millisecond) || update.From.IP == 0 || update.To.IP == 0 || update.From == update.To {
@@ -152,12 +153,19 @@ func (n *Node) handleAd(inner []byte, from uint16) {
 			continue
 		}
 
+		if previous == nil || previous.alive(now) != update.Alive {
+			topologyChanged = true
+		}
+
 		n.graph[update.Edge] = &Record{Update: update, expires: now.Add(time.Duration(update.TTL) * time.Millisecond)}
 		changed = append(changed, update)
 	}
 
-	if len(changed) > 0 {
+	if topologyChanged {
 		n.recompute(now)
+	}
+
+	if len(changed) > 0 {
 		n.spread(changed, from)
 	}
 }
