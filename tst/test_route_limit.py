@@ -13,14 +13,17 @@ def test():
         lab.wait_route('n0', 'n16', names[1:17], timeout=60)
         lab.wait_route('n16', 'n0', list(reversed(names[:16])), timeout=60)
         lab.wait_route('n0', 'n17', None)
+        lab.wait_ping('n0', 'n16', timeout=60)
         workload.udp_server(lab, 'n16')
         observers = [lab.intercept(names[i], names[i + 1], 'observe', kind=3, count=-1) for i in range(16)]
+        replies = [lab.intercept(names[i + 1], names[i], 'observe', kind=3, count=-1) for i in range(16)]
         udp = workload.UdpClient(lab, 'n0', 'n16')
         for size in (1, 1200, 1352):
             payload = b'x' * size
             started = time.monotonic()
             udp.send(payload)
-            assert udp.recv(timeout=5) == payload, (size, [rule['hits'] for rule in observers])
+            assert udp.recv(timeout=5) == payload, (
+                size, [rule['hits'] for rule in observers], [rule['hits'] for rule in replies])
             print(f'16-hop UDP: {size} bytes, RTT {time.monotonic() - started:.3f}s', flush=True)
         log = workload.udp_server(lab, 'n17')
         too_far = workload.UdpClient(lab, 'n0', 'n17')
@@ -29,6 +32,7 @@ def test():
         assert 'unreachable'.encode().hex() not in log.read_text()
         lab.wait_route('n17', 'n1', list(reversed(names[1:17])))
         lab.wait_route('n1', 'n17', names[2:])
+        lab.wait_ping('n17', 'n1', timeout=60)
         workload.udp_server(lab, 'n1')
         reverse = workload.UdpClient(lab, 'n17', 'n1')
         reverse.send(b'y' * 1352)
