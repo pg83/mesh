@@ -100,7 +100,8 @@ Forwarding a graph record preserves its ID and alive flag.
 The graph is a map of directed endpoint pairs. A vertex is `(IP, port)`;
 registry indexes identify encryption keys, not graph vertices. An internal
 mesh address is represented as `(meshIP, 0)`. Each host supplies both edges
-between that vertex and each of its actual local UDP endpoints. Static
+between that vertex and each of its actual local UDP endpoints. It withdraws
+its obsolete local attachments, including those learned after a restart. Static
 registry addresses are discovery candidates, not evidence of a live edge.
 
 Receiving an authenticated, non-replayed packet observes precisely its UDP

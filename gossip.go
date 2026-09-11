@@ -63,8 +63,8 @@ func (n *Node) refresh(now time.Time) {
 		}
 	}
 
-	for edge := range n.owned {
-		if !desired[edge] {
+	for edge, record := range n.graph {
+		if record.Alive && !desired[edge] && (n.owned[edge] || edge.From == me || edge.To == me) {
 			n.record(edge, false)
 		}
 	}
