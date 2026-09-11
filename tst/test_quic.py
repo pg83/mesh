@@ -34,7 +34,7 @@ def test():
             processes[name] = proc
             assert select.select([proc.stdout], [], [], 15)[0], f'{name}: QUIC connect timed out'
             report = json.loads(proc.stdout.readline())
-            assert report['event'] == 'ready', report
+            assert report.get('event') == 'ready', report
         # All four connections are established before any client starts its clock.
         for proc in processes.values():
             proc.stdin.write(b'go\n')
@@ -44,7 +44,7 @@ def test():
             output, _ = proc.communicate(timeout=50)
             assert proc.returncode == 0, (name, output)
             report = json.loads(output)
-            assert report['event'] == 'done', report
+            assert report.get('event') == 'done', report
             assert report['seconds'] >= 30, report
             assert report['rounds'] >= 16, report
             assert report['bytes'] == report['rounds'] * (64 << 10), report

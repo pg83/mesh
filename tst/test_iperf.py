@@ -13,11 +13,21 @@ def test():
         lab.wait_route('b', 'a', ['r', 'a'])
         lab.wait_ping('a', 'b')
         host = workload.address(lab, 'b')
-        server = lab.spawn('b', ['iperf3', '-s', '-B', host, '-p', '5201'], 'iperf-server')
-        workload.wait_port(lab, 'b', host, 5201, server)
+        sequence = 0
         def run(*args):
+            nonlocal sequence
+            sequence += 1
+            label = f'iperf-server-{sequence}'
+            server = lab.spawn('b', ['iperf3', '-s', '-1', '--forceflush', '-B', host, '-p', '5201'], label)
+            log = lab.dir / f'{label}.log'
+            def ready():
+                assert server.poll() is None, log.read_text()
+                return 'Server listening on 5201' in log.read_text()
+            # A TCP readiness connection would consume this one-off server.
+            lab.wait(ready, 'iperf server listening')
             result = lab.run('a', ['iperf3', '-c', host, '-p', '5201', '-t', '3', '-J', *args], check=False)
             assert result.returncode == 0, (result.stdout, result.stderr)
+            assert server.wait(timeout=15) == 0, log.read_text()
             report = json.loads(result.stdout)
             assert 'error' not in report, report
             print(json.dumps(report['end']), flush=True)
