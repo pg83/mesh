@@ -158,10 +158,10 @@ class Lab:
                 self.blocked.discard((dst, src, seg))
 
     def intercept(self, src, dst, action, count=1, kind=None, seg=None,
-                  min_size=0, max_size=None, every=1, delay=0):
+                  min_size=0, max_size=None, every=1, delay=0, rate=None):
         rule = dict(src=src, dst=dst, action=action, count=count, kind=kind,
                     seg=seg, min_size=min_size, max_size=max_size, every=every, delay=delay,
-                    seen=0, hits=0, held=[])
+                    rate=rate, next=0, seen=0, hits=0, held=[])
         with self.lock:
             self.rules.append(rule)
         return rule
@@ -175,6 +175,30 @@ class Lab:
             held, rule['held'] = rule['held'], []
             for out, packet, key in reversed(held) if reverse else held:
                 self.deliver(out, packet, key)
+
+    def replay(self, rule, src=None, dst=None, seg=None, transform=None):
+        """Reinject captured UDP packets, optionally on another channel or with changed bytes."""
+        with self.lock:
+            assert rule['held'], 'no captured packet to replay'
+            for _, original, key in rule['held']:
+                source, target, channel = src or key[0], dst or key[1], seg or key[2]
+                packet = bytearray(original)
+                head = (packet[0] & 15) * 4
+                assert packet[9] == 17 and not (struct.unpack_from('!H', packet, 6)[0] & 0x3fff)
+                if transform:
+                    packet[head + 8:] = transform(bytes(packet[head + 8:]))
+                packet[12:16] = socket.inet_aton(self.nodes[source].addresses[channel])
+                packet[16:20] = socket.inet_aton(self.nodes[target].addresses[channel])
+                struct.pack_into('!H', packet, 2, len(packet))
+                struct.pack_into('!H', packet, head + 4, len(packet) - head)
+                packet[head + 6:head + 8] = b'\0\0'
+                packet[10:12] = b'\0\0'
+                checksum = sum(struct.unpack('!' + 'H' * (head // 2), packet[:head]))
+                while checksum >> 16:
+                    checksum = (checksum & 0xffff) + (checksum >> 16)
+                struct.pack_into('!H', packet, 10, ~checksum & 0xffff)
+                out = self.ports[(channel, bytes(packet[16:20]))]
+                self.deliver(out, bytes(packet), (source, target, channel))
 
     def traffic(self, src, dst, seg=None):
         with self.lock:
@@ -233,6 +257,14 @@ class Lab:
                             if action == 'delay':
                                 self.serial += 1
                                 heapq.heappush(self.delayed, (now + rule['delay'], self.serial, out, packet, key))
+                                break
+                            if action == 'pace':
+                                if rule['next'] > now + .2:
+                                    self.counts[(*key, 'queue-full')] += 1
+                                    break
+                                rule['next'] = max(now, rule['next']) + len(packet) / rule['rate']
+                                self.serial += 1
+                                heapq.heappush(self.delayed, (rule['next'], self.serial, out, packet, key))
                                 break
                             if action == 'corrupt':
                                 # IPv4 permits a zero UDP checksum. Keep the IP header
@@ -436,7 +468,9 @@ class Lab:
         sys.stderr.write(f'link counters: {counters}\n')
         artifacts = os.environ.get('MESH_TEST_ARTIFACTS')
         if artifacts:
-            shutil.copytree(self.dir, Path(artifacts) / self.dir.name, dirs_exist_ok=True)
+            def special(directory, names):
+                return [n for n in names if not (Path(directory, n).is_file() or Path(directory, n).is_dir())]
+            shutil.copytree(self.dir, Path(artifacts) / self.dir.name, dirs_exist_ok=True, ignore=special)
 
     # --- observations ---
 

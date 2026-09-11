@@ -198,6 +198,9 @@ individual daemon run has a separate counter directory; shutdown waits for
 all processes and missing daemon counters fail the run. CLI coverage is
 merged too. Codecov receives that same profile and requires 95% coverage.
 
+The additional twenty protocol and application scenarios are listed in
+[tst/SCENARIOS.md](tst/SCENARIOS.md).
+
 On failure the suite prints application/mesh logs and channel counters. Set
 `MESH_TEST_ARTIFACTS` to preserve these along with status snapshots outside
 the build temporary directory; CI uploads them as failure artifacts.

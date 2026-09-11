@@ -70,7 +70,7 @@ func quicServer(addr, certPath string) {
 	}
 }
 
-func quicClient(addr, certPath string, duration time.Duration) {
+func quicClient(addr, certPath string, duration time.Duration, slow bool) {
 	roots := x509.NewCertPool()
 
 	if !roots.AppendCertsFromPEM(throw2(os.ReadFile(certPath))) {
@@ -92,7 +92,16 @@ func quicClient(addr, certPath string, duration time.Duration) {
 	stream := throw2(conn.OpenStreamSync(ctx))
 
 	quicReport(map[string]any{"event": "ready"})
-	throw2(bufio.NewReader(os.Stdin).ReadString('\n'))
+
+	input := bufio.NewReader(os.Stdin)
+
+	throw2(input.ReadString('\n'))
+
+	if slow {
+		quicSlow(stream, input)
+
+		return
+	}
 
 	payload := make([]byte, 64<<10)
 	reply := make([]byte, len(payload))
@@ -104,6 +113,7 @@ func quicClient(addr, certPath string, duration time.Duration) {
 	throw(stream.SetDeadline(started.Add(duration + 15*time.Second)))
 
 	rounds := uint64(0)
+	lastReport := started
 
 	for time.Since(started) < duration {
 		binary.LittleEndian.PutUint64(payload, rounds)
@@ -121,6 +131,11 @@ func quicClient(addr, certPath string, duration time.Duration) {
 		}
 
 		rounds++
+
+		if time.Since(lastReport) >= time.Second {
+			quicReport(map[string]any{"event": "progress", "bytes": rounds * uint64(len(payload)), "seconds": time.Since(started).Seconds()})
+			lastReport = time.Now()
+		}
 	}
 
 	throw(stream.Close())
@@ -137,13 +152,59 @@ func quicClient(addr, certPath string, duration time.Duration) {
 	})
 }
 
+func quicSlow(stream *quic.Stream, input *bufio.Reader) {
+	payload := make([]byte, 16<<20)
+
+	throw2(rand.Read(payload))
+
+	started := time.Now()
+
+	throw(stream.SetDeadline(started.Add(time.Minute)))
+
+	finished := make(chan struct{})
+
+	go quicBoundary(func() {
+		if size := throw2(stream.Write(payload)); size != len(payload) {
+			throwFmt("short QUIC write: %d", size)
+		}
+
+		close(finished)
+	})
+
+	select {
+	case <-finished:
+		throwFmt("slow QUIC reader did not cause backpressure")
+	case <-time.After(2 * time.Second):
+	}
+
+	quicReport(map[string]any{"event": "blocked"})
+	throw2(input.ReadString('\n'))
+
+	reply := make([]byte, len(payload))
+
+	throw2(io.ReadFull(stream, reply))
+
+	if !bytes.Equal(payload, reply) {
+		throwFmt("slow QUIC response mismatch")
+	}
+
+	<-finished
+	throw(stream.Close())
+
+	if extra := throw2(io.ReadAll(stream)); len(extra) != 0 {
+		throwFmt("unexpected QUIC response: %d bytes", len(extra))
+	}
+
+	quicReport(map[string]any{"event": "done", "bytes": len(payload), "rounds": len(payload) / (64 << 10), "seconds": time.Since(started).Seconds()})
+}
+
 func main() {
 	quicBoundary(func() {
 		switch os.Args[1] {
 		case "server":
 			quicServer(os.Args[2], os.Args[3])
-		case "client":
-			quicClient(os.Args[2], os.Args[3], throw2(time.ParseDuration(os.Args[4])))
+		case "client", "slow-client":
+			quicClient(os.Args[2], os.Args[3], throw2(time.ParseDuration(os.Args[4])), os.Args[1] == "slow-client")
 		default:
 			throwFmt("expected server or client")
 		}

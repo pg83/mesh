@@ -126,7 +126,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         name=f"e2e_{test_name}",
         inputs=[test_path, "$(S)/tst/lib.py", "$(S)/tst/workload.py", "$(S)/tst/program.py"],
         outputs=outputs,
-        deps=[mesh, probe] if test_name == "protocol" else [mesh, quic] if test_name == "quic" else [mesh],
+        deps=[mesh, probe] if test_name in ("protocol", "gossip_stale_after_expiry") else [mesh, quic] if test_name.startswith("quic") else [mesh],
         cmd=[
             *prelude,
             ["python3", test_path],

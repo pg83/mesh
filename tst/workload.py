@@ -180,3 +180,105 @@ def udp_server(lab, name, port=9000):
         return log.exists() and log.read_text().startswith('ready\n')
     lab.wait(ready, 'UDP server ready')
     return log
+
+
+class QuicClient:
+    def __init__(self, server, source, seconds=30, slow=False):
+        self.server, self.source, self.seconds = server, source, seconds
+        self.proc = server.lab.spawn(source,
+            [os.environ['MESH_TEST_QUIC'], 'slow-client' if slow else 'client', server.host, server.cert, f'{seconds}s'],
+            'quic-' + source, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
+        self.done = None
+        self.started = None
+        assert self.read(15).get('event') == 'ready'
+
+    def read(self, timeout=20):
+        assert select.select([self.proc.stdout], [], [], timeout)[0], f'{self.source}: QUIC report timed out'
+        line = self.proc.stdout.readline()
+        assert line, f'{self.source}: QUIC exited {self.proc.poll()}'
+        report = json.loads(line)
+        assert 'error' not in report, (self.source, report)
+        if report.get('event') == 'done':
+            self.done = report
+        return report
+
+    def start(self):
+        self.started = time.monotonic()
+        self.proc.stdin.write(b'go\n')
+
+    def progress(self, timeout=25):
+        target = time.monotonic() - self.started
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            report = self.read(max(.1, deadline - time.monotonic()))
+            assert report.get('event') != 'done', f'{self.source}: QUIC finished before fault check'
+            if report.get('event') == 'progress' and report['seconds'] >= target:
+                return report
+        raise AssertionError(f'{self.source}: no QUIC progress')
+
+    def finish(self):
+        deadline = time.monotonic() + self.seconds + 30
+        while self.done is None:
+            self.read(max(.1, deadline - time.monotonic()))
+            assert time.monotonic() < deadline, f'{self.source}: QUIC did not finish'
+        assert self.proc.wait(timeout=10) == 0
+        self.proc.stdin.close()
+        report = self.done
+        assert report['seconds'] >= self.seconds, report
+        assert report['rounds'] >= 16, report
+        assert report['bytes'] == report['rounds'] * (64 << 10), report
+        print(f"QUIC {self.source}: {report['bytes']} verified bytes in {report['seconds']:.2f}s, "
+              f"{report['bytes'] / report['seconds'] / (1 << 20):.2f} MiB/s each way", flush=True)
+        return report
+
+
+class QuicServer:
+    def __init__(self, lab, name):
+        self.lab, self.name = lab, name
+        self.host = address(lab, name) + ':9000'
+        self.cert = lab.dir / ('quic-' + name + '.pem')
+        self.log = lab.dir / ('quic-server-' + name + '.log')
+        self.proc = lab.spawn(name, [os.environ['MESH_TEST_QUIC'], 'server', self.host, self.cert], 'quic-server-' + name)
+        def ready():
+            assert self.proc.poll() is None, self.log.read_text()
+            return any(e.get('event') == 'ready' for e in self.events())
+        lab.wait(ready, 'QUIC server listening')
+
+    def events(self):
+        return [json.loads(line) for line in self.log.read_text().splitlines() if line.startswith('{')]
+
+    def client(self, name, seconds=30, slow=False):
+        return QuicClient(self, name, seconds, slow)
+
+    def finish(self, clients):
+        reports = {client.source: client.finish() for client in clients}
+        self.lab.wait(lambda: sum(e.get('event') == 'done' for e in self.events()) == len(clients),
+                      'all QUIC transfers completed')
+        accepted = [e['peer'].split(':')[0] for e in self.events() if e.get('event') == 'connected']
+        assert sorted(accepted) == sorted(address(self.lab, n) for n in reports), accepted
+        received = {e['peer'].split(':')[0]: e['bytes'] for e in self.events() if e.get('event') == 'done'}
+        assert received == {address(self.lab, n): r['bytes'] for n, r in reports.items()}, received
+        assert self.proc.poll() is None, self.log.read_text()
+        self.lab.check()
+
+
+class Probe:
+    def __init__(self, lab, source, target, seg=1):
+        lab.stop_node(source)
+        self.proc = lab.spawn(source,
+            [os.environ['MESH_TEST_PROBE'], lab.dir / (source + '.json'),
+             lab.nodes[target].addresses[seg] + ':7000', str(lab.nodes[target].index)],
+            'probe-' + source, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
+        assert self.read()['ready']
+
+    def read(self):
+        assert select.select([self.proc.stdout], [], [], 10)[0], 'probe timed out'
+        return json.loads(self.proc.stdout.readline())
+
+    def send(self, **command):
+        self.proc.stdin.write(json.dumps(command).encode() + b'\n')
+        assert self.read()['sent']
+
+    def finish(self):
+        self.proc.stdin.close()
+        assert self.proc.wait(timeout=10) == 0
