@@ -16,6 +16,7 @@ import (
 	"io"
 	"math/big"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -103,6 +104,13 @@ func quicClient(addr, certPath string, duration time.Duration, slow bool) {
 		return
 	}
 
+	var stopping atomic.Bool
+
+	go quicBoundary(func() {
+		throw2(input.ReadString('\n'))
+		stopping.Store(true)
+	})
+
 	payload := make([]byte, 64<<10)
 	reply := make([]byte, len(payload))
 
@@ -115,7 +123,7 @@ func quicClient(addr, certPath string, duration time.Duration, slow bool) {
 	rounds := uint64(0)
 	lastReport := started
 
-	for time.Since(started) < duration {
+	for time.Since(started) < duration || !stopping.Load() {
 		binary.LittleEndian.PutUint64(payload, rounds)
 
 		written := throw2(stream.Write(payload))

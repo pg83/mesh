@@ -185,6 +185,7 @@ def udp_server(lab, name, port=9000):
 class QuicClient:
     def __init__(self, server, source, seconds=30, slow=False):
         self.server, self.source, self.seconds = server, source, seconds
+        self.slow = slow
         self.proc = server.lab.spawn(source,
             [os.environ['MESH_TEST_QUIC'], 'slow-client' if slow else 'client', server.host, server.cert, f'{seconds}s'],
             'quic-' + source, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
@@ -218,6 +219,8 @@ class QuicClient:
         raise AssertionError(f'{self.source}: no QUIC progress')
 
     def finish(self):
+        if not self.slow:
+            self.proc.stdin.write(b'stop\n')
         deadline = time.monotonic() + self.seconds + 30
         while self.done is None:
             self.read(max(.1, deadline - time.monotonic()))
