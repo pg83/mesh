@@ -31,6 +31,7 @@ def test():
         probe.send(op='ad', body=dict(index=2, edges=[dict(yz, id=ident+1, alive=False)]))
         lab.wait(lambda: not present('c', y, z), 'explicit pair withdrawal propagates')
         burst = [lib.edge(lib.endpoint('192.0.2.10', 9000+i), z, ident+i+2) for i in range(24)]
+        relays = lab.intercept('a', 'c', 'copy', kind=4, count=-1)
         held = lab.intercept('r', 'a', 'hold', kind=4, count=-1)
         for update in burst:
             probe.send(op='ad', body=dict(index=2, edges=[update]))
@@ -46,6 +47,8 @@ def test():
             withdrawn = not any(e['from'] == burst[0]['from'] and e['to'] == z for e in graph)
             return pairs and withdrawn
         lab.wait(relayed, 'all burst pairs and the latest withdrawal reach another peer')
+        assert relays['held']
+        assert max(len(packet) for _, packet, _ in relays['held']) <= 1200
         lab.wait_ping('a', 'c')
         probe.finish()
 

@@ -10,7 +10,7 @@ import (
 
 const (
 	adTimeout       = sessionTimeout
-	gossipBatchSize = 6
+	gossipBatchSize = 8
 )
 
 type Ad struct {

@@ -86,7 +86,8 @@ Inner gossip starts with `2`, an Ed25519 signature (64), and a JSON object
 containing the signer's registry index and an `edges` list. Each record has
 `from` and `to` endpoints (`ip` integer and `port`), an `id`, an `alive` flag,
 and remaining `ttl` in milliseconds. Gossip is split into batches of up to
-six records to keep control packets below the physical MTU used by the lab.
+eight records: even with maximum-width fields the IPv4/UDP packet stays below
+1200 bytes.
 The signer may transmit any part of the graph, including records learned
 from other members; the signature authenticates the transmitting member's
 report. It does not claim that every reported edge touches that member.
