@@ -18,8 +18,7 @@ def test():
         lab.unblock('a', 'b')
         lab.wait_links('a', ['b'])
         stream.progress(after=before + 2)
-        # Restart before the other end's 15-second session timeout. Its live
-        # session must be replaced by the new authenticated handshake.
+        # Restart while the other end is alive; derived keys work immediately.
         before = stream.replies
         lab.stop_node('b')
         lab.start_node('b')

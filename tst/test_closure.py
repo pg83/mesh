@@ -7,8 +7,8 @@ import lib
 
 def test():
     with lib.Lab(["a", "b", "c"], {1: ["a", "b", "c"]}, statics=["a"]) as lab:
-        lab.wait_links("b", ["a"])
-        lab.wait_links("c", ["a"])
+        lab.wait(lambda: lab.nodes["a"].index in lab.links("b"), "b sees a")
+        lab.wait(lambda: lab.nodes["a"].index in lab.links("c"), "c sees a")
 
         lab.wait_links("b", ["a", "c"], timeout=60)
         lab.wait_links("c", ["a", "b"], timeout=60)

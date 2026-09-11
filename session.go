@@ -2,76 +2,61 @@ package main
 
 import (
 	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
+	"io"
 	"net"
 	"time"
 
-	"github.com/flynn/noise"
 	"golang.org/x/crypto/chacha20poly1305"
+	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/hkdf"
 )
 
 type Session struct {
+	local    uint16
 	peer     uint16
-	localID  uint32
-	remoteID uint32
 	send     cipher.AEAD
 	recv     cipher.AEAD
-	counter  uint64
 	window   Window
 	endpoint *net.UDPAddr
 	created  time.Time
 	lastRecv time.Time
-	lastSend time.Time
 }
 
-type Handshake struct {
-	peer    uint16
-	localID uint32
-	state   *noise.HandshakeState
-	addr    *net.UDPAddr
-	created time.Time
+func sessionCipher(shared, sender, receiver []byte) cipher.AEAD {
+	info := append([]byte(protocol), sender...)
+
+	info = append(info, receiver...)
+
+	key := make([]byte, chacha20poly1305.KeySize)
+
+	throw2(io.ReadFull(hkdf.New(sha256.New, shared, nil, info), key))
+
+	return throw2(chacha20poly1305.NewX(key))
 }
 
-func aead(cs *noise.CipherState) cipher.AEAD {
-	key := cs.UnsafeKey()
+func newSession(local, peer *Peer, private []byte) *Session {
+	shared := throw2(curve25519.X25519(private, peer.pub))
 
-	return throw2(chacha20poly1305.New(key[:]))
-}
-
-func newSession(peer uint16, localID, remoteID uint32, send, recv *noise.CipherState, endpoint *net.UDPAddr, now time.Time) *Session {
 	return &Session{
-		peer:     peer,
-		localID:  localID,
-		remoteID: remoteID,
-		send:     aead(send),
-		recv:     aead(recv),
-		endpoint: endpoint,
-		created:  now,
-		lastRecv: now,
-		lastSend: now,
+		local: local.index,
+		peer:  peer.index,
+		send:  sessionCipher(shared, local.pub, peer.pub),
+		recv:  sessionCipher(shared, peer.pub, local.pub),
 	}
 }
 
-func nonce(counter uint64) []byte {
-	n := make([]byte, nonceSize)
-
-	binary.LittleEndian.PutUint64(n[4:], counter)
-
-	return n
-}
-
-func (s *Session) seal(inner []byte, now time.Time) []byte {
+func (s *Session) seal(inner []byte, id uint64) []byte {
 	out := make([]byte, headerTransport, headerTransport+len(inner)+s.send.Overhead())
 
 	out[0] = packetTransport
-	binary.LittleEndian.PutUint32(out[1:], s.remoteID)
-	binary.LittleEndian.PutUint64(out[5:], s.counter)
+	binary.LittleEndian.PutUint16(out[1:], s.local)
+	binary.LittleEndian.PutUint64(out[3:], id)
+	throw2(rand.Read(out[11:headerTransport]))
 
-	out = s.send.Seal(out, nonce(s.counter), inner, out[:headerTransport])
-	s.counter++
-	s.lastSend = now
-
-	return out
+	return s.send.Seal(out, out[11:headerTransport], inner, out[:headerTransport])
 }
 
 func (s *Session) open(packet []byte) ([]byte, bool) {
@@ -79,14 +64,14 @@ func (s *Session) open(packet []byte) ([]byte, bool) {
 		return nil, false
 	}
 
-	counter := binary.LittleEndian.Uint64(packet[5:])
-	inner, err := s.recv.Open(nil, nonce(counter), packet[headerTransport:], packet[:headerTransport])
+	id := binary.LittleEndian.Uint64(packet[3:])
+	inner, err := s.recv.Open(nil, packet[11:headerTransport], packet[headerTransport:], packet[:headerTransport])
 
 	if err != nil {
 		return nil, false
 	}
 
-	if !s.window.accept(counter) {
+	if !s.window.accept(id) {
 		return nil, false
 	}
 

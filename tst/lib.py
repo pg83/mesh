@@ -158,9 +158,9 @@ class Lab:
                 self.blocked.discard((dst, src, seg))
 
     def intercept(self, src, dst, action, count=1, kind=None, seg=None,
-                  min_size=0, every=1, delay=0):
+                  min_size=0, max_size=None, every=1, delay=0):
         rule = dict(src=src, dst=dst, action=action, count=count, kind=kind,
-                    seg=seg, min_size=min_size, every=every, delay=delay,
+                    seg=seg, min_size=min_size, max_size=max_size, every=every, delay=delay,
                     seen=0, hits=0, held=[])
         with self.lock:
             self.rules.append(rule)
@@ -215,6 +215,7 @@ class Lab:
                                     or rule['count'] == 0
                                     or rule['seg'] not in (None, seg)
                                     or len(payload) < rule['min_size']
+                                    or (rule['max_size'] is not None and len(payload) > rule['max_size'])
                                     or (rule['kind'] is not None and payload[:1] != bytes([rule['kind']]))):
                                 continue
                             rule['seen'] += 1

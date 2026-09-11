@@ -2,7 +2,7 @@ package main
 
 import "slices"
 
-func (n *Node) edges(index uint16) []uint16 {
+func (n *Node) advertisedNeighbors(index uint16) []uint16 {
 	if index == n.cfg.Index {
 		return n.neighbors()
 	}
@@ -12,6 +12,18 @@ func (n *Node) edges(index uint16) []uint16 {
 	}
 
 	return nil
+}
+
+func (n *Node) edges(index uint16) []uint16 {
+	peers := []uint16{}
+
+	for _, peer := range n.advertisedNeighbors(index) {
+		if slices.Contains(n.advertisedNeighbors(peer), index) {
+			peers = append(peers, peer)
+		}
+	}
+
+	return peers
 }
 
 func (n *Node) recompute() {

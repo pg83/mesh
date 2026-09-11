@@ -111,7 +111,7 @@ func (n *Node) publish(now time.Time) {
 func (n *Node) flood(known *Known, from uint16) {
 	inner := encodeAd(known.blob, known.sig)
 
-	for peer := range n.sessions {
+	for peer := range n.peers {
 		if peer != from {
 			n.forward(peer, inner)
 		}

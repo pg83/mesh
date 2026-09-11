@@ -11,8 +11,6 @@ import (
 	"net"
 	"os"
 	"time"
-
-	"github.com/flynn/noise"
 )
 
 type ProbeCommand struct {
@@ -28,44 +26,11 @@ func main() {
 	reg := newRegistry(cfg.Registry)
 	peer := reg.byIndex[uint16(throw2(json.Number(os.Args[3]).Int64()))]
 	dh, sig := deriveKeys(decodeKey(cfg.Key))
-
-	hs := throw2(noise.NewHandshakeState(noise.Config{
-		CipherSuite: cipherSuite, Pattern: noise.HandshakeIK, Initiator: true,
-		Prologue: []byte(prologue), StaticKeypair: dh, PeerStatic: peer.pub,
-	}))
-
+	session := newSession(reg.byIndex[cfg.Index], peer, dh.private)
+	packetID := uint64(time.Now().UnixNano())
 	conn := throw2(net.ListenUDP("udp4", &net.UDPAddr{Port: cfg.Port}))
 
 	defer conn.Close()
-
-	msg, _, _, err := hs.WriteMessage(nil, binary.LittleEndian.AppendUint64(nil, uint64(time.Now().UnixNano())))
-
-	throw(err)
-
-	packet := binary.LittleEndian.AppendUint32([]byte{packetInit}, 42)
-
-	throw2(conn.WriteToUDP(append(packet, msg...), remote))
-	throw(conn.SetReadDeadline(time.Now().Add(5 * time.Second)))
-
-	var session *Session
-
-	buf := make([]byte, maxPacket)
-
-	for session == nil {
-		size, _, err := conn.ReadFromUDP(buf)
-
-		throw(err)
-
-		if size < headerResponse || buf[0] != packetResponse {
-			continue
-		}
-
-		_, send, recv, err := hs.ReadMessage(nil, buf[headerResponse:size])
-
-		throw(err)
-
-		session = newSession(peer.index, 42, binary.LittleEndian.Uint32(buf[5:]), send, recv, remote, time.Now())
-	}
 
 	encoder := json.NewEncoder(os.Stdout)
 
@@ -78,14 +43,16 @@ func main() {
 
 		throw(json.Unmarshal(scanner.Bytes(), &command))
 
+		packetID++
+
 		var out []byte
 
 		switch command.Op {
 		case "inner":
-			out = session.seal(throw2(hex.DecodeString(command.Hex)), time.Now())
+			out = session.seal(throw2(hex.DecodeString(command.Hex)), packetID)
 		case "short-transport":
-			out = binary.LittleEndian.AppendUint32([]byte{packetTransport}, session.remoteID)
-			out = binary.LittleEndian.AppendUint64(out, 0)
+			out = binary.LittleEndian.AppendUint16([]byte{packetTransport}, cfg.Index)
+			out = binary.LittleEndian.AppendUint64(out, packetID)
 		case "ad":
 			key := sig
 
@@ -95,7 +62,7 @@ func main() {
 
 			inner := encodeAd(command.Body, ed25519.Sign(key, command.Body))
 
-			out = session.seal(inner, time.Now())
+			out = session.seal(inner, packetID)
 		default:
 			throwFmt("unknown probe command %q", command.Op)
 		}

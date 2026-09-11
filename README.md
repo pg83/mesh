@@ -6,15 +6,14 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Private overlay network for a closed set of nodes. Every node knows every
-public key; links are UDP sessions negotiated with Noise IK and carried by a
-symmetric AEAD; a gossip map on each node describes who can reach whom; the
+public key; UDP links use keys derived from those static keys and carry
+authenticated encrypted packets; a gossip map on each node describes who can reach whom; the
 source picks the whole path and relays only follow it; IP rides on top over a
 TUN device.
 
 This is the first version: registry, links, TUN, gossip, the routing map,
-relaying, and the dial loop over the full address closure. Link metrics,
-retransmits and additional transports come later and do not change the wire
-format.
+relaying, and periodic keepalives over the full address closure. Link metrics,
+retransmits and additional transports come later.
 
 ## Usage
 
@@ -48,26 +47,32 @@ endpoints is never dialed by a node that has not heard of it; it dials, and
 its own advertised addresses let others dial it back later. `tun` (default
 `mesh0`) and `mtu` (default 1380) are optional.
 
-`key` is one 32-byte seed. The Noise static keypair (`pub`) and the
+`key` is one 32-byte seed. The X25519 static keypair (`pub`) and the
 advertisement signing keypair (`sig`) are both derived from it: an
 advertisement travels past its author, so the link cipher cannot vouch for
 it and it carries its own signature.
 
 ## Wire format
 
-All multibyte integers in the mesh protocol use little-endian order,
-including handshake attempt IDs, session IDs, transport counters and route
-indexes. Encapsulated IP packets retain their standard network format.
-The Noise prologue is `mesh/2`; this wire format requires all nodes to be
-upgraded together from `mesh/1`.
+All multibyte integers in the mesh protocol use little-endian order.
+Encapsulated IP packets retain their standard network format. The key
+context is `mesh/3`; older wire formats are incompatible, so upgrade all
+nodes together.
 
-Outer packet, first byte is the type:
+Each pair derives a shared secret with X25519 and directional encryption
+keys with HKDF-SHA256. The HKDF context contains `mesh/3`, the sender's public
+key and the receiver's public key, in that order. There is no handshake and
+no forward secrecy.
+
+The only outer packet type is transport:
 
 | Type | Layout |
 |---|---|
-| init | `1`, sender id (4), Noise IK message 1 with an 8-byte attempt ID payload |
-| response | `2`, receiver id (4), sender id (4), Noise IK message 2 |
-| transport | `3`, receiver id (4), counter (8), ChaCha20-Poly1305 over the inner packet, header as associated data |
+| transport | `3`, sender index (2), packet ID (8), random nonce (24), XChaCha20-Poly1305 ciphertext and tag (16) |
+
+The entire header is authenticated as associated data. A fresh random nonce
+for every packet avoids encryption nonce reuse under the static key across
+process restarts.
 
 Inner packet, first byte is the type: `0` keepalive, `1` data, `2`
 advertisement. Data carries src index (2), hop count (1), the path as indexes
@@ -76,9 +81,9 @@ points at itself, advances it, and hands the packet to the session of the
 next index. An advertisement carries a 64-byte signature and the JSON body.
 
 One packet counter is initialized from Unix nanoseconds when the node starts.
-Every new init and every locally authored advertisement increments that same
-counter, across all peers and endpoints. Forwarded advertisements retain
-their author's ID.
+Every outgoing transport packet and every locally authored advertisement
+increments that same counter, across all peers and endpoints. Forwarded
+advertisements retain their author's ID inside a fresh transport packet.
 
 ## Map
 
@@ -86,34 +91,37 @@ Every node floods one advertisement about itself: its index, a packet ID in
 the `ts` field, the addresses it offers, and the peers it currently has a link
 with. Advertisement IDs are only compared with another advertisement of the
 same node; expiry runs on local arrival time instead. A newer
-advertisement is stored and passed on to every link except the one it came
-from, so it stops spreading on its own. A link coming up hands the new peer
+advertisement is stored and passed on to peers with an observed endpoint,
+except the one it came from, so it stops spreading on its own. This includes
+a peer whose incoming traffic has timed out: the outgoing direction can
+still deliver the update about the lost link. A link coming up hands the new peer
 the whole database at once.
 
 Routes are a breadth-first search by hop count over the advertised graph,
-recomputed whenever it changes. The source puts the whole path into the
+recomputed whenever it changes. An edge is usable only while both nodes
+advertise each other; receiving keepalives alone does not prove that the
+opposite direction works. The source puts the whole path into the
 packet, so relays make no decisions and loops cannot form.
 
-Dialing knocks on the closure of known addresses: the statics from the
-registry plus everything a peer advertises, which arrives through the mesh.
-So a node reachable only through a relay today becomes directly reachable as
-soon as one of its addresses works. Addresses inside the mesh subnet are
-never dialed: the overlay must not run over itself.
+Every second, a node sends a keepalive to every known endpoint of every
+peer: static registry addresses, advertised addresses learned through gossip,
+and the last authenticated source address. A peer reachable only through a
+relay can become directly reachable as soon as an endpoint works. Learned
+addresses inside the mesh subnet are filtered; static registry addresses
+are used as configured.
 
 ## Behaviour
 
-- A responder confirms a session only after receiving an authenticated
-  transport packet, so one-way init traffic cannot advertise a working link.
-- One session per peer, bound to the peer identity. Any authenticated packet
-  updates the remote endpoint, so a peer can roam.
-- Keepalive after 5 s idle, session dropped after 15 s without traffic.
+- No handshake, retries or exponential backoff. Keepalives go to every
+  endpoint once per second, regardless of data traffic or link state.
+- Any authenticated, non-replayed packet refreshes the peer's activity and
+  updates its remote endpoint, so a peer can roam.
+- A link becomes alive on the first accepted packet and expires after five
+  seconds without accepted packets, checked by the one-second timer.
 - Advertisement every 10 s and on every link change, expired after 40 s.
-- Dialing knocks on every known address of every peer without a session, with
-  per-address backoff from 1 s to 5 min. Crossed handshakes: the larger index
-  gives up its own attempt. An init from a peer that already has a session
-  replaces it; an init whose attempt ID is not greater than the last accepted
-  ID from that peer is rejected.
-- Replay protection on transport counters with a 1024-slot window.
+- Replay protection on packet IDs with a 1024-slot window. Derived keys and
+  replay state survive link expiry within the running process; a receiver
+  restart resets its replay history.
 
 ## Development
 
@@ -158,14 +166,16 @@ roaming and fallback between two physical segments. Concurrent SSH clients
 have distinct mesh IPs. The same SSH process exchanges numbered requests
 throughout; tests reject missing/duplicate replies and report its maximum
 pause. Route convergence is bounded by 30 seconds and SSH recovery by 60
-seconds, allowing for the current 15-second session timeout and TCP retries.
+seconds, allowing for gossip propagation and TCP retries after the five-second link timeout.
 
 Other scenarios transfer and hash files through scp and curl while cutting
 the active path, synchronize trees with rsync, and run iperf3 TCP/UDP streams
 with deterministic loss and delay. UDP probes check packet sizes, replay,
-reordering and packets older than the replay window. Gossip expiry,
-handshake loss/replay, unknown keys, CLI errors and malformed packets have
-separate tests. `mesh-probe` is built only with the `meshprobe` tag for the
+reordering and packets older than the replay window. Separate tests check
+keepalives on every endpoint during SSH traffic, data keeping a link alive
+when keepalives are dropped, five-second expiry, replay after expiry, and a
+20-second RTT carrying UDP traffic without link flaps. Gossip expiry, unknown
+keys, CLI errors and malformed packets also have separate tests. `mesh-probe` is built only with the `meshprobe` tag for the
 protocol test; it sends authenticated malformed messages to real mesh nodes.
 It is absent from the production binary and its coverage profile.
 

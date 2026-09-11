@@ -8,13 +8,15 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/flynn/noise"
 	"golang.org/x/crypto/curve25519"
 )
 
-var cipherSuite = noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashBLAKE2s)
+const protocol = "mesh/3"
 
-const prologue = "mesh/2"
+type DHKey struct {
+	private []byte
+	public  []byte
+}
 
 type KeyPair struct {
 	Key string `json:"key"`
@@ -22,7 +24,7 @@ type KeyPair struct {
 	Sig string `json:"sig"`
 }
 
-func deriveKeys(seed []byte) (noise.DHKey, ed25519.PrivateKey) {
+func deriveKeys(seed []byte) (DHKey, ed25519.PrivateKey) {
 	h := sha512.Sum512(seed)
 	scalar := h[:32]
 
@@ -32,7 +34,7 @@ func deriveKeys(seed []byte) (noise.DHKey, ed25519.PrivateKey) {
 
 	pub := throw2(curve25519.X25519(scalar, curve25519.Basepoint))
 
-	return noise.DHKey{Private: scalar, Public: pub}, ed25519.NewKeyFromSeed(seed)
+	return DHKey{private: scalar, public: pub}, ed25519.NewKeyFromSeed(seed)
 }
 
 func keygen() {
@@ -44,7 +46,7 @@ func keygen() {
 
 	out := throw2(json.Marshal(KeyPair{
 		Key: base64.StdEncoding.EncodeToString(seed),
-		Pub: base64.StdEncoding.EncodeToString(dh.Public),
+		Pub: base64.StdEncoding.EncodeToString(dh.public),
 		Sig: base64.StdEncoding.EncodeToString(sig.Public().(ed25519.PublicKey)),
 	}))
 

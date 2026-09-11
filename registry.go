@@ -16,7 +16,6 @@ type Peer struct {
 
 type Registry struct {
 	byIndex map[uint16]*Peer
-	byPub   map[[32]byte]*Peer
 	byIntip map[[4]byte]*Peer
 }
 
@@ -47,7 +46,6 @@ func decodeKey(s string) []byte {
 func newRegistry(peers []PeerConfig) *Registry {
 	r := &Registry{
 		byIndex: map[uint16]*Peer{},
-		byPub:   map[[32]byte]*Peer{},
 		byIntip: map[[4]byte]*Peer{},
 	}
 
@@ -72,7 +70,6 @@ func newRegistry(peers []PeerConfig) *Registry {
 		}
 
 		r.byIndex[p.index] = p
-		r.byPub[[32]byte(p.pub)] = p
 		r.byIntip[p.intip] = p
 	}
 

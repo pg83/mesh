@@ -12,13 +12,13 @@ def test():
         lab.wait_links('c', ['a', 'b'])
         lab.stop_node('c')
         lab.keygen(lab.nodes['c'])
-        attempt = lab.intercept('c', 'b', 'copy', kind=1)
+        attempt = lab.intercept('c', 'b', 'copy', kind=3)
         lab.start_node('c')
-        lab.wait(lambda: attempt['hits'] == 1, 'unknown key init actually sent')
+        lab.wait(lambda: attempt['hits'] == 1, 'unknown key packet actually sent')
         lab.wait_links('b', ['a'], timeout=30)
         lab.wait_links('a', ['b'], timeout=30)
         assert lab.links('c') == set()
-        # Give an additional handshake timeout to any in-flight attempts.
+        # More keepalives from the changed identity must remain rejected.
         until = time.monotonic() + 6
         while time.monotonic() < until:
             assert lab.links('c') == set()

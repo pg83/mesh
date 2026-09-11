@@ -21,11 +21,10 @@ type LinkStatus struct {
 }
 
 type Status struct {
-	Index   uint16              `json:"index"`
-	Links   []LinkStatus        `json:"links"`
-	Nodes   []uint16            `json:"nodes"`
-	Routes  map[string][]uint16 `json:"routes"`
-	Pending int                 `json:"pending"`
+	Index  uint16              `json:"index"`
+	Links  []LinkStatus        `json:"links"`
+	Nodes  []uint16            `json:"nodes"`
+	Routes map[string][]uint16 `json:"routes"`
 }
 
 func (n *Node) status() *Status {
@@ -60,8 +59,6 @@ func (n *Node) status() *Status {
 	for dst, path := range n.routes {
 		st.Routes[strconv.Itoa(int(dst))] = path
 	}
-
-	st.Pending = len(n.pending)
 
 	return st
 }

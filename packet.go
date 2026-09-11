@@ -3,16 +3,12 @@ package main
 import "encoding/binary"
 
 const (
-	packetInit      = 1
-	packetResponse  = 2
 	packetTransport = 3
 	innerKeepalive  = 0
 	innerData       = 1
 	innerAd         = 2
-	headerInit      = 1 + 4
-	headerResponse  = 1 + 4 + 4
-	headerTransport = 1 + 4 + 8
-	nonceSize       = 12
+	nonceSize       = 24
+	headerTransport = 1 + 2 + 8 + nonceSize
 	maxPacket       = 65535
 	maxHops         = 16
 )

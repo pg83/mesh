@@ -38,18 +38,19 @@ def test():
         now = time.time_ns() + 1_000_000_000
         body = dict(index=1, ts=now, addrs=['invalid', '10.77.0.1:7000'], neighbors=[])
         send('ad', body=body)
-        lab.wait(lambda: lab.status('b')['routes'].get('1') == [1], 'probe peer reachable')
+        lab.wait(lambda: lab.nodes['a'].index in lab.links('b'), 'probe peer alive')
         send('ad', body=body)  # same announcement must not flood again
         send('ad', body=dict(body, index=99, ts=now + 1))
         send('ad', body=dict(body, index=3, ts=now + 2))  # signature belongs to a, not c
-        # A newer signed ad changes routing; the same older ad cannot undo it.
-        send('ad', body=dict(body, ts=now + 3, neighbors=[99]))
-        lab.wait(lambda: lab.status('b')['routes'].get('99') == [1, 99], 'new advertisement applied')
+        # Routing requires both endpoints to advertise the link.
+        send('ad', body=dict(body, ts=now + 3, neighbors=[2]))
+        lab.wait(lambda: lab.status('b')['routes'].get('1') == [1], 'mutual link advertised')
         send('ad', body=body)
         # Keep the real b/c application route healthy after all malformed traffic.
         lab.wait_ping('b', 'c')
         lab.wait_ping('c', 'b')
-        assert lab.status('b')['routes']['99'] == [1, 99]
+        assert lab.status('b')['routes']['1'] == [1]
+        assert '99' not in lab.status('b')['routes']
         assert 99 not in lab.status('b')['nodes']
         # Delivery with a valid route but invalid IP payload must not kill a node.
         for ip in (b'bad', b'\x65' + b'\0' * 19, b'\x44' + b'\0' * 19,
@@ -59,7 +60,8 @@ def test():
         probe.stdin.close()
         assert probe.wait(timeout=10) == 0
         lab.wait_links('b', ['c'], timeout=30)
-        lab.wait(lambda: lab.status('b')['pending'] > 0, 'redial from advertised candidates')
+        probe_attempt = lab.intercept('b', 'a', 'copy', kind=3, min_size=52, max_size=52)
+        lab.wait(lambda: probe_attempt['hits'] == 1, 'keepalive to the expired peer')
         lab.wait_ping('b', 'c')
 
 

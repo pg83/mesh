@@ -11,7 +11,7 @@ import lib
 
 
 def fragmented_status():
-    status = dict(index=1, links=[], nodes=[1], pending=0,
+    status = dict(index=1, links=[], nodes=[1],
                   routes={str(i): [1, 2, 3] for i in range(60000)})
     payload = json.dumps(status).encode() + b'\n'
     assert len(payload) > 1 << 20

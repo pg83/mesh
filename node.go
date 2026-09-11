@@ -2,50 +2,33 @@ package main
 
 import (
 	"crypto/ed25519"
-	"crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"log/slog"
 	"net"
 	"os"
 	"os/signal"
 	"slices"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/flynn/noise"
 )
 
 const (
-	tickInterval      = time.Second
-	keepaliveInterval = 5 * time.Second
-	sessionTimeout    = 15 * time.Second
-	handshakeTimeout  = 5 * time.Second
-	dialMinDelay      = time.Second
-	dialMaxDelay      = 5 * time.Minute
+	tickInterval   = time.Second
+	sessionTimeout = 5 * time.Second
 )
-
-type Attempt struct {
-	next  time.Time
-	delay time.Duration
-}
 
 type Node struct {
 	cfg      *Config
 	reg      *Registry
-	key      noise.DHKey
+	key      DHKey
 	conn     *net.UDPConn
 	tun      *Tun
 	log      *slog.Logger
 	mu       sync.Mutex
 	sessions map[uint16]*Session
-	byID     map[uint32]*Session
-	pending  map[uint32]*Handshake
-	lastInit map[uint16]uint64
+	peers    map[uint16]*Session
 	packetID uint64
-	attempts map[string]*Attempt
 	sig      ed25519.PrivateKey
 	ads      map[uint16]*Known
 	routes   map[uint16][]uint16
@@ -72,19 +55,22 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		ads:      map[uint16]*Known{},
 		routes:   map[uint16][]uint16{},
 		sessions: map[uint16]*Session{},
-		byID:     map[uint32]*Session{},
-		pending:  map[uint32]*Handshake{},
-		lastInit: map[uint16]uint64{},
+		peers:    map[uint16]*Session{},
 		packetID: uint64(time.Now().UnixNano()),
-		attempts: map[string]*Attempt{},
 	}
 
-	if string(n.key.Public) != string(me.pub) {
+	if string(n.key.public) != string(me.pub) {
 		throwFmt("private key does not match registry entry %d", cfg.Index)
 	}
 
 	if string(sig.Public().(ed25519.PublicKey)) != string(me.sig) {
 		throwFmt("signing key does not match registry entry %d", cfg.Index)
+	}
+
+	for index, peer := range reg.byIndex {
+		if index != cfg.Index {
+			n.peers[index] = newSession(me, peer, dh.private)
+		}
 	}
 
 	_, n.subnet = throw3(net.ParseCIDR(cfg.Subnet))
@@ -120,102 +106,26 @@ func (n *Node) loop(name string, body func()) {
 	})
 }
 
-func (n *Node) freshID() uint32 {
-	for {
-		var b [4]byte
-		throw2(rand.Read(b[:]))
-
-		id := binary.LittleEndian.Uint32(b[:])
-		_, s := n.byID[id]
-		_, h := n.pending[id]
-
-		if id != 0 && !s && !h {
-			return id
-		}
-	}
-}
-
-func (n *Node) handshakeState(initiator bool, peerPub []byte) *noise.HandshakeState {
-	return throw2(noise.NewHandshakeState(noise.Config{
-		CipherSuite:   cipherSuite,
-		Pattern:       noise.HandshakeIK,
-		Initiator:     initiator,
-		Prologue:      []byte(prologue),
-		StaticKeypair: n.key,
-		PeerStatic:    peerPub,
-	}))
-}
-
 func (n *Node) send(packet []byte, addr *net.UDPAddr) {
 	n.conn.WriteToUDP(packet, addr)
 }
 
 func (n *Node) install(s *Session) {
-	if old := n.sessions[s.peer]; old != nil {
-		delete(n.byID, old.localID)
-	}
-
 	n.sessions[s.peer] = s
-	n.byID[s.localID] = s
-	n.dropUnconfirmed(s.peer)
-	n.dropPending(s.peer)
-	n.forgetAttempts(s.peer)
+	s.created = s.lastRecv
 	n.log.Info("link up", "peer", s.peer, "endpoint", s.endpoint)
 
-	n.send(s.seal([]byte{innerKeepalive}, time.Now()), s.endpoint)
 	n.recompute()
 	n.syncTo(s.peer)
 	n.publish(time.Now())
 }
 
-func (n *Node) dropUnconfirmed(peer uint16) {
-	for id, s := range n.byID {
-		if s.peer == peer && n.sessions[peer] != s {
-			delete(n.byID, id)
-		}
-	}
-}
-
 func (n *Node) remove(s *Session, why string) {
 	delete(n.sessions, s.peer)
-	delete(n.byID, s.localID)
-	n.forgetAttempts(s.peer)
 	n.log.Info("link down", "peer", s.peer, "why", why)
 
 	n.recompute()
 	n.publish(time.Now())
-}
-
-func (n *Node) dropPending(peer uint16) {
-	for id, h := range n.pending {
-		if h.peer == peer {
-			delete(n.pending, id)
-		}
-	}
-}
-
-func (n *Node) hasPending(peer uint16) bool {
-	for _, h := range n.pending {
-		if h.peer == peer {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (n *Node) forgetAttempts(peer uint16) {
-	prefix := attemptKey(peer, "")
-
-	for key := range n.attempts {
-		if strings.HasPrefix(key, prefix) {
-			delete(n.attempts, key)
-		}
-	}
-}
-
-func attemptKey(peer uint16, addr string) string {
-	return fmt.Sprintf("%d:%s", peer, addr)
 }
 
 func (n *Node) recvLoop() {
@@ -231,12 +141,7 @@ func (n *Node) recvLoop() {
 
 		n.mu.Lock()
 
-		switch packet[0] {
-		case packetInit:
-			n.handleInit(packet, addr)
-		case packetResponse:
-			n.handleResponse(packet, addr)
-		case packetTransport:
+		if packet[0] == packetTransport {
 			n.handleTransport(packet, addr)
 		}
 
@@ -244,90 +149,12 @@ func (n *Node) recvLoop() {
 	}
 }
 
-func (n *Node) handleInit(packet []byte, addr *net.UDPAddr) {
-	if len(packet) < headerInit {
-		return
-	}
-
-	remoteID := binary.LittleEndian.Uint32(packet[1:])
-	hs := n.handshakeState(false, nil)
-	payload, _, _, err := hs.ReadMessage(nil, packet[headerInit:])
-
-	if err != nil || len(payload) != 8 {
-		return
-	}
-
-	peer := n.reg.byPub[[32]byte(hs.PeerStatic())]
-
-	if peer == nil || peer.index == n.cfg.Index {
-		return
-	}
-
-	stamp := binary.LittleEndian.Uint64(payload)
-
-	if stamp <= n.lastInit[peer.index] {
-		return
-	}
-
-	if n.hasPending(peer.index) {
-		if n.cfg.Index < peer.index {
-			return
-		}
-
-		n.dropPending(peer.index)
-	}
-
-	response, recv, send, err := hs.WriteMessage(nil, nil)
-
-	if err != nil {
-		return
-	}
-
-	n.lastInit[peer.index] = stamp
-
-	now := time.Now()
-	s := newSession(peer.index, n.freshID(), remoteID, send, recv, addr, now)
-
-	n.dropUnconfirmed(peer.index)
-	n.byID[s.localID] = s
-
-	out := make([]byte, headerResponse, headerResponse+len(response))
-
-	out[0] = packetResponse
-	binary.LittleEndian.PutUint32(out[1:], remoteID)
-	binary.LittleEndian.PutUint32(out[5:], s.localID)
-	n.send(append(out, response...), addr)
-}
-
-func (n *Node) handleResponse(packet []byte, addr *net.UDPAddr) {
-	if len(packet) < headerResponse {
-		return
-	}
-
-	localID := binary.LittleEndian.Uint32(packet[1:])
-	remoteID := binary.LittleEndian.Uint32(packet[5:])
-	h := n.pending[localID]
-
-	if h == nil {
-		return
-	}
-
-	_, send, recv, err := h.state.ReadMessage(nil, packet[headerResponse:])
-
-	if err != nil {
-		return
-	}
-
-	delete(n.pending, localID)
-	n.install(newSession(h.peer, localID, remoteID, send, recv, addr, time.Now()))
-}
-
 func (n *Node) handleTransport(packet []byte, addr *net.UDPAddr) {
 	if len(packet) < headerTransport {
 		return
 	}
 
-	s := n.byID[binary.LittleEndian.Uint32(packet[1:])]
+	s := n.peers[binary.LittleEndian.Uint16(packet[1:])]
 
 	if s == nil {
 		return
@@ -381,13 +208,13 @@ func (n *Node) handleData(inner []byte) {
 }
 
 func (n *Node) forward(peer uint16, inner []byte) {
-	s := n.sessions[peer]
+	s := n.peers[peer]
 
-	if s == nil {
+	if s == nil || s.endpoint == nil {
 		return
 	}
 
-	n.send(s.seal(inner, time.Now()), s.endpoint)
+	n.send(s.seal(inner, n.nextPacketID()), s.endpoint)
 }
 
 func (n *Node) tunLoop() {
@@ -430,22 +257,8 @@ func (n *Node) timerLoop() {
 
 func (n *Node) tick(now time.Time) {
 	for _, s := range n.sessions {
-		if now.Sub(s.lastRecv) > sessionTimeout {
+		if now.Sub(s.lastRecv) >= sessionTimeout {
 			n.remove(s, "timeout")
-		} else if now.Sub(s.lastSend) > keepaliveInterval {
-			n.send(s.seal([]byte{innerKeepalive}, now), s.endpoint)
-		}
-	}
-
-	for id, h := range n.pending {
-		if now.Sub(h.created) > handshakeTimeout {
-			delete(n.pending, id)
-		}
-	}
-
-	for id, s := range n.byID {
-		if n.sessions[s.peer] != s && now.Sub(s.created) > handshakeTimeout {
-			delete(n.byID, id)
 		}
 	}
 
@@ -455,44 +268,26 @@ func (n *Node) tick(now time.Time) {
 		n.publish(now)
 	}
 
-	n.dial(now)
-}
-
-func (n *Node) dial(now time.Time) {
-	for _, peer := range n.reg.byIndex {
-		if peer.index == n.cfg.Index || n.sessions[peer.index] != nil {
-			continue
-		}
-
-		for _, addr := range n.candidates(peer) {
-			key := attemptKey(peer.index, addr.String())
-			a := n.attempts[key]
-
-			if a == nil {
-				a = &Attempt{delay: dialMinDelay}
-				n.attempts[key] = a
-			}
-
-			if now.Before(a.next) {
-				continue
-			}
-
-			a.next = now.Add(a.delay)
-			a.delay = min(a.delay*2, dialMaxDelay)
-			n.sendInit(peer, addr, now)
+	for index, s := range n.peers {
+		for _, addr := range n.candidates(n.reg.byIndex[index]) {
+			n.send(s.seal([]byte{innerKeepalive}, n.nextPacketID()), addr)
 		}
 	}
 }
 
 func (n *Node) candidates(peer *Peer) []*net.UDPAddr {
 	addrs := slices.Clone(peer.static)
-	known := n.ads[peer.index]
+	texts := []string{}
 
-	if known == nil {
-		return addrs
+	if known := n.ads[peer.index]; known != nil {
+		texts = append(texts, known.ad.Addrs...)
 	}
 
-	for _, text := range known.ad.Addrs {
+	if addr := n.peers[peer.index].endpoint; addr != nil {
+		texts = append(texts, addr.String())
+	}
+
+	for _, text := range texts {
 		addr, err := net.ResolveUDPAddr("udp", text)
 
 		if err != nil || n.subnet.Contains(addr.IP) {
@@ -513,30 +308,4 @@ func (n *Node) nextPacketID() uint64 {
 	n.packetID++
 
 	return n.packetID
-}
-
-func (n *Node) sendInit(peer *Peer, addr *net.UDPAddr, now time.Time) {
-	hs := n.handshakeState(true, peer.pub)
-	id := binary.LittleEndian.AppendUint64(nil, n.nextPacketID())
-	msg, _, _, err := hs.WriteMessage(nil, id)
-
-	if err != nil {
-		return
-	}
-
-	h := &Handshake{
-		peer:    peer.index,
-		localID: n.freshID(),
-		state:   hs,
-		addr:    addr,
-		created: now,
-	}
-
-	n.pending[h.localID] = h
-
-	out := make([]byte, headerInit, headerInit+len(msg))
-
-	out[0] = packetInit
-	binary.LittleEndian.PutUint32(out[1:], h.localID)
-	n.send(append(out, msg...), addr)
 }
