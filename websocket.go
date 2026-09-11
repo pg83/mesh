@@ -34,7 +34,7 @@ type WSConnection struct {
 	peer   uint16
 	origin uint64
 	id     uint64
-	queue  chan []byte
+	queue  *Mailbox[[]byte]
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -138,11 +138,7 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 
 		c := newWSConnection(socket, binding.To, binding.From, session.peer, binding.From.hash(), binary.LittleEndian.Uint64(packet[3:]))
 
-		if !post(n.events, any(c)) {
-			c.stop()
-
-			return
-		}
+		n.events.in <- c
 
 		<-c.ctx.Done()
 	}).catch(func(e *Exception) { n.log.Debug("websocket accept failed", "err", e) })
@@ -202,7 +198,7 @@ func newWSConnection(socket *websocket.Conn, source, target Endpoint, peer uint1
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &WSConnection{conn: socket, edge: Edge{From: source.hash(), To: target.hash()}, source: source, target: target,
-		peer: peer, origin: origin, id: id, queue: make(chan []byte, 64), ctx: ctx, cancel: cancel}
+		peer: peer, origin: origin, id: id, queue: newMailbox[[]byte](ctx.Done()), ctx: ctx, cancel: cancel}
 }
 
 func (c *WSConnection) stop() {
@@ -211,7 +207,10 @@ func (c *WSConnection) stop() {
 
 func (a *EdgeActor) sendWS(packet []byte) {
 	if a.ws != nil {
-		post(a.ws.queue, packet)
+		select {
+		case a.ws.queue.in <- packet:
+		case <-a.ws.ctx.Done():
+		}
 
 		return
 	}
@@ -329,7 +328,7 @@ func (c *WSConnection) run(input chan any, n *Node) {
 		errors <- try(func() {
 			for {
 				select {
-				case packet := <-c.queue:
+				case packet := <-c.queue.out:
 					throw(c.conn.Write(c.ctx, websocket.MessageBinary, packet))
 				case <-c.ctx.Done():
 					return

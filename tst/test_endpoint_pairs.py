@@ -12,6 +12,9 @@ def test():
             lab.ports[(1, socket.inet_aton('10.1.0.101'))] = lab.ports[(1, socket.inet_aton('10.1.0.1'))]
         lab.wait_ping('a', 'b')
         stream = workload.SshServer(lab, 'b').stream('a')
+        lab.wait(lambda: (route := lab.endpoint_route('a', 'b'))
+                 and route[0]['from'] == lib.endpoint('10.1.0.1'),
+                 'initial route uses the source endpoint that will fail')
         lab.intercept('a', 'b', 'drop', source_ip='10.1.0.1', count=-1)
         def alternative():
             route = lab.endpoint_route('a', 'b')

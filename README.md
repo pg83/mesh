@@ -82,12 +82,13 @@ the configured source IP and interface. Reception accepts only configured
 local address/port pairs. Each local pair must map to one advertised pair,
 and each advertised pair to one local pair. Exact duplicate entries are harmless.
 
-Each directed transport edge has a goroutine and a buffered mailbox. Edge actors
+Each directed transport edge has a goroutine and an unbounded FIFO mailbox. Edge actors
 handle authentication, gossip and forwarding directly to the next edge actor;
 inactive candidates remain available for rediscovery. One graph goroutine merges
 observations and advertisements and periodically publishes a shared immutable
-snapshot, including routes, to the actors and TUN. Mailbox sends are nonblocking:
-full queues drop messages, and snapshots and link observations are repeated.
+snapshot, including routes, to the actors and TUN. Each mailbox has a channel-driven
+queue that accepts messages independently of its consumer. Packets and snapshots
+share that queue; there is no configured capacity or drop-on-full policy.
 Socket reads run independently of mailbox processing. There is no shared mutex
 around graph updates or packet forwarding.
 
@@ -238,15 +239,15 @@ rebuild routes.
 Status exposes incoming endpoint pairs, the live graph, its vertices, and
 routes keyed by destination endpoint. Each edge reports its latest observation
 periodically; the graph owner publishes immutable snapshots through the same
-bounded mailboxes used for packets.
+mailboxes used for packets.
 WS connections are indexed by an unordered endpoint pair, so incoming and
 outgoing routes use one connection. Simultaneous dials prefer the connection
 initiated by the smaller endpoint hash; duplicate attempts from that same
 endpoint prefer the larger first-packet ID. A sole working connection stays
 open regardless of initiator. There is at most one pending dial per pair,
 and a new timer tick never restarts that attempt. Each WS connection has a
-reader and writer, with a bounded outgoing queue; a full queue drops packets
-rather than blocking other transports. Dial, HTTP upgrade, authentication
+reader and writer, with an unbounded outgoing mailbox so a stalled write does
+not block other transports. Closing a connection releases its pending queue. Dial, HTTP upgrade, authentication
 exchange, and socket writes run independently of graph updates. Old connection
 cleanup cannot remove its replacement. Five seconds of silence withdraws
 incoming liveness independently of TCP connection state.

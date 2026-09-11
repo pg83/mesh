@@ -41,9 +41,9 @@ type Node struct {
 	tlsCA      map[uint64]string
 	endpoints  []SocketEndpoint
 	tun        *Tun
-	events     chan any
-	tunInbox   chan any
-	tunWrites  chan []byte
+	events     *Mailbox[any]
+	tunInbox   *Mailbox[any]
+	tunWrites  *Mailbox[[]byte]
 	actors     map[Edge]*EdgeActor
 	snapshot   *Snapshot
 	ws         map[Edge]WSStatus
@@ -71,7 +71,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	dh, sig := deriveKeys(decodeKey(cfg.Key))
 
 	n := &Node{
-		events: make(chan any, 1024), tunInbox: make(chan any, 1024), tunWrites: make(chan []byte, 1024), actors: map[Edge]*EdgeActor{},
+		events: newMailbox[any](nil), tunInbox: newMailbox[any](nil), tunWrites: newMailbox[[]byte](nil), actors: map[Edge]*EdgeActor{},
 		cfg: cfg, reg: reg, key: dh, sig: sig, log: log,
 		graph: map[Edge]State{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
 		discovered: map[uint16]map[uint64]time.Time{}, owners: map[uint64]uint16{},
@@ -156,7 +156,7 @@ func (n *Node) run() {
 	go n.loop("TUN reader", n.readTun)
 	go n.loop("TUN actor", n.tunLoop)
 	go n.loop("TUN writer", func() {
-		for p := range n.tunWrites {
+		for p := range n.tunWrites.out {
 			n.tun.write(p)
 		}
 	})

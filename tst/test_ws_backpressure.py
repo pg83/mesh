@@ -1,4 +1,4 @@
-"""A stalled WebSocket writer must not hold the graph lock or stall another UDP peer."""
+"""A stalled WebSocket writer queues packets while the graph and another peer progress."""
 import sys
 import time
 import lib
@@ -23,12 +23,17 @@ def test():
         for i in range(20):
             started = time.monotonic()
             lab.status('a')
-            assert time.monotonic() - started < 2, 'WS writer holds graph mutex'
+            assert time.monotonic() - started < 2, 'WS writer stalls graph updates'
             payload = f'other-peer-{i}'.encode()
             client.send(payload)
             assert client.recv() == payload
             time.sleep(.1)
         assert flood.wait(timeout=10) == 0
+        lab.unblock('a', 'b')
+        lab.wait_ping('a', 'b')
+        resumed = workload.UdpClient(lab, 'a', 'b')
+        resumed.send(b'writer-resumed')
+        assert resumed.recv() == b'writer-resumed'
 
 
 lib.main(test)

@@ -57,7 +57,7 @@ type EdgeActor struct {
 	edge     Edge
 	peer     uint16
 	outgoing bool
-	inbox    chan any
+	inbox    *Mailbox[any]
 	view     *Snapshot
 	session  *Session
 	packetID uint64
@@ -65,15 +65,6 @@ type EdgeActor struct {
 	udp      *UDPLink
 	ws       *WSConnection
 	dial     <-chan DialResult
-}
-
-func post[T any](in chan<- T, message T) bool {
-	select {
-	case in <- message:
-		return true
-	default:
-		return false
-	}
 }
 
 func (a *EdgeActor) run() {
@@ -89,7 +80,7 @@ func (a *EdgeActor) run() {
 		}
 
 		select {
-		case msg := <-a.inbox:
+		case msg := <-a.inbox.out:
 			switch v := msg.(type) {
 			case *Snapshot:
 				first := a.view == nil
@@ -97,7 +88,7 @@ func (a *EdgeActor) run() {
 				a.view = v
 				a.updateTransport()
 
-				if first {
+				if first && a.udp != nil {
 					a.gossip()
 				}
 			case Received:
@@ -143,7 +134,7 @@ func (a *EdgeActor) report() {
 		report.connection = &WSStatus{Edge: connectionKey(a.edge), Origin: a.ws.origin, ID: a.ws.id}
 	}
 
-	post(a.node.events, any(report))
+	post(a.node.events.in, any(report))
 }
 
 func (a *EdgeActor) updateTransport() {
@@ -299,7 +290,7 @@ func (a *EdgeActor) advertisement(inner []byte) {
 		return
 	}
 
-	post(a.node.events, any(ad))
+	post(a.node.events.in, any(ad))
 }
 
 func (a *EdgeActor) forward(inner []byte) {
@@ -311,7 +302,7 @@ func (a *EdgeActor) forward(inner []byte) {
 
 	if d.cursor == len(d.path)-1 {
 		if validIPv4(d.ip) && endpoint(net.IP(d.ip[16:20]), 0).hash() == a.node.reg.byIndex[a.node.cfg.Index].endpoint().hash() {
-			post(a.node.tunWrites, d.ip)
+			post(a.node.tunWrites.in, d.ip)
 		}
 
 		return
@@ -354,7 +345,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 
 		remote := addr.(*net.UDPAddr)
 
-		post(n.events, any(Discovery{wire: endpoint(control.Dst, int(socket.port)), remote: endpoint(remote.IP, remote.Port), peer: peer,
+		post(n.events.in, any(Discovery{wire: endpoint(control.Dst, int(socket.port)), remote: endpoint(remote.IP, remote.Port), peer: peer,
 			received: Received{packet: append([]byte(nil), buf[:size]...), at: time.Now()}}))
 	}
 }
@@ -366,7 +357,7 @@ func (n *Node) readTun() {
 		packet := n.tun.read(buf)
 
 		if validIPv4(packet) {
-			post(n.tunInbox, any(TunPacket{ip: append([]byte(nil), packet...)}))
+			post(n.tunInbox.in, any(TunPacket{ip: append([]byte(nil), packet...)}))
 		}
 	}
 }
@@ -374,7 +365,7 @@ func (n *Node) readTun() {
 func (n *Node) tunLoop() {
 	var view *Snapshot
 
-	for message := range n.tunInbox {
+	for message := range n.tunInbox.out {
 		switch v := message.(type) {
 		case *Snapshot:
 			view = v

@@ -10,7 +10,7 @@ func (n *Node) edgeActor(edge Edge, peer uint16, outgoing bool) *EdgeActor {
 	actor := n.actors[edge]
 
 	if actor == nil {
-		actor = &EdgeActor{node: n, edge: edge, peer: peer, outgoing: outgoing, inbox: make(chan any, 64),
+		actor = &EdgeActor{node: n, edge: edge, peer: peer, outgoing: outgoing, inbox: newMailbox[any](nil),
 			session: n.session(peer), packetID: uint64(time.Now().UnixNano())}
 		n.actors[edge] = actor
 		go n.loop("edge", actor.run)
@@ -54,7 +54,7 @@ func (n *Node) publishSnapshot() {
 	actors := map[Edge]chan any{}
 
 	for edge, actor := range n.actors {
-		actors[edge] = actor.inbox
+		actors[edge] = actor.inbox.in
 	}
 
 	view := &Snapshot{graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local), owners: maps.Clone(n.owners),
@@ -64,10 +64,10 @@ func (n *Node) publishSnapshot() {
 	n.snapshot = view
 
 	for _, actor := range n.actors {
-		post(actor.inbox, any(view))
+		post(actor.inbox.in, any(view))
 	}
 
-	post(n.tunInbox, any(view))
+	post(n.tunInbox.in, any(view))
 }
 
 func (n *Node) observe(r EdgeReport) {
@@ -109,7 +109,7 @@ func (n *Node) graphLoop() {
 
 	for {
 		select {
-		case event := <-n.events:
+		case event := <-n.events.out:
 			switch v := event.(type) {
 			case *Ad:
 				n.handleAd(v)
@@ -125,14 +125,20 @@ func (n *Node) graphLoop() {
 				}
 
 				remote := n.remember(v.remote)
+				edge := Edge{From: remote, To: local}
+				created := n.actors[edge] == nil
 
 				n.edgePair(Edge{From: local, To: remote}, v.peer)
 
-				edge := Edge{From: remote, To: local}
-
 				n.observe(EdgeReport{edge: edge, peer: v.peer, seen: v.received.at})
-				n.publishSnapshot()
-				post(n.actors[edge].inbox, any(v.received))
+
+				if created {
+					n.publishSnapshot()
+				} else {
+					dirty = true
+				}
+
+				post(n.actors[edge].inbox.in, any(v.received))
 			case *WSConnection:
 				if n.local[v.edge.From] == nil {
 					v.stop()
@@ -149,10 +155,7 @@ func (n *Node) graphLoop() {
 				n.discovered[v.peer][v.edge.To] = time.Now()
 				n.publishSnapshot()
 
-				if !post(actor.inbox, any(v)) {
-					v.stop()
-					v.conn.CloseNow()
-				}
+				post(actor.inbox.in, any(v))
 			case chan *Snapshot:
 				post(v, n.snapshot)
 			case chan *Status:
@@ -184,7 +187,7 @@ func (n *Node) currentSnapshot(ctx context.Context) *Snapshot {
 	reply := make(chan *Snapshot, 1)
 
 	select {
-	case n.events <- reply:
+	case n.events.in <- reply:
 	case <-ctx.Done():
 		throw(ctx.Err())
 	}

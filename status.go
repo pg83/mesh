@@ -104,7 +104,7 @@ func (n *Node) statusLoop() {
 		conn := throw2(ln.Accept())
 		reply := make(chan *Status, 1)
 
-		n.events <- reply
+		n.events.in <- reply
 
 		out := throw2(json.Marshal(<-reply))
 
