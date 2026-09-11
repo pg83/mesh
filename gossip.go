@@ -134,7 +134,13 @@ func (n *Node) handleAd(inner []byte, from uint16) {
 
 	peer := n.reg.byIndex[ad.Index]
 
-	if peer == nil || !ed25519.Verify(peer.sig, blob, sig) {
+	fresh := slices.ContainsFunc(ad.Edges, func(update Update) bool {
+		previous := n.graph[update.Edge]
+
+		return previous == nil || update.ID > previous.ID
+	})
+
+	if peer == nil || !fresh || !ed25519.Verify(peer.sig, blob, sig) {
 		return
 	}
 
