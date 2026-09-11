@@ -16,7 +16,7 @@ const (
 
 type Ad struct {
 	Index     uint16   `json:"index"`
-	Timestamp int64    `json:"ts"`
+	ID        uint64   `json:"ts"`
 	Addrs     []string `json:"addrs"`
 	Neighbors []uint16 `json:"neighbors"`
 }
@@ -89,7 +89,7 @@ func (n *Node) neighbors() []uint16 {
 func (n *Node) publish(now time.Time) {
 	ad := &Ad{
 		Index:     n.cfg.Index,
-		Timestamp: now.UnixNano(),
+		ID:        n.nextPacketID(),
 		Addrs:     n.localAddrs(),
 		Neighbors: n.neighbors(),
 	}
@@ -137,7 +137,7 @@ func (n *Node) handleAd(inner []byte, from uint16) {
 		return
 	}
 
-	if old := n.ads[ad.Index]; old != nil && ad.Timestamp <= old.ad.Timestamp {
+	if old := n.ads[ad.Index]; old != nil && ad.ID <= old.ad.ID {
 		return
 	}
 

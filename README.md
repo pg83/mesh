@@ -73,15 +73,17 @@ advertisement. Data carries src index (2), hop count (1), the path as indexes
 points at itself, advances it, and hands the packet to the session of the
 next index. An advertisement carries a 64-byte signature and the JSON body.
 
-The attempt counter is initialized from Unix nanoseconds when the node starts
-and incremented once for every init, across all peers and endpoints.
+One packet counter is initialized from Unix nanoseconds when the node starts.
+Every new init and every locally authored advertisement increments that same
+counter, across all peers and endpoints. Forwarded advertisements retain
+their author's ID.
 
 ## Map
 
-Every node floods one advertisement about itself: its index, a timestamp, the
-addresses it offers, and the peers it currently has a link with. Timestamps
-are per-node counters and are only ever compared with another advertisement
-of the same node; expiry runs on local arrival time instead. A newer
+Every node floods one advertisement about itself: its index, a packet ID in
+the `ts` field, the addresses it offers, and the peers it currently has a link
+with. Advertisement IDs are only compared with another advertisement of the
+same node; expiry runs on local arrival time instead. A newer
 advertisement is stored and passed on to every link except the one it came
 from, so it stops spreading on its own. A link coming up hands the new peer
 the whole database at once.
