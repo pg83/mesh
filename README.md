@@ -20,10 +20,22 @@ and retransmits come later.
 ```
 mesh keygen                 # prints {"pub": ..., "key": ...}
 mesh run -c config.json     # runs a node
+mesh run -c config.json -key-file /home/pg/.ssh/home.key
 mesh status -s status.sock  # dumps links as JSON
 ```
 
 Config is JSON:
+
+`-key-file` overrides `key` in the config, which may then be omitted. The file
+contains either a base64-encoded 32-byte seed (surrounding whitespace is ignored)
+or an unencrypted OpenSSH Ed25519 private key. An unreadable or invalid file
+fails startup; it does not fall back to the config key. Encrypted SSH keys and
+other SSH key types are not supported.
+
+For an SSH identity, put the complete `ssh-ed25519 AAAA...` public key line in
+the registry's `pub` field and omit `sig`. Mesh derives the X25519 public key
+from the Ed25519 point and uses the Ed25519 public key for signatures. Existing
+base64 `pub`/`sig` entries remain supported and can share the same registry.
 
 ```json
 {

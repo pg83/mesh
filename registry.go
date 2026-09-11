@@ -55,10 +55,12 @@ func newRegistry(peers []PeerConfig) *Registry {
 			throwFmt("index 0 is reserved")
 		}
 
+		pub, sig := publicKeys(pc.Pub, pc.Sig)
+
 		p := &Peer{
 			index: pc.Index,
-			pub:   decodeKey(pc.Pub),
-			sig:   ed25519.PublicKey(decodeKey(pc.Sig)),
+			pub:   pub,
+			sig:   sig,
 			intip: parseIntip(pc.Intip),
 		}
 

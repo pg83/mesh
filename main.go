@@ -21,9 +21,17 @@ func main() {
 		case "run":
 			fs := flag.NewFlagSet("run", flag.ExitOnError)
 			config := fs.String("c", "", "config file")
+			keyFile := fs.String("key-file", "", "private key file (base64 seed or OpenSSH Ed25519)")
 
 			throw(fs.Parse(os.Args[2:]))
-			newNode(loadConfig(*config), log).run()
+
+			cfg := loadConfig(*config)
+
+			if *keyFile != "" {
+				cfg.Key = loadPrivateKey(*keyFile)
+			}
+
+			newNode(cfg, log).run()
 		case "keygen":
 			keygen()
 		case "status":
@@ -46,7 +54,7 @@ func printUsage() {
 	os.Stderr.WriteString(`Usage: mesh command [flags]
 
 Commands:
-  run -c config.json    run a node
+  run -c config.json [-key-file path]    run a node
   keygen                print a fresh key pair as JSON
   status -s socket      dump node status as JSON
 `)

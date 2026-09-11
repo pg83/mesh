@@ -7,8 +7,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"strings"
 
+	"filippo.io/edwards25519"
 	"golang.org/x/crypto/curve25519"
+	"golang.org/x/crypto/ssh"
 )
 
 const protocol = "mesh/6"
@@ -22,6 +25,51 @@ type KeyPair struct {
 	Key string `json:"key"`
 	Pub string `json:"pub"`
 	Sig string `json:"sig"`
+}
+
+func loadPrivateKey(path string) string {
+	data := strings.TrimSpace(string(throw2(os.ReadFile(path))))
+
+	if !strings.HasPrefix(data, "-----BEGIN ") {
+		return data
+	}
+
+	key := throw2(ssh.ParseRawPrivateKey([]byte(data)))
+	private, ok := key.(*ed25519.PrivateKey)
+
+	if !ok {
+		throwFmt("SSH private key must be Ed25519")
+	}
+
+	return base64.StdEncoding.EncodeToString(private.Seed())
+}
+
+func publicKeys(pub, sig string) ([]byte, ed25519.PublicKey) {
+	if !strings.HasPrefix(pub, "ssh-") {
+		return decodeKey(pub), ed25519.PublicKey(decodeKey(sig))
+	}
+
+	key, _, _, rest, err := ssh.ParseAuthorizedKey([]byte(pub))
+
+	throw(err)
+
+	if strings.TrimSpace(string(rest)) != "" {
+		throwFmt("expected one SSH public key")
+	}
+
+	if key.Type() != ssh.KeyAlgoED25519 {
+		throwFmt("SSH public key must be Ed25519")
+	}
+
+	public := key.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey)
+
+	if sig != "" && string(decodeKey(sig)) != string(public) {
+		throwFmt("signing key does not match SSH public key")
+	}
+
+	point := throw2(new(edwards25519.Point).SetBytes(public))
+
+	return point.BytesMontgomery(), public
 }
 
 func deriveKeys(seed []byte) (DHKey, ed25519.PrivateKey) {

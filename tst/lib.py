@@ -116,6 +116,7 @@ class Lab:
         self.thread = None
         self.processes = []
         self.configs = {}
+        self.run_args = {}
         self.coverage_dirs = []
         for seg, names in segments.items():
             for name in names:
@@ -446,7 +447,7 @@ class Lab:
             node.coverage.mkdir(parents=True)
             self.coverage_dirs.append(node.coverage)
             env['GOCOVERDIR'] = str(node.coverage)
-        node.proc = self.spawn(name, [MESH, 'run', '-c', self.write_config(node)], name, env=env)
+        node.proc = self.spawn(name, [MESH, 'run', '-c', self.write_config(node), *self.run_args.get(name, [])], name, env=env)
 
     def stop_node(self, name):
         node = self.nodes[name]
