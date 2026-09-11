@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -264,18 +263,12 @@ func (a *EdgeActor) receive(r Received) {
 }
 
 func (a *EdgeActor) advertisement(inner []byte) {
-	if len(inner) < 1+ed25519.SignatureSize {
-		return
-	}
-
-	sig, blob := inner[1:1+ed25519.SignatureSize], inner[1+ed25519.SignatureSize:]
 	ad := &Ad{}
 
-	if json.Unmarshal(blob, ad) != nil {
+	if json.Unmarshal(inner[1:], ad) != nil {
 		return
 	}
 
-	peer := a.node.reg.byIndex[ad.Index]
 	fresh := false
 
 	for _, u := range ad.Edges {
@@ -286,7 +279,7 @@ func (a *EdgeActor) advertisement(inner []byte) {
 		}
 	}
 
-	if peer == nil || !fresh || !ed25519.Verify(peer.sig, blob, sig) {
+	if !fresh {
 		return
 	}
 

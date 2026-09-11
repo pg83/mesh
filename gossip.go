@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/ed25519"
 	"encoding/json"
 	"net"
 	"slices"
@@ -11,15 +10,12 @@ import (
 const gossipBatchSize = 8
 
 type Ad struct {
-	Index     uint16     `json:"index"`
 	Edges     []Update   `json:"edges"`
 	Endpoints []Endpoint `json:"endpoints"`
 }
 
-func encodeAd(blob, sig []byte) []byte {
-	out := append([]byte{innerAd}, sig...)
-
-	return append(out, blob...)
+func encodeAd(blob []byte) []byte {
+	return append([]byte{innerAd}, blob...)
 }
 
 func (n *Node) scanLocal() map[uint64]*LocalEndpoint {
@@ -131,7 +127,7 @@ func (n *Node) advertisements() [][]byte {
 		var blob []byte
 
 		for end < len(updates) && end-start < gossipBatchSize {
-			ad := Ad{Index: n.cfg.Index, Edges: updates[start : end+1]}
+			ad := Ad{Edges: updates[start : end+1]}
 			seen := map[uint64]bool{}
 
 			for _, u := range ad.Edges {
@@ -153,7 +149,7 @@ func (n *Node) advertisements() [][]byte {
 			end++
 		}
 
-		packets = append(packets, encodeAd(blob, ed25519.Sign(n.sig, blob)))
+		packets = append(packets, encodeAd(blob))
 		start = end
 	}
 

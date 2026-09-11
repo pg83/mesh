@@ -13,12 +13,12 @@ def test():
         mesh = lib.endpoint(lib.intip(3), 0)
         ep = lib.endpoint('10.2.0.3')
         old = [lib.edge(mesh, ep, ident), lib.edge(ep, mesh, ident)]
-        probe.send(op='ad', body=dict(index=2, edges=old))
+        probe.send(op='ad', body=dict(edges=old))
         withdrawn = [dict(e, id=ident + 1, alive=False) for e in old]
-        probe.send(op='ad', body=dict(index=2, edges=withdrawn))
+        probe.send(op='ad', body=dict(edges=withdrawn))
         lab.wait(lambda: 3 not in lab.known_nodes('a'), 'withdrawn endpoint disappears')
         # A new envelope and transport ID cannot make these old pair versions fresh.
-        probe.send(op='ad', body=dict(index=2, edges=old))
+        probe.send(op='ad', body=dict(edges=old))
         time.sleep(.2)
         assert 3 not in lab.known_nodes('a'), 'superseded graph records returned'
         assert lab.route('a', 'b') is None

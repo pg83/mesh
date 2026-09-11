@@ -15,7 +15,7 @@ def test():
         target = lib.endpoint(lab.nodes['b'].addresses[1])
         internal = lib.endpoint(lib.intip(lab.nodes['b'].index), 0)
         lab.intercept('a', 'b', 'drop', kind=4, count=-1)
-        probe.send(op='ad', body=dict(index=3, edges=[lib.edge(internal, target, time.time_ns(), alive=False)]))
+        probe.send(op='ad', body=dict(edges=[lib.edge(internal, target, time.time_ns(), alive=False)]))
         lab.wait(lambda: not any(e['from'] == internal and e['to'] == target
                                  for e in lab.status('a')['graph']), 'outward attachment withdrawn')
         path = lab.endpoint_route('a', 'b')

@@ -5,7 +5,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/ed25519"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -23,7 +22,6 @@ type ProbeCommand struct {
 	Op   string          `json:"op"`
 	Hex  string          `json:"hex"`
 	Body json.RawMessage `json:"body"`
-	Key  string          `json:"key"`
 	Read bool            `json:"read"`
 	Text bool            `json:"text"`
 }
@@ -40,7 +38,7 @@ func main() {
 	cfg := loadConfig(os.Args[1])
 	reg := newRegistry(cfg.Registry)
 	peer := reg.byIndex[uint16(throw2(json.Number(os.Args[3]).Int64()))]
-	dh, sig := deriveKeys(decodeKey(cfg.Key))
+	dh := deriveKey(decodeKey(cfg.Key))
 	session := newSession(reg.byIndex[cfg.Index], peer, dh.private)
 	packetID := uint64(time.Now().UnixNano())
 
@@ -99,15 +97,7 @@ func main() {
 			out = session.seal(nil, packetID)
 			out = out[:len(out)-1]
 		case "ad":
-			key := sig
-
-			if command.Key != "" {
-				_, key = deriveKeys(decodeKey(command.Key))
-			}
-
-			inner := encodeAd(command.Body, ed25519.Sign(key, command.Body))
-
-			out = session.seal(inner, packetID)
+			out = session.seal(encodeAd(command.Body), packetID)
 		default:
 			throwFmt("unknown probe command %q", command.Op)
 		}

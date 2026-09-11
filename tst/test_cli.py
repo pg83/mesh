@@ -44,7 +44,6 @@ def test():
         bad(lambda c: c.update(key='not base64!'), 'base64')
         bad(lambda c: c.update(key='YQ=='), 'bad key length')
         bad(lambda c: c.update(key=lab.nodes['b'].keys['key']), 'private key does not match')
-        bad(lambda c: c['registry'][0].update(sig=lab.nodes['b'].keys['sig']), 'signing key does not match')
         bad(lambda c: c['registry'].append(c['registry'][0]), 'duplicate index')
         bad(lambda c: c['registry'][0].update(intip='bad'), 'bad intip')
         bad(lambda c: c['endpoint'][0].update(proto='bad'), 'bad endpoint proto')

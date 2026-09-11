@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const protocol = "mesh/6"
+const protocol = "mesh/7"
 
 type DHKey struct {
 	private []byte
@@ -24,7 +24,6 @@ type DHKey struct {
 type KeyPair struct {
 	Key string `json:"key"`
 	Pub string `json:"pub"`
-	Sig string `json:"sig"`
 }
 
 func loadPrivateKey(path string) string {
@@ -44,9 +43,9 @@ func loadPrivateKey(path string) string {
 	return base64.StdEncoding.EncodeToString(private.Seed())
 }
 
-func publicKeys(pub, sig string) ([]byte, ed25519.PublicKey) {
+func publicKey(pub string) []byte {
 	if !strings.HasPrefix(pub, "ssh-") {
-		return decodeKey(pub), ed25519.PublicKey(decodeKey(sig))
+		return decodeKey(pub)
 	}
 
 	key, _, _, rest, err := ssh.ParseAuthorizedKey([]byte(pub))
@@ -62,17 +61,12 @@ func publicKeys(pub, sig string) ([]byte, ed25519.PublicKey) {
 	}
 
 	public := key.(ssh.CryptoPublicKey).CryptoPublicKey().(ed25519.PublicKey)
-
-	if sig != "" && string(decodeKey(sig)) != string(public) {
-		throwFmt("signing key does not match SSH public key")
-	}
-
 	point := throw2(new(edwards25519.Point).SetBytes(public))
 
-	return point.BytesMontgomery(), public
+	return point.BytesMontgomery()
 }
 
-func deriveKeys(seed []byte) (DHKey, ed25519.PrivateKey) {
+func deriveKey(seed []byte) DHKey {
 	h := sha512.Sum512(seed)
 	scalar := h[:32]
 
@@ -82,7 +76,7 @@ func deriveKeys(seed []byte) (DHKey, ed25519.PrivateKey) {
 
 	pub := throw2(curve25519.X25519(scalar, curve25519.Basepoint))
 
-	return DHKey{private: scalar, public: pub}, ed25519.NewKeyFromSeed(seed)
+	return DHKey{private: scalar, public: pub}
 }
 
 func keygen() {
@@ -90,12 +84,11 @@ func keygen() {
 
 	throw2(rand.Read(seed))
 
-	dh, sig := deriveKeys(seed)
+	dh := deriveKey(seed)
 
 	out := throw2(json.Marshal(KeyPair{
 		Key: base64.StdEncoding.EncodeToString(seed),
 		Pub: base64.StdEncoding.EncodeToString(dh.public),
-		Sig: base64.StdEncoding.EncodeToString(sig.Public().(ed25519.PublicKey)),
 	}))
 
 	os.Stdout.Write(append(out, '\n'))

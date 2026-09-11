@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/ed25519"
 	"log/slog"
 	"net"
 	"os"
@@ -33,7 +32,6 @@ type Node struct {
 	cfg        *Config
 	reg        *Registry
 	key        DHKey
-	sig        ed25519.PrivateKey
 	log        *slog.Logger
 	subnet     *net.IPNet
 	sockets    map[uint16]*UDPSocket
@@ -68,11 +66,11 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		throwFmt("index %d not in registry", cfg.Index)
 	}
 
-	dh, sig := deriveKeys(decodeKey(cfg.Key))
+	dh := deriveKey(decodeKey(cfg.Key))
 
 	n := &Node{
 		events: newMailbox[any](nil), tunInbox: newMailbox[any](nil), tunWrites: newMailbox[[]byte](nil), actors: map[Edge]*EdgeActor{},
-		cfg: cfg, reg: reg, key: dh, sig: sig, log: log,
+		cfg: cfg, reg: reg, key: dh, log: log,
 		graph: map[Edge]State{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
 		discovered: map[uint16]map[uint64]time.Time{}, owners: map[uint64]uint16{},
 		routes:   map[uint64][]Edge{},
@@ -82,10 +80,6 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 
 	if string(n.key.public) != string(me.pub) {
 		throwFmt("private key does not match registry entry %d", cfg.Index)
-	}
-
-	if string(sig.Public().(ed25519.PublicKey)) != string(me.sig) {
-		throwFmt("signing key does not match registry entry %d", cfg.Index)
 	}
 
 	for index, peer := range reg.byIndex {

@@ -424,7 +424,6 @@ class Lab:
             reg.append({
                 "index": node.index,
                 "pub": node.keys["pub"],
-                "sig": node.keys["sig"],
                 "intip": intip(node.index),
                 "endpoint": static,
             })

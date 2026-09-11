@@ -35,24 +35,22 @@ def test():
         a, b, c = [lib.endpoint(f'10.1.0.{i}') for i in (1, 2, 3)]
         for packet in [b'', b'\xff', b'\x01', b'\x01\0\0', b'\x01\x11\0',
                        data([(a,b)], cursor=1), data([(a,c)]), data([(a,b),(b,lib.endpoint('10.1.0.99'))]),
-                       b'\x02', b'\x02' + b'\0' * 64 + b'{']:
+                       b'\x02', b'\x02{']:
             inner(packet)
         send('short-transport')
         send('short-tag')
         ident = time.time_ns() + 1_000_000_000
         mesh_a = lib.endpoint(lib.intip(1), 0)
         records = [lib.edge(mesh_a, a, ident), lib.edge(a, mesh_a, ident), lib.edge(b, a, ident)]
-        body = dict(index=1, edges=records)
+        body = dict(edges=records)
         send('ad', body=body)
         lab.wait_route('b', 'a', ['a'])
         send('ad', body=body)
-        send('ad', body=dict(body, index=99))
-        send('ad', body=dict(body, index=3))
         # Reject malformed graph entries without discarding independent valid pairs.
         for change in [dict(id=0), {'from':lib.endpoint('0.0.0.0')}, {'to':b}]:
-            send('ad', body=dict(index=1, edges=[dict(records[2], **dict(id=ident+1) | change)]))
+            send('ad', body=dict(edges=[dict(records[2], **dict(id=ident+1) | change)]))
         # An update to one pair does not remove another pair omitted from this batch.
-        send('ad', body=dict(index=1, edges=[dict(records[0], id=ident+2)]))
+        send('ad', body=dict(edges=[dict(records[0], id=ident+2)]))
         assert lab.route('b', 'a') == ['a']
         for ip in (b'bad', b'\x65' + b'\0' * 19, b'\x44' + b'\0' * 19,
                    b'\x4f' + b'\0' * 19, b'\x45' + b'\0' * 19):

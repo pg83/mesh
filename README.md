@@ -33,9 +33,9 @@ fails startup; it does not fall back to the config key. Encrypted SSH keys and
 other SSH key types are not supported.
 
 For an SSH identity, put the complete `ssh-ed25519 AAAA...` public key line in
-the registry's `pub` field and omit `sig`. Mesh derives the X25519 public key
-from the Ed25519 point and uses the Ed25519 public key for signatures. Existing
-base64 `pub`/`sig` entries remain supported and can share the same registry.
+the registry's `pub` field. Mesh derives the X25519 public key from the Ed25519
+point. Base64 X25519 `pub` entries can share the same registry. Legacy `sig`
+fields are ignored.
 
 ```json
 {
@@ -45,8 +45,8 @@ base64 `pub`/`sig` entries remain supported and can share the same registry.
   "subnet": "10.77.0.0/24",
   "status": "/run/mesh/status.sock",
   "registry": [
-    {"index": 1, "pub": "<x25519>", "sig": "<ed25519>", "intip": "10.77.0.1", "endpoint": [{"proto": "udp", "addr": "203.0.113.10", "port": 17001, "bind_addr": "192.168.1.20", "bind_port": 7001}]},
-    {"index": 2, "pub": "<x25519>", "sig": "<ed25519>", "intip": "10.77.0.2", "endpoint": []}
+    {"index": 1, "pub": "<x25519>", "intip": "10.77.0.1", "endpoint": [{"proto": "udp", "addr": "203.0.113.10", "port": 17001, "bind_addr": "192.168.1.20", "bind_port": 7001}]},
+    {"index": 2, "pub": "<x25519>", "intip": "10.77.0.2", "endpoint": []}
   ]
 }
 ```
@@ -133,19 +133,19 @@ the application's local address and route. The next process reattaches to
 that interface. When changing the configured TUN name or removing mesh,
 remove the old interface explicitly with `ip link del <name>`.
 
-`key` is one 32-byte seed. The X25519 static keypair (`pub`) and the
-advertisement signing keypair (`sig`) are both derived from it: an
-advertisement travels past its author, so the link cipher cannot vouch for
-it and it carries its own signature.
+`key` is one 32-byte seed from which the X25519 static keypair (`pub`) is
+derived. Every transport packet, including gossip, is authenticated by the
+link cipher. Nodes merge graph records and advertise their own graph view;
+there is no separate advertisement signature or signing key.
 
 ## Wire format
 
 All multibyte integers in the mesh protocol use little-endian order.
 Encapsulated IP packets retain their standard network format. The key
-context is `mesh/6`; older wire formats are incompatible.
+context is `mesh/7`; older wire formats are incompatible.
 
 Each registered pair derives a shared secret with X25519 and directional
-keys with HKDF-SHA256. The context contains `mesh/6`, the sender's public key
+keys with HKDF-SHA256. The context contains `mesh/7`, the sender's public key
 and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
@@ -162,8 +162,8 @@ hops are allowed. A relay checks the receiving pair against the route,
 advances the cursor, and sends from the exact next source endpoint to the
 exact next destination. Local delivery verifies the destination mesh IP.
 
-Inner gossip starts with `2`, an Ed25519 signature (64), and a JSON object
-containing `index`, `endpoints`, and `edges`. Endpoint descriptions contain
+Inner gossip starts with `2`, followed directly by a JSON object containing
+`endpoints` and `edges`. Endpoint descriptions contain
 `proto`, `addr`, `port`, and optional `path`. Edges contain `from` and `to`
 64-bit hashes, `id`, and `alive`. Descriptions appear once per message;
 each message includes the descriptions referenced by its edges. Publications
@@ -172,7 +172,7 @@ record can exceed that target. There is no dependency on an earlier gossip
 message arriving first. Other nodes can use these descriptions to open new
 direct connections.
 
-The signer may transmit any part of the graph, including records learned
+The authenticated sender may transmit any part of the graph, including records learned
 from other members. An omitted pair is unchanged; a newer record replaces
 an older one. Gossip remains periodic, once per second.
 

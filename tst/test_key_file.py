@@ -1,6 +1,5 @@
 """SSH and seed files interoperate with inline keys over real mesh links."""
 
-import base64
 import copy
 import json
 import subprocess
@@ -24,7 +23,6 @@ class KeyFiles(lib.Lab):
     def registry(self):
         peers = super().registry()
         peers[0]['pub'] = (self.dir / 'home.key.pub').read_text().strip()
-        peers[0].pop('sig')
         return peers
 
     def write_config(self, node):
@@ -88,12 +86,10 @@ def test():
         bad(home, 'no key found', lambda c: c['registry'][0].update(pub='ssh-ed25519 broken'))
         bad(home, 'expected one SSH public key', lambda c: c['registry'][0].update(pub=public + '\n' + public))
         bad(home, 'SSH public key must be Ed25519', lambda c: c['registry'][0].update(pub=(lab.dir / 'rsa.key.pub').read_text()))
-        bad(home, 'signing key does not match SSH public key', lambda c: c['registry'][0].update(sig=lab.nodes['b'].keys['sig']))
-
-        # A matching explicit signing key is also accepted for an SSH entry.
-        sig = base64.b64encode(base64.b64decode(public.split()[1])[-32:]).decode()
+        # Legacy signing fields are ignored for SSH and raw X25519 entries.
         peers = lab.registry()
-        peers[0]['sig'] = sig
+        for peer in peers:
+            peer['sig'] = 'unused legacy signing key'
         lab.configs.setdefault('a', {})['registry'] = peers
         lab.stop_node('a')
         lab.start_node('a')

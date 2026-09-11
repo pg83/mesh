@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/ed25519"
 	"encoding/base64"
 	"net"
 )
@@ -9,7 +8,6 @@ import (
 type Peer struct {
 	index     uint16
 	pub       []byte
-	sig       ed25519.PublicKey
 	intip     [4]byte
 	endpoints []EndpointConfig
 	addresses []Endpoint
@@ -55,12 +53,9 @@ func newRegistry(peers []PeerConfig) *Registry {
 			throwFmt("index 0 is reserved")
 		}
 
-		pub, sig := publicKeys(pc.Pub, pc.Sig)
-
 		p := &Peer{
 			index: pc.Index,
-			pub:   pub,
-			sig:   sig,
+			pub:   publicKey(pc.Pub),
 			intip: parseIntip(pc.Intip),
 		}
 
