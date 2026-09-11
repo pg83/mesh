@@ -57,7 +57,9 @@ def test():
         lab.stop_node('a')
         lab.configs['a'] = {'status': ''}
         lab.start_node('a')
-        lab.wait_ping('a', 'b')
+        # A fast restart loses gossip locally while b still considers a alive.
+        # Allow the next ten-second advertisement to restore the mutual route.
+        lab.wait_ping('a', 'b', timeout=15)
         unavailable_status(lab, OSError)
 
         ready = lab.dir / 'invalid-status-ready'
@@ -86,7 +88,7 @@ with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
         lab.start_node('a')
         lab.wait_links('a', [])
         lab.unblock('a', 'b')
-        lab.wait_ping('a', 'b')
+        lab.wait_ping('a', 'b', timeout=15)
 
 
 lib.main(test)
