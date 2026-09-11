@@ -118,7 +118,9 @@ Discovery does not depend on an existing route or a reverse connection.
 
 Gossip merges each directed pair independently. An omitted pair is unchanged;
 a newer record replaces an older version of that pair. Newly learned versions
-are forwarded promptly. Relaying or repeating the same version never refreshes
+are collected across packets returned by one socket read and relayed using
+the newest version per pair, reducing redundant sends during bursts.
+Relaying or repeating the same version never refreshes
 its local expiry. Records live for at most five seconds from receipt; their
 highest versions remain remembered after expiry to reject stale reintroduction.
 Local observations generate fresh versions each second.
@@ -146,10 +148,7 @@ link expiry; restarting a receiver resets its replay history.
 CI runs the same `./build test` on every push and pull request. The lab needs
 unprivileged user namespaces and the tun module, which the workflow enables.
 The separate Race detector job runs the entire suite, including QUIC stress,
-with `./build -j 1 -Drace test`. Race topologies run sequentially so independent
-labs do not overflow the userspace switches' TUN queues by competing for the
-runner's CPUs. Nodes and application clients inside each topology still run
-concurrently. This builds mesh with `-race` and CGO enabled
+with `./build -j 4 -Drace test`. This builds mesh with `-race` and CGO enabled
 (a C compiler is required). A detected race immediately fails the process;
 CI preserves its report with the test logs. CLI invocations skip the race
 runtime's one-second exit delay.

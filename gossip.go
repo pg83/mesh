@@ -120,7 +120,7 @@ func (n *Node) spread(updates []Update, from uint16) {
 	}
 }
 
-func (n *Node) handleAd(inner []byte, from uint16) {
+func (n *Node) handleAd(inner []byte, from uint16, pending map[Edge]uint16) {
 	if len(inner) < 1+ed25519.SignatureSize {
 		return
 	}
@@ -145,7 +145,6 @@ func (n *Node) handleAd(inner []byte, from uint16) {
 	}
 
 	now := time.Now()
-	changed := []Update{}
 	topologyChanged := false
 
 	for _, update := range ad.Edges {
@@ -164,15 +163,11 @@ func (n *Node) handleAd(inner []byte, from uint16) {
 		}
 
 		n.graph[update.Edge] = &Record{Update: update, expires: now.Add(time.Duration(update.TTL) * time.Millisecond)}
-		changed = append(changed, update)
+		pending[update.Edge] = from
 	}
 
 	if topologyChanged {
 		n.recompute(now)
-	}
-
-	if len(changed) > 0 {
-		n.spread(changed, from)
 	}
 }
 
@@ -200,4 +195,32 @@ func (n *Node) candidates(peer *Peer) []Endpoint {
 	slices.SortFunc(addrs, compareEndpoint)
 
 	return slices.Compact(addrs)
+}
+
+func (n *Node) relayGossip(pending map[Edge]uint16) {
+	if len(pending) == 0 {
+		return
+	}
+
+	now := time.Now()
+	batches := map[uint16][]Update{}
+
+	for edge, from := range pending {
+		record := n.graph[edge]
+		remaining := record.expires.Sub(now)
+
+		if remaining <= 0 {
+			continue
+		}
+
+		update := record.Update
+
+		update.TTL = uint32((remaining + time.Millisecond - 1) / time.Millisecond)
+		batches[from] = append(batches[from], update)
+	}
+
+	for from, updates := range batches {
+		slices.SortFunc(updates, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
+		n.spread(updates, from)
+	}
 }

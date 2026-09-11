@@ -30,6 +30,22 @@ def test():
         assert present('a', y, z), 'an omitted pair was removed'
         probe.send(op='ad', body=dict(index=2, edges=[dict(yz, id=ident+1, alive=False)]))
         lab.wait(lambda: not present('c', y, z), 'explicit pair withdrawal propagates')
+        burst = [lib.edge(lib.endpoint('192.0.2.10', 9000+i), z, ident+i+2) for i in range(24)]
+        held = lab.intercept('r', 'a', 'hold', kind=4, count=-1)
+        for update in burst:
+            probe.send(op='ad', body=dict(index=2, edges=[update]))
+        probe.send(op='ad', body=dict(index=2, edges=[dict(burst[0], id=ident+100, alive=False)]))
+        probe.send(op='ad', body=dict(index=2, edges=[dict(burst[0], id=ident+99)]))
+        lab.wait(lambda: len(held['held']) == len(burst)+2, 'all burst packets held')
+        lab.clear(held)
+        lab.release(held)
+        def relayed():
+            graph = lab.status('c')['graph']
+            pairs = all(any(e['from'] == u['from'] and e['to'] == u['to'] and e['id'] == u['id']
+                            for e in graph) for u in burst[1:])
+            withdrawn = not any(e['from'] == burst[0]['from'] and e['to'] == z for e in graph)
+            return pairs and withdrawn
+        lab.wait(relayed, 'all burst pairs and the latest withdrawal reach another peer')
         lab.wait_ping('a', 'c')
         probe.finish()
 
