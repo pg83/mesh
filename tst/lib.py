@@ -461,7 +461,7 @@ class Lab:
             for name in self.nodes:
                 try:
                     (self.dir / f'{name}-udp.txt').write_text(
-                        self.run(name, ['cat', '/proc/net/snmp', '/proc/net/udp']).stdout)
+                        self.run(name, ['cat', '/proc/net/snmp', '/proc/net/udp', '/proc/net/dev']).stdout)
                     (self.dir / f'{name}-status.json').write_text(json.dumps(self.status(name), indent=2))
                 except Exception:
                     pass

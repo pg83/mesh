@@ -1,4 +1,5 @@
 """03: Four loaded QUIC connections survive loss and restoration of their direct paths."""
+import time
 import lib
 import workload
 
@@ -13,18 +14,23 @@ def test():
         clients = [server.client(n, seconds=40) for n in names[2:]]
         for client in clients:
             client.start()
+        phase = time.monotonic()
         for client in clients:
-            client.progress()
+            client.progress(after=phase)
         for name in names[2:]:
             lab.block(name, 's', seg=1)
         for client in clients:
             lab.wait_route(client.source, 's', ['r', 's'])
-            client.progress()
+        phase = time.monotonic()
+        for client in clients:
+            client.progress(after=phase)
         for name in names[2:]:
             lab.unblock(name, 's', seg=1)
         for client in clients:
             lab.wait_route(client.source, 's', ['s'])
-            client.progress()
+        phase = time.monotonic()
+        for client in clients:
+            client.progress(after=phase)
         server.finish(clients)
 
 

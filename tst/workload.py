@@ -206,9 +206,10 @@ class QuicClient:
         self.started = time.monotonic()
         self.proc.stdin.write(b'go\n')
 
-    def progress(self, timeout=25):
-        target = time.monotonic() - self.started
-        deadline = time.monotonic() + timeout
+    def progress(self, timeout=25, after=None):
+        after = time.monotonic() if after is None else after
+        target = after - self.started
+        deadline = after + timeout
         while time.monotonic() < deadline:
             report = self.read(max(.1, deadline - time.monotonic()))
             assert report.get('event') != 'done', f'{self.source}: QUIC finished before fault check'

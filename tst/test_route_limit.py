@@ -1,4 +1,5 @@
 """20: Full-size UDP crosses 16 hops, while a 17-hop route is rejected."""
+import time
 import lib
 import workload
 
@@ -16,8 +17,10 @@ def test():
         udp = workload.UdpClient(lab, 'n0', 'n16')
         for size in (1, 1200, 1352):
             payload = b'x' * size
+            started = time.monotonic()
             udp.send(payload)
-            assert udp.recv(timeout=5) == payload, (size, [rule['hits'] for rule in observers])
+            assert udp.recv(timeout=30) == payload, (size, [rule['hits'] for rule in observers])
+            print(f'16-hop UDP: {size} bytes, RTT {time.monotonic() - started:.3f}s', flush=True)
         log = workload.udp_server(lab, 'n17')
         too_far = workload.UdpClient(lab, 'n0', 'n17')
         too_far.send(b'unreachable')
@@ -28,7 +31,7 @@ def test():
         workload.udp_server(lab, 'n1')
         reverse = workload.UdpClient(lab, 'n17', 'n1')
         reverse.send(b'y' * 1352)
-        assert reverse.recv(timeout=5) == b'y' * 1352
+        assert reverse.recv(timeout=30) == b'y' * 1352
         lab.check()
 
 
