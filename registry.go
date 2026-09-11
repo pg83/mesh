@@ -52,6 +52,10 @@ func newRegistry(peers []PeerConfig) *Registry {
 	}
 
 	for _, pc := range peers {
+		if pc.Index == 0 {
+			throwFmt("index 0 is reserved")
+		}
+
 		p := &Peer{
 			index: pc.Index,
 			pub:   decodeKey(pc.Pub),

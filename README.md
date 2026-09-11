@@ -41,7 +41,9 @@ Config is JSON:
 ```
 
 The registry is the same on every node: index, both public keys, internal
-address, and the static endpoints a node has, if any. A node without static
+address, and the static endpoints a node has, if any. Node indexes must be
+in the range 1–65535; zero is reserved and rejected in the registry.
+A node without static
 endpoints is never dialed by a node that has not heard of it; it dials, and
 its own advertised addresses let others dial it back later. `tun` (default
 `mesh0`) and `mtu` (default 1380) are optional.

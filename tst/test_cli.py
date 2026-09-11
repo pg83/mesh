@@ -35,6 +35,10 @@ def test():
             assert result.returncode != 0
             assert expected in result.stderr, result.stderr
         bad(lambda c: c.update(index=99), 'not in registry')
+        bad(lambda c: c.update(index=0), 'not in registry')
+        bad(lambda c: c['registry'][0].update(index=0), 'index 0 is reserved')
+        bad(lambda c: c['registry'][1].update(index=0), 'index 0 is reserved')
+        bad(lambda c: c['registry'][0].pop('index'), 'index 0 is reserved')
         bad(lambda c: c.update(key='not base64!'), 'base64')
         bad(lambda c: c.update(key='YQ=='), 'bad key length')
         bad(lambda c: c.update(key=lab.nodes['b'].keys['key']), 'private key does not match')
