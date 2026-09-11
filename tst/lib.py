@@ -168,7 +168,10 @@ class Lab:
         addr = segaddr(seg, node.index)
         node.addresses[seg] = addr
         self.nsenter(node, "ip", "addr", "add", f"{addr}/24", "dev", name, check=True)
-        self.nsenter(node, "ip", "link", "set", name, "up", check=True)
+        # A full periodic graph fanout can exceed the default 500-packet TUN
+        # queue before the userspace switch is scheduled. Faults are injected
+        # by the switch; leave room for a publication in the 18-node topology.
+        self.nsenter(node, "ip", "link", "set", name, "txqueuelen", "4096", "up", check=True)
         self.tuns[fd] = (seg, node)
         self.ports[(seg, socket.inet_aton(addr))] = fd
 

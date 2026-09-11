@@ -1,5 +1,6 @@
 """20: Full-size UDP crosses 16 hops, while a 17-hop route is rejected."""
 import time
+import json
 import lib
 import workload
 
@@ -32,6 +33,14 @@ def test():
         reverse = workload.UdpClient(lab, 'n17', 'n1')
         reverse.send(b'y' * 1352)
         assert reverse.recv(timeout=5) == b'y' * 1352
+        # This scenario assumes lossless physical links; detect accidental
+        # queue overflow in the test wiring separately from a routing failure.
+        for name, node in lab.nodes.items():
+            links = json.loads(lab.run(name, ['ip', '-s', '-j', 'link', 'show']).stdout)
+            for link in links:
+                if link['ifname'] in {f's{seg}' for seg in node.segments}:
+                    dropped = link['stats64']['tx']['dropped']
+                    assert dropped == 0, (name, link['ifname'], 'test TUN queue overflow', dropped)
         lab.check()
 
 
