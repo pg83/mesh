@@ -62,6 +62,43 @@ jobs:
           path: ${{ runner.temp }}/mesh-artifacts
           retention-days: 7
 
+  race:
+    name: Race detector
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install application test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y gcc openssh-client openssh-server rsync curl iperf3 iproute2 util-linux
+          echo /usr/sbin >> "$GITHUB_PATH"
+          echo "MESH_TEST_ARTIFACTS=$RUNNER_TEMP/mesh-artifacts" >> "$GITHUB_ENV"
+
+      - name: Prepare namespaces and tun
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo modprobe tun
+
+      - name: Run all e2e tests with the race detector
+        run: ./build -j 4 -Drace test
+
+      - name: Save failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mesh-race-failure
+          path: ${{ runner.temp }}/mesh-artifacts
+          retention-days: 7
+
   coverage:
     name: Coverage
     runs-on: ubuntu-24.04

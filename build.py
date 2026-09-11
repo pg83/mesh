@@ -6,9 +6,14 @@ build.flags.allow({
         "descr": "instrument the binary; `./build -Dcoverage coverage` writes $(B)/coverage.out",
         "default": "",
     },
+    "race": {
+        "descr": "build mesh with the Go race detector; run with `./build -Drace test`",
+        "default": "",
+    },
 })
 
 COVERAGE = bool(build.flags.coverage)
+RACE = bool(build.flags.race)
 
 
 def coverage_dir(name):
@@ -42,7 +47,7 @@ GO_INPUTS = [
 ]
 
 GO_ENV = {
-    "CGO_ENABLED": "0",
+    "CGO_ENABLED": "1" if RACE else "0",
     "GOFLAGS": "-mod=readonly -buildvcs=false",
     "GOTOOLCHAIN": "local",
     "GOWORK": "off",
@@ -59,6 +64,7 @@ mesh = command(
         "go", "build",
         "-trimpath",
         "-buildvcs=false",
+        *(["-race"] if RACE else []),
         *(["-cover", "-covermode=atomic"] if COVERAGE else []),
         "-o", "$(B)/bin/mesh",
         ".",
@@ -105,6 +111,9 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
     }
     prelude = []
     outputs = [test_stamp]
+
+    if RACE:
+        env["GORACE"] = "halt_on_error=1 atexit_sleep_ms=0"
 
     if COVERAGE:
         # the counters are a declared output so the coverage node sees them

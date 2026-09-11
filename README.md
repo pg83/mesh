@@ -132,6 +132,11 @@ are used as configured.
 
 CI runs the same `./build test` on every push and pull request. The lab needs
 unprivileged user namespaces and the tun module, which the workflow enables.
+The separate Race detector job runs the entire suite, including QUIC stress,
+with `./build -j 4 -Drace test`. This builds mesh with `-race` and CGO enabled
+(a C compiler is required). A detected race immediately fails the process;
+CI preserves its report with the test logs. CLI invocations skip the race
+runtime's one-second exit delay.
 
 Coverage comes from the end-to-end suite rather than from unit tests:
 `./build -Dcoverage coverage` builds an instrumented binary, points every test
@@ -174,7 +179,7 @@ IPs, one connection per client, matching server/client byte counts, and
 prints each client's throughput. `mesh-quic` uses
 [quic-go](https://github.com/quic-go/quic-go) and is built only with the
 `meshquic` tag; it is absent from the production binary and coverage profile.
-The stress test runs in both CI jobs as part of the regular e2e suite.
+The stress test runs in all three CI jobs as part of the regular e2e suite.
 
 Other scenarios transfer and hash files through scp and curl while cutting
 the active path, synchronize trees with rsync, and run iperf3 TCP/UDP streams
