@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	adTimeout       = sessionTimeout
+	adTimeout       = 40 * time.Second
 	gossipBatchSize = 6
 )
 
@@ -49,12 +49,12 @@ func (n *Node) scanLocal() map[Endpoint]int {
 func (n *Node) refresh(now time.Time) {
 	n.local = n.scanLocal()
 
-	desired := map[Edge]bool{}
+	desired := map[Edge]time.Duration{}
 	me := n.reg.byIndex[n.cfg.Index].endpoint()
 
 	for ep := range n.local {
-		desired[Edge{From: me, To: ep}] = true
-		desired[Edge{From: ep, To: me}] = true
+		desired[Edge{From: me, To: ep}] = adTimeout
+		desired[Edge{From: ep, To: me}] = adTimeout
 	}
 
 	for edge, received := range n.observed {
@@ -62,18 +62,18 @@ func (n *Node) refresh(now time.Time) {
 			delete(n.observed, edge)
 			n.log.Info("link down", "from", edge.From.string(), "to", edge.To.string())
 		} else {
-			desired[edge] = true
+			desired[edge] = sessionTimeout
 		}
 	}
 
 	for edge := range n.owned {
-		if !desired[edge] {
-			n.record(edge, false, now)
+		if desired[edge] == 0 {
+			n.record(edge, false, now, adTimeout)
 		}
 	}
 
-	for edge := range desired {
-		n.record(edge, true, now)
+	for edge, lifetime := range desired {
+		n.record(edge, true, now, lifetime)
 	}
 
 	n.owned = desired

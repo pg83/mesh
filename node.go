@@ -31,7 +31,7 @@ type Node struct {
 	packetID   uint64
 	sig        ed25519.PrivateKey
 	graph      map[Edge]*Record
-	owned      map[Edge]bool
+	owned      map[Edge]time.Duration
 	observed   map[Edge]time.Time
 	local      map[Endpoint]int
 	discovered map[uint16]map[Endpoint]time.Time
@@ -52,7 +52,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 
 	n := &Node{
 		cfg: cfg, reg: reg, key: dh, sig: sig, log: log,
-		graph: map[Edge]*Record{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
+		graph: map[Edge]*Record{}, owned: map[Edge]time.Duration{}, observed: map[Edge]time.Time{},
 		discovered: map[uint16]map[Endpoint]time.Time{}, owners: map[Endpoint]uint16{},
 		routes: map[Endpoint][]Edge{}, peers: map[uint16]*Session{},
 		packetID: uint64(time.Now().UnixNano()),
@@ -74,7 +74,12 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	}
 
 	_, n.subnet = throw3(net.ParseCIDR(cfg.Subnet))
-	n.conn = ipv4.NewPacketConn(throw2(net.ListenUDP("udp4", &net.UDPAddr{Port: cfg.Port})))
+
+	udp := throw2(net.ListenUDP("udp4", &net.UDPAddr{Port: cfg.Port}))
+
+	throw(udp.SetReadBuffer(4 << 20))
+	throw(udp.SetWriteBuffer(4 << 20))
+	n.conn = ipv4.NewPacketConn(udp)
 	throw(n.conn.SetControlMessage(ipv4.FlagDst, true))
 	n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
 	n.refresh(time.Now())
@@ -164,10 +169,11 @@ func (n *Node) handleTransport(packet []byte, edge Edge) {
 
 	n.observed[edge] = now
 	n.discovered[s.peer][edge.From] = now
+	n.owners[edge.From] = s.peer
 
 	if !exists {
-		n.owned[edge] = true
-		n.record(edge, true, now)
+		n.owned[edge] = sessionTimeout
+		n.record(edge, true, now, sessionTimeout)
 		n.recompute(now)
 		n.log.Info("link up", "from", edge.From.string(), "to", edge.To.string())
 	}
