@@ -557,11 +557,22 @@ class Lab:
         """Asks the node itself, from inside its namespace."""
         self.check()
         node = self.nodes[name]
-        r = self.nsenter(node, MESH, "status", "-s", STATUS,
-                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        if r.returncode != 0:
-            raise OSError(f"{name}: status failed")
-        status = json.loads(r.stdout)
+        try:
+            with open(self.netns(node.pid)) as target, open('/proc/thread-self/ns/net') as current:
+                try:
+                    os.setns(target.fileno(), os.CLONE_NEWNET)
+                    conn = socket.socket(socket.AF_UNIX)
+                finally:
+                    os.setns(current.fileno(), os.CLONE_NEWNET)
+            with conn:
+                conn.settimeout(10)
+                conn.connect('\0' + STATUS[1:])
+                chunks = []
+                while data := conn.recv(65536):
+                    chunks.append(data)
+        except OSError as error:
+            raise OSError(f'{name}: status failed: {error}') from error
+        status = json.loads(b''.join(chunks))
         descriptors = status['endpoints']
         def decode(edge):
             return dict(edge, **{k: descriptors[str(edge[k])] for k in ('from', 'to')})
