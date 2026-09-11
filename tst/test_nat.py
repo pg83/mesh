@@ -37,6 +37,11 @@ def test():
         other = 17002 if selected == 17001 else 17001
         lab.wait(lambda: lab.selected_endpoint('a', 'b') == f'198.51.100.2:{other}',
                  'second forwarded port')
+        # A->B and B->A converge independently. A UDP echo needs both routes;
+        # waiting for A's destination alone can lose the one-shot reply.
+        lab.wait(lambda: (path := lab.endpoint_route('b', 'a'))
+                 and path[0]['from'] == lib.endpoint('198.51.100.2', other),
+                 'return route from second forwarded port')
         for client in clients:
             client.send(b'after-port-failure')
             assert client.recv() == b'after-port-failure'
