@@ -13,11 +13,10 @@ import (
 )
 
 type Session struct {
-	local  uint16
-	peer   uint16
-	send   cipher.AEAD
-	recv   cipher.AEAD
-	window Window
+	local uint16
+	peer  uint16
+	send  cipher.AEAD
+	recv  cipher.AEAD
 }
 
 func sessionCipher(shared, sender, receiver []byte) cipher.AEAD {
@@ -64,14 +63,9 @@ func (s *Session) open(packet []byte) ([]byte, bool) {
 		return nil, false
 	}
 
-	id := binary.LittleEndian.Uint64(packet[3:])
 	inner, err := s.recv.Open(nil, packet[11:headerTransport], packet[headerTransport:], packet[:headerTransport])
 
 	if err != nil {
-		return nil, false
-	}
-
-	if !s.window.accept(id) {
 		return nil, false
 	}
 

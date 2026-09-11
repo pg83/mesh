@@ -12,7 +12,7 @@ inside the nodes' network namespaces.
 | 4 | quic_mtu | Existing connection moves to a smaller physical MTU |
 | 5 | quic_isolation | Congested bulk traffic does not starve an independent SSH channel |
 | 6 | quic_slow_reader | One flow-controlled client does not stop three others |
-| 7 | quic_restart | Busy sender restart, unchanged QUIC connection, old UDP replay |
+| 7 | quic_restart | Busy sender restart with the same QUIC connection |
 | 8 | restart_all | Simultaneous mesh restart preserves an existing SSH application |
 | 9 | partition_merge | Independent topology changes converge after partitions merge |
 | 10 | route_stale | Delayed gossip and an obsolete in-flight source route |
@@ -21,9 +21,9 @@ inside the nodes' network namespaces.
 | 13 | gossip_stale | A superseded announcement cannot restore a withdrawn edge |
 | 14 | gossip_lost_withdrawal | Periodic gossip delivers missed withdrawals while data keeps its incoming link alive |
 | 15 | endpoint_fanout | Working endpoint after 32 unreachable candidates |
-| 16 | packet_id_poison | Unauthenticated maximum ID cannot poison the receive window |
+| 16 | packet_header_auth | Changing the transport ID invalidates authentication |
 | 17 | packet_binding | Reflection and cross-peer ciphertext injection |
-| 18 | packet_replay_endpoint | Replay rejection across physical endpoints |
+| 18 | packet_endpoint_binding | A packet must arrive on the endpoint pair in its source route |
 | 19 | quic_noise | SSH and QUIC survive a bounded stream of invalid UDP packets |
 | 20 | route_limit | Full-size data at 16 hops; no route at 17 hops |
 

@@ -19,7 +19,7 @@ def test():
                 assert client.recv() == payload
                 time.sleep(.1)
         # Gossip and data have distinct authenticated outer packet types.
-        probes = [lab.intercept('a', 'b', 'copy', kind=4, seg=seg, count=-1,
+        probes = [lab.intercept('a', 'b', 'observe', kind=4, seg=seg, count=-1,
                                 max_size=899) for seg in (1, 2)]
         before = [rule['hits'] for rule in probes]
         traffic(3.2)
@@ -49,10 +49,6 @@ def test():
         assert time.monotonic() - started < 8
         assert lab.links('a') == {lab.nodes['b'].index}
         lab.wait_route('a', 'b', None, timeout=3)
-        # Already accepted packets cannot revive a link after its idle timeout.
-        lab.release(probes[0])
-        time.sleep(.2)
-        assert lab.links('b') == set()
         lab.clear(dropped)
         lab.unblock('a', 'b', both=False)
         lab.wait_links('b', ['a'], timeout=3)

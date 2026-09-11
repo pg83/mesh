@@ -1,4 +1,4 @@
-"""16: An unauthenticated maximum packet ID cannot advance the replay window."""
+"""16: The transport packet ID is authenticated; changing it invalidates the packet."""
 import lib
 import workload
 

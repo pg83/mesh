@@ -104,7 +104,7 @@ between that vertex and each of its actual local UDP endpoints. It withdraws
 its obsolete local attachments, including those learned after a restart. Static
 registry addresses are discovery candidates, not evidence of a live edge.
 
-Receiving an authenticated, non-replayed packet observes precisely its UDP
+Receiving an authenticated packet observes precisely its UDP
 source and destination pair. The destination comes from socket packet
 metadata. That incoming edge remains locally alive while packets arrive,
 and is withdrawn after five seconds of silence. The reverse edge is
@@ -135,9 +135,8 @@ rebuild routes.
 
 Status exposes incoming endpoint pairs, the live graph, its vertices, and
 routes keyed by destination endpoint. The runtime keeps one state mutex and
-the existing receive, TUN, timer, status, and signal loops. Crypto keys and
-the 1024-slot receive window stay shared across a peer's endpoints and survive
-link expiry; restarting a receiver resets its replay history.
+the existing receive, TUN, timer, status, and signal loops. Crypto keys stay
+shared across a peer's endpoints and survive local link expiry. Transport duplicate detection is not implemented.
 
 ## Development
 
@@ -200,10 +199,10 @@ The stress test runs in all three CI jobs as part of the regular e2e suite.
 
 Other scenarios transfer and hash files through scp and curl while cutting
 the active path, synchronize trees with rsync, and run iperf3 TCP/UDP streams
-with deterministic loss and delay. UDP probes check packet sizes, replay,
-reordering and packets older than the replay window. Separate tests check
+with deterministic loss and delay. UDP probes check packet sizes, reordering
+across busy channels, endpoint binding and ciphertext authentication. Separate tests check
 gossip on every endpoint during UDP traffic, data keeping a link alive
-when gossip is dropped, five-second local link expiry, replay after expiry, and a
+when gossip is dropped, five-second local link expiry, and a
 20-second RTT carrying UDP traffic without link flaps. Gossip reconnection, unknown
 keys, CLI errors and malformed packets also have separate tests. `mesh-probe` is built only with the `meshprobe` tag for the
 protocol test; it sends authenticated malformed messages to real mesh nodes.
