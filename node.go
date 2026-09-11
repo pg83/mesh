@@ -118,43 +118,31 @@ func (n *Node) send(packet []byte, edge Edge) {
 }
 
 func (n *Node) recvLoop() {
-	messages := make([]ipv4.Message, 32)
-
-	for i := range messages {
-		messages[i].Buffers = [][]byte{make([]byte, maxPacket)}
-		messages[i].OOB = ipv4.NewControlMessage(ipv4.FlagDst)
-	}
+	buf := make([]byte, maxPacket)
 
 	for {
-		count := throw2(n.conn.ReadBatch(messages, 0))
-		pending := map[Edge]uint16{}
+		size, control, addr, err := n.conn.ReadFrom(buf)
+
+		throw(err)
+
+		if size == 0 || control == nil || control.Dst == nil {
+			continue
+		}
+
+		remote := addr.(*net.UDPAddr)
+		edge := Edge{From: endpoint(remote.IP, remote.Port), To: endpoint(control.Dst, n.cfg.Port)}
 
 		n.mu.Lock()
 
-		for _, message := range messages[:count] {
-			control := ipv4.ControlMessage{}
-
-			throw(control.Parse(message.OOB[:message.NN]))
-
-			if message.N == 0 || control.Dst == nil {
-				continue
-			}
-
-			packet := message.Buffers[0][:message.N]
-			remote := message.Addr.(*net.UDPAddr)
-			edge := Edge{From: endpoint(remote.IP, remote.Port), To: endpoint(control.Dst, n.cfg.Port)}
-
-			if packet[0] == packetTransport || packet[0] == packetGossip {
-				n.handleTransport(packet, edge, pending)
-			}
+		if buf[0] == packetTransport || buf[0] == packetGossip {
+			n.handleTransport(buf[:size], edge)
 		}
 
-		n.relayGossip(pending)
 		n.mu.Unlock()
 	}
 }
 
-func (n *Node) handleTransport(packet []byte, edge Edge, pending map[Edge]uint16) {
+func (n *Node) handleTransport(packet []byte, edge Edge) {
 	if len(packet) < headerTransport {
 		return
 	}
@@ -192,7 +180,7 @@ func (n *Node) handleTransport(packet []byte, edge Edge, pending map[Edge]uint16
 	case innerData:
 		n.handleData(inner, edge)
 	case innerAd:
-		n.handleAd(inner, s.peer, pending)
+		n.handleAd(inner)
 	}
 }
 

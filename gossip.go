@@ -85,20 +85,13 @@ func (n *Node) publish() {
 	}
 
 	slices.SortFunc(updates, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
-	n.spread(updates, 0)
-}
 
-func (n *Node) spread(updates []Update, from uint16) {
 	for start := 0; start < len(updates); start += gossipBatchSize {
 		ad := Ad{Index: n.cfg.Index, Edges: updates[start:min(start+gossipBatchSize, len(updates))]}
 		blob := throw2(json.Marshal(ad))
 		inner := encodeAd(blob, ed25519.Sign(n.sig, blob))
 
 		for index, session := range n.peers {
-			if index == from {
-				continue
-			}
-
 			for _, dst := range n.candidates(n.reg.byIndex[index]) {
 				for src := range n.local {
 					n.send(session.seal(inner, n.nextPacketID()), Edge{From: src, To: dst})
@@ -108,7 +101,7 @@ func (n *Node) spread(updates []Update, from uint16) {
 	}
 }
 
-func (n *Node) handleAd(inner []byte, from uint16, pending map[Edge]uint16) {
+func (n *Node) handleAd(inner []byte) {
 	if len(inner) < 1+ed25519.SignatureSize {
 		return
 	}
@@ -150,7 +143,6 @@ func (n *Node) handleAd(inner []byte, from uint16, pending map[Edge]uint16) {
 		}
 
 		n.graph[update.Edge] = &update
-		pending[update.Edge] = from
 	}
 
 	if topologyChanged {
@@ -182,21 +174,4 @@ func (n *Node) candidates(peer *Peer) []Endpoint {
 	slices.SortFunc(addrs, compareEndpoint)
 
 	return slices.Compact(addrs)
-}
-
-func (n *Node) relayGossip(pending map[Edge]uint16) {
-	if len(pending) == 0 {
-		return
-	}
-
-	batches := map[uint16][]Update{}
-
-	for edge, from := range pending {
-		batches[from] = append(batches[from], *n.graph[edge])
-	}
-
-	for from, updates := range batches {
-		slices.SortFunc(updates, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
-		n.spread(updates, from)
-	}
 }

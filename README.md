@@ -117,9 +117,9 @@ selected source address and interface through UDP socket control metadata.
 Discovery does not depend on an existing route or a reverse connection.
 
 Gossip merges each directed pair independently. An omitted pair is unchanged;
-a newer record replaces an older version of that pair. Newly learned versions
-are collected across packets returned by one socket read and relayed using
-the newest version per pair, reducing redundant sends during bursts.
+a newer record replaces an older version of that pair. Receiving gossip updates
+the graph without sending a reply or forwarding it immediately. The next
+one-second publication includes the updated graph.
 Records have no age-based expiry. A newer `alive=false` record withdraws an
 edge; older versions cannot restore it. Automatic cleanup of unreachable
 parts of the graph is not implemented.
