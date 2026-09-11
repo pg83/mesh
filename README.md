@@ -167,6 +167,15 @@ throughout; tests reject missing/duplicate replies and report its maximum
 pause. Route convergence is bounded by 30 seconds and SSH recovery by 60
 seconds, allowing for gossip propagation and TCP retries after the five-second link timeout.
 
+The QUIC stress test runs one server and four clients in five separate
+namespaces. All clients start together and continuously exchange 64 KiB
+blocks for 30 seconds, verifying every byte. It checks four distinct source
+IPs, one connection per client, matching server/client byte counts, and
+prints each client's throughput. `mesh-quic` uses
+[quic-go](https://github.com/quic-go/quic-go) and is built only with the
+`meshquic` tag; it is absent from the production binary and coverage profile.
+The stress test runs in both CI jobs as part of the regular e2e suite.
+
 Other scenarios transfer and hash files through scp and curl while cutting
 the active path, synchronize trees with rsync, and run iperf3 TCP/UDP streams
 with deterministic loss and delay. UDP probes check packet sizes, replay,

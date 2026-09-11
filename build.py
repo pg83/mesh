@@ -80,6 +80,17 @@ probe = command(
     color="cyan",
 )
 
+quic = command(
+    name="quic",
+    inputs=GO_INPUTS,
+    outputs=["$(B)/bin/mesh-quic"],
+    cmd=["go", "build", "-trimpath", "-tags=meshquic", "-o", "$(B)/bin/mesh-quic", "."],
+    cwd="$(S)",
+    env=GO_ENV,
+    descr="GO",
+    color="cyan",
+)
+
 e2e_tests = []
 coverage_dirs = []
 for test_path in build.glob("$(S)/tst/test_*.py"):
@@ -89,6 +100,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         "MESH_TEST_ARTIFACTS": os.environ.get("MESH_TEST_ARTIFACTS", ""),
         "MESH_TEST_BINARY": mesh.outputs[0],
         "MESH_TEST_PROBE": probe.outputs[0],
+        "MESH_TEST_QUIC": quic.outputs[0],
         "PYTHONDONTWRITEBYTECODE": "1",
     }
     prelude = []
@@ -105,7 +117,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         name=f"e2e_{test_name}",
         inputs=[test_path, "$(S)/tst/lib.py", "$(S)/tst/workload.py", "$(S)/tst/program.py"],
         outputs=outputs,
-        deps=[mesh, probe] if test_name == "protocol" else [mesh],
+        deps=[mesh, probe] if test_name == "protocol" else [mesh, quic] if test_name == "quic" else [mesh],
         cmd=[
             *prelude,
             ["python3", test_path],

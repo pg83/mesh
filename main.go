@@ -1,4 +1,4 @@
-//go:build !meshprobe
+//go:build !meshprobe && !meshquic
 
 package main
 

@@ -30,6 +30,8 @@ gossip map on every node, source routing through any node, IP over TUN.
 - Test network faults belong in tst/lib.py's switch. No daemon control API.
 - probe.go is a test-only authenticated peer behind the meshprobe build tag;
   main.go is excluded only for that helper binary.
+- quic.go is a test-only QUIC server/client behind the meshquic build tag.
+  tst/test_quic.py runs four clients for 30 seconds in every CI e2e run.
 - Keep the same SSH/TCP process alive across failover assertions. Reconnecting
   a client is not a successful migration test.
 - Coverage requires counters for every daemon run and at least 95% overall.

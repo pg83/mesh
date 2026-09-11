@@ -16,7 +16,8 @@ def test():
         server = lab.spawn('b', ['iperf3', '-s', '-B', host, '-p', '5201'], 'iperf-server')
         workload.wait_port(lab, 'b', host, 5201, server)
         def run(*args):
-            result = lab.run('a', ['iperf3', '-c', host, '-p', '5201', '-t', '3', '-J', *args])
+            result = lab.run('a', ['iperf3', '-c', host, '-p', '5201', '-t', '3', '-J', *args], check=False)
+            assert result.returncode == 0, (result.stdout, result.stderr)
             report = json.loads(result.stdout)
             assert 'error' not in report, report
             print(json.dumps(report['end']), flush=True)
