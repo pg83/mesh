@@ -64,8 +64,8 @@ func (s *Session) seal(inner []byte, now time.Time) []byte {
 	out := make([]byte, headerTransport, headerTransport+len(inner)+s.send.Overhead())
 
 	out[0] = packetTransport
-	binary.BigEndian.PutUint32(out[1:], s.remoteID)
-	binary.BigEndian.PutUint64(out[5:], s.counter)
+	binary.LittleEndian.PutUint32(out[1:], s.remoteID)
+	binary.LittleEndian.PutUint64(out[5:], s.counter)
 
 	out = s.send.Seal(out, nonce(s.counter), inner, out[:headerTransport])
 	s.counter++
@@ -79,7 +79,7 @@ func (s *Session) open(packet []byte) ([]byte, bool) {
 		return nil, false
 	}
 
-	counter := binary.BigEndian.Uint64(packet[5:])
+	counter := binary.LittleEndian.Uint64(packet[5:])
 	inner, err := s.recv.Open(nil, nonce(counter), packet[headerTransport:], packet[:headerTransport])
 
 	if err != nil {

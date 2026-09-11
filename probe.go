@@ -38,11 +38,11 @@ func main() {
 
 	defer conn.Close()
 
-	msg, _, _, err := hs.WriteMessage(nil, binary.BigEndian.AppendUint64(nil, uint64(time.Now().UnixNano())))
+	msg, _, _, err := hs.WriteMessage(nil, binary.LittleEndian.AppendUint64(nil, uint64(time.Now().UnixNano())))
 
 	throw(err)
 
-	packet := binary.BigEndian.AppendUint32([]byte{packetInit}, 42)
+	packet := binary.LittleEndian.AppendUint32([]byte{packetInit}, 42)
 
 	throw2(conn.WriteToUDP(append(packet, msg...), remote))
 	throw(conn.SetReadDeadline(time.Now().Add(5 * time.Second)))
@@ -64,7 +64,7 @@ func main() {
 
 		throw(err)
 
-		session = newSession(peer.index, 42, binary.BigEndian.Uint32(buf[5:]), send, recv, remote, time.Now())
+		session = newSession(peer.index, 42, binary.LittleEndian.Uint32(buf[5:]), send, recv, remote, time.Now())
 	}
 
 	encoder := json.NewEncoder(os.Stdout)
@@ -84,8 +84,8 @@ func main() {
 		case "inner":
 			out = session.seal(throw2(hex.DecodeString(command.Hex)), time.Now())
 		case "short-transport":
-			out = binary.BigEndian.AppendUint32([]byte{packetTransport}, session.remoteID)
-			out = binary.BigEndian.AppendUint64(out, 0)
+			out = binary.LittleEndian.AppendUint32([]byte{packetTransport}, session.remoteID)
+			out = binary.LittleEndian.AppendUint64(out, 0)
 		case "ad":
 			key := sig
 

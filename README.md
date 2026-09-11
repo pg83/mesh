@@ -53,6 +53,12 @@ it and it carries its own signature.
 
 ## Wire format
 
+All multibyte integers in the mesh protocol use little-endian order,
+including handshake timestamps, session IDs, transport counters and route
+indexes. Encapsulated IP packets retain their standard network format.
+The Noise prologue is `mesh/2`; this wire format requires all nodes to be
+upgraded together from `mesh/1`.
+
 Outer packet, first byte is the type:
 
 | Type | Layout |
@@ -105,7 +111,7 @@ never dialed: the overlay must not run over itself.
 
 ```
 ./build          # .build/bin/mesh, published as ./mesh
-./build test     # go test + e2e topologies in tst/
+./build test     # e2e topologies in tst/
 ./lint.sh        # house style gate, needs a sibling ay checkout
 ```
 

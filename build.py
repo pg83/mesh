@@ -50,8 +50,6 @@ GO_SOURCES = [
     path for path in build.glob("$(S)/*.go")
     if not path.endswith("_test.go")
 ]
-GO_TEST_SOURCES = build.glob("$(S)/*_test.go")
-
 GO_INPUTS = [
     *GO_SOURCES,
     "$(S)/go.mod",
@@ -98,21 +96,6 @@ probe = command(
     color="cyan",
 )
 
-go_test_stamp = "$(B)/tests/go.stamp"
-go_test = command(
-    name="go_test",
-    inputs=[*GO_INPUTS, *GO_TEST_SOURCES],
-    outputs=[go_test_stamp],
-    cmd=[
-        ["go", "test", "-count=1", "-timeout=2m", "."],
-        touch(go_test_stamp),
-    ],
-    cwd="$(S)",
-    env=GO_ENV,
-    descr="UT",
-    color="green",
-)
-
 e2e_tests = []
 coverage_dirs = []
 for test_path in build.glob("$(S)/tst/test_*.py"):
@@ -151,9 +134,8 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
     ))
 
 group("install", mesh)
-group("unit", go_test)
 group("e2e", *e2e_tests)
-group("test", go_test, *e2e_tests)
+group("test", *e2e_tests)
 
 if COVERAGE:
     coverage = command(

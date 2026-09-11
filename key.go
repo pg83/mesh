@@ -14,7 +14,7 @@ import (
 
 var cipherSuite = noise.NewCipherSuite(noise.DH25519, noise.CipherChaChaPoly, noise.HashBLAKE2s)
 
-const prologue = "mesh/1"
+const prologue = "mesh/2"
 
 type KeyPair struct {
 	Key string `json:"key"`

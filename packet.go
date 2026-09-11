@@ -28,11 +28,11 @@ func encodeData(d *Data) []byte {
 	out := make([]byte, 0, 1+2+1+2*len(d.path)+1+len(d.ip))
 
 	out = append(out, innerData)
-	out = binary.BigEndian.AppendUint16(out, d.src)
+	out = binary.LittleEndian.AppendUint16(out, d.src)
 	out = append(out, byte(len(d.path)))
 
 	for _, hop := range d.path {
-		out = binary.BigEndian.AppendUint16(out, hop)
+		out = binary.LittleEndian.AppendUint16(out, hop)
 	}
 
 	out = append(out, byte(d.cursor))
@@ -54,14 +54,14 @@ func decodeData(inner []byte) (*Data, bool) {
 	}
 
 	d := &Data{
-		src:    binary.BigEndian.Uint16(inner[1:3]),
+		src:    binary.LittleEndian.Uint16(inner[1:3]),
 		path:   make([]uint16, hops),
 		cursor: int(inner[head-1]),
 		ip:     inner[head:],
 	}
 
 	for i := range d.path {
-		d.path[i] = binary.BigEndian.Uint16(inner[4+2*i:])
+		d.path[i] = binary.LittleEndian.Uint16(inner[4+2*i:])
 	}
 
 	if d.cursor >= hops {

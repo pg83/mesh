@@ -123,7 +123,7 @@ func (n *Node) freshID() uint32 {
 		var b [4]byte
 		throw2(rand.Read(b[:]))
 
-		id := binary.BigEndian.Uint32(b[:])
+		id := binary.LittleEndian.Uint32(b[:])
 		_, s := n.byID[id]
 		_, h := n.pending[id]
 
@@ -247,7 +247,7 @@ func (n *Node) handleInit(packet []byte, addr *net.UDPAddr) {
 		return
 	}
 
-	remoteID := binary.BigEndian.Uint32(packet[1:])
+	remoteID := binary.LittleEndian.Uint32(packet[1:])
 	hs := n.handshakeState(false, nil)
 	payload, _, _, err := hs.ReadMessage(nil, packet[headerInit:])
 
@@ -261,7 +261,7 @@ func (n *Node) handleInit(packet []byte, addr *net.UDPAddr) {
 		return
 	}
 
-	stamp := binary.BigEndian.Uint64(payload)
+	stamp := binary.LittleEndian.Uint64(payload)
 
 	if stamp <= n.lastInit[peer.index] {
 		return
@@ -292,8 +292,8 @@ func (n *Node) handleInit(packet []byte, addr *net.UDPAddr) {
 	out := make([]byte, headerResponse, headerResponse+len(response))
 
 	out[0] = packetResponse
-	binary.BigEndian.PutUint32(out[1:], remoteID)
-	binary.BigEndian.PutUint32(out[5:], s.localID)
+	binary.LittleEndian.PutUint32(out[1:], remoteID)
+	binary.LittleEndian.PutUint32(out[5:], s.localID)
 	n.send(append(out, response...), addr)
 }
 
@@ -302,8 +302,8 @@ func (n *Node) handleResponse(packet []byte, addr *net.UDPAddr) {
 		return
 	}
 
-	localID := binary.BigEndian.Uint32(packet[1:])
-	remoteID := binary.BigEndian.Uint32(packet[5:])
+	localID := binary.LittleEndian.Uint32(packet[1:])
+	remoteID := binary.LittleEndian.Uint32(packet[5:])
 	h := n.pending[localID]
 
 	if h == nil {
@@ -325,7 +325,7 @@ func (n *Node) handleTransport(packet []byte, addr *net.UDPAddr) {
 		return
 	}
 
-	s := n.byID[binary.BigEndian.Uint32(packet[1:])]
+	s := n.byID[binary.LittleEndian.Uint32(packet[1:])]
 
 	if s == nil {
 		return
@@ -509,7 +509,7 @@ func (n *Node) candidates(peer *Peer) []*net.UDPAddr {
 
 func (n *Node) sendInit(peer *Peer, addr *net.UDPAddr, now time.Time) {
 	hs := n.handshakeState(true, peer.pub)
-	stamp := binary.BigEndian.AppendUint64(nil, uint64(now.UnixNano()))
+	stamp := binary.LittleEndian.AppendUint64(nil, uint64(now.UnixNano()))
 	msg, _, _, err := hs.WriteMessage(nil, stamp)
 
 	if err != nil {
@@ -529,6 +529,6 @@ func (n *Node) sendInit(peer *Peer, addr *net.UDPAddr, now time.Time) {
 	out := make([]byte, headerInit, headerInit+len(msg))
 
 	out[0] = packetInit
-	binary.BigEndian.PutUint32(out[1:], h.localID)
+	binary.LittleEndian.PutUint32(out[1:], h.localID)
 	n.send(append(out, msg...), addr)
 }

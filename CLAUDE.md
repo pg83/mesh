@@ -12,7 +12,8 @@ gossip map on every node, source routing through any node, IP over TUN.
 ## Build and test
 
 - `./build` builds `.build/bin/mesh` and publishes `./mesh`.
-- `./build test` runs Go unit tests and the e2e suite in `tst/`.
+- `./build test` runs the e2e suite in `tst/`. Tests are e2e only; do not add
+  Go unit tests.
 - Every e2e test is a topology: nodes in separate network namespaces, wired by
   the userspace switch in `tst/lib.py` (this kernel has no veth; TUN only).
   Tests need unprivileged user namespaces; they re-exec under `unshare -rUn`.

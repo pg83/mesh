@@ -30,8 +30,8 @@ def test():
         def inner(data):
             send('inner', hex=data.hex())
         def data(path, cursor=0, payload=b''):
-            return b'\x01\x00\x01' + bytes([len(path)]) + b''.join(struct.pack('!H', p) for p in path) + bytes([cursor]) + payload
-        for packet in [b'', b'\xff', b'\x01', b'\x01\0\1\0', b'\x01\0\1\x11',
+            return b'\x01\x01\x00' + bytes([len(path)]) + b''.join(struct.pack('<H', p) for p in path) + bytes([cursor]) + payload
+        for packet in [b'', b'\xff', b'\x01', b'\x01\1\0\0', b'\x01\1\0\x11',
                        data([2], cursor=1), data([3]), data([2, 99]), b'\x02', b'\x02' + b'\0' * 64 + b'{']:
             inner(packet)
         send('short-transport')
