@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A node without static addresses is never dialed, only dials: the link
-comes up from its side and carries traffic both ways."""
+"""A node absent from the static endpoints bootstraps the link itself;
+its discovered endpoint then carries traffic both ways."""
 
 import lib
 

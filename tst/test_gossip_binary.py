@@ -15,9 +15,10 @@ def encode(endpoints, edges):
     offsets = []
     for ep in endpoints:
         offsets.append(len(packet))
-        packet += struct.pack('<BH', {'udp': 1, 'ws': 2, 'wss': 3}[ep['proto']], ep['port'])
+        kind = 4 if ep['proto'] == 'udp' and ':' in ep['addr'] else {'udp': 1, 'ws': 2, 'wss': 3}[ep['proto']]
+        packet += struct.pack('<BH', kind, ep['port'])
         if ep['proto'] == 'udp':
-            packet += socket.inet_aton(ep['addr'])
+            packet += lib.ipbytes(ep['addr'])
         else:
             for value in (ep['addr'], ep['path']):
                 data = value.encode()
@@ -31,7 +32,8 @@ def test():
         probe = workload.Probe(lab, 'a', 'b')
         endpoints = [lib.endpoint('192.0.2.10', 0), lib.endpoint('192.0.2.11', 9000),
                      dict(proto='ws', addr='edge.example.invalid', port=80, path='/mesh/λ'),
-                     dict(proto='wss', addr='secure.example.invalid', port=443, path='/' + 'x' * 300)]
+                     dict(proto='wss', addr='secure.example.invalid', port=443, path='/' + 'x' * 300),
+                     lib.endpoint('2001:db8::1234', 9000)]
         ident = time.time_ns()
         edges = [lib.edge(a, b, ident) for a, b in zip(endpoints, endpoints[1:])]
         packet, offsets = encode(endpoints, edges)
@@ -47,7 +49,7 @@ def test():
             send(packet[:end])
         send(packet + b'\0')
         mutations = [(1, b'\xff\xff'), (3, b'\xff\xff'), (5 + 24, b'\x02'),
-                     (offsets[0], b'\x00'), (offsets[2], b'\x04'),
+                     (offsets[0], b'\x00'), (offsets[2], b'\x05'),
                      (offsets[2] + 3, b'\xff\xff'),
                      (offsets[2] + 5 + len(endpoints[2]['addr']), b'\xff\xff')]
         for offset, value in mutations:

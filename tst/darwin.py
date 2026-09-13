@@ -103,3 +103,106 @@ with software_checksums(), tempfile.TemporaryDirectory(prefix='mesh-darwin-') as
     assert '[bad udp cksum' not in packets, 'bad UDP checksum on Darwin:\n'+packets
     assert '[udp sum ok]' in packets, 'no verified UDP packets captured:\n'+packets
     print('Darwin outgoing UDP checksums verified on the captured packets')
+
+
+@contextmanager
+def ipv6_addresses(iface, addresses):
+    added = []
+    try:
+        for address in addresses:
+            run('/sbin/ifconfig', iface, 'inet6', address, 'prefixlen', '64', 'alias')
+            added.append(address)
+        yield added
+    finally:
+        for address in added:
+            run('/sbin/ifconfig', iface, 'inet6', address, '-alias')
+
+
+def wait_for(predicate, description, timeout=15):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(.05)
+    raise AssertionError(description)
+
+
+def status():
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:18058/status', timeout=1) as response:
+            return json.load(response)
+    except OSError:
+        return {}
+
+
+def attached(address):
+    state = status()
+    endpoints = state.get('endpoints', {})
+    return any(e['alive'] and endpoints[str(e['from'])]['addr'] == '10.77.0.1'
+               and endpoints[str(e['to'])]['addr'] == address for e in state.get('graph', []))
+
+
+# Alias the runner's physical interface: loopback interfaces are intentionally
+# excluded from mesh discovery. No external IPv6 connectivity is required.
+iface = None
+for line in run('/sbin/ifconfig').splitlines():
+    if line and not line[0].isspace():
+        current_iface = line.split(':', 1)[0]
+    if line.strip().startswith('inet '+host+' '):
+        iface = current_iface
+assert iface, 'could not find physical interface'
+old, peer_addr, new = 'fd77:abcd::1', 'fd77:abcd::2', 'fd77:abcd::3'
+with software_checksums(), ipv6_addresses(iface, [old, peer_addr]) as aliases, tempfile.TemporaryDirectory(prefix='mesh-darwin6-') as directory:
+    root = Path(directory)
+    a, b = [json.loads(run(binary, 'keygen')) for _ in range(2)]
+    registry = [dict(name='mac', index=1, pub=a['pub'], intip='10.77.0.1', endpoint=[]),
+                dict(name='echo', index=2, pub=b['pub'], intip='10.77.0.2',
+                     endpoint=[dict(proto='udp', addr=peer_addr, port=17002)])]
+    (root/'node.json').write_text(json.dumps(dict(index=1, key=a['key'], subnet='10.77.0.0/24', mtu=1380,
+        control='127.0.0.1:18058', registry=registry, endpoint=[dict(proto='udp', addr='::', port=17001)])))
+    (root/'peer.json').write_text(json.dumps(dict(index=2, key=b['key'], registry=registry,
+        endpoint=[dict(proto='udp', addr=peer_addr, port=17002)])))
+    wait_for(lambda: all('tentative' not in line for line in run('/sbin/ifconfig', iface).splitlines()
+                         if old in line or peer_addr in line), 'IPv6 DAD did not finish')
+    processes = []
+    with open(root/'node.log', 'w+') as node_log, open(root/'peer.log', 'w+') as peer_log, \
+         open(root/'packets.log', 'w+') as packets_log, open(root/'capture.log', 'w+') as capture_log:
+        try:
+            capture = subprocess.Popen(['/usr/sbin/tcpdump', '-i', 'lo0', '-nn', '-l', '-vv',
+                'ip6 and udp and src port 17001 and dst port 17002'], stdout=packets_log, stderr=capture_log)
+            processes.append(capture)
+            def capture_ready():
+                capture_log.seek(0)
+                return 'listening on' in capture_log.read()
+            wait_for(capture_ready, 'IPv6 tcpdump did not start')
+            peer_process = subprocess.Popen([probe, 'echo', root/'peer.json', '['+old+']:17001', '1'], stdout=peer_log, stderr=peer_log)
+            processes.append(peer_process)
+            node = subprocess.Popen([binary, 'run', '-c', root/'node.json'], stdout=node_log, stderr=node_log)
+            processes.append(node)
+            wait_for(lambda: status().get('routes', {}).get('10.77.0.2:0'), 'no route over IPv6')
+            for size in [56, 1200]:
+                result = run('/sbin/ping', '-n', '-c', '4', '-s', str(size), '-W', '1000', '10.77.0.2')
+                assert ' 0.0% packet loss' in result, result
+            assert attached(old), status()
+            run('/sbin/ifconfig', iface, 'inet6', old, '-alias')
+            aliases.remove(old)
+            wait_for(lambda: not attached(old), 'Darwin address removal notification', timeout=3)
+            run('/sbin/ifconfig', iface, 'inet6', new, 'prefixlen', '64', 'alias')
+            aliases.append(new)
+            wait_for(lambda: attached(new), 'Darwin address addition notification', timeout=3)
+            wait_for(lambda: status().get('routes', {}).get('10.77.0.2:0'), 'IPv6 route after roaming')
+            result = run('/sbin/ping', '-n', '-c', '4', '-W', '1000', '10.77.0.2')
+            assert ' 0.0% packet loss' in result, result
+            assert node.poll() is None
+        finally:
+            for process in reversed(processes):
+                process.terminate()
+                process.wait(timeout=5)
+            for log in [node_log, peer_log, capture_log]:
+                log.seek(0)
+                print(log.read())
+        packets_log.seek(0)
+        packets = packets_log.read()
+        assert '[bad udp cksum' not in packets, packets
+        assert '[udp sum ok]' in packets, packets
+        print('Darwin IPv6: encrypted TUN round trips, checksum and address events passed')

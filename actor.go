@@ -307,11 +307,11 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 	sessions := map[uint16]*Session{}
 
 	for {
-		size, control, addr, err := socket.conn.ReadFrom(buf)
+		size, dst, addr, err := socket.read(buf)
 
 		throw(err)
 
-		if size < headerTransport || control == nil || control.Dst == nil || (buf[0] != packetTransport && buf[0] != packetGossip) {
+		if size < headerTransport || dst == nil || (buf[0] != packetTransport && buf[0] != packetGossip) {
 			continue
 		}
 
@@ -334,7 +334,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 
 		remote := addr.(*net.UDPAddr)
 
-		post(n.events.in, any(Discovery{wire: endpoint(control.Dst, int(socket.port)), remote: endpoint(remote.IP, remote.Port), peer: peer,
+		post(n.events.in, any(Discovery{wire: endpoint(dst, int(socket.port)), remote: endpoint(remote.IP, remote.Port), peer: peer,
 			received: Received{packet: append([]byte(nil), buf[:size]...), at: time.Now()}}))
 	}
 }

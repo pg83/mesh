@@ -3,7 +3,7 @@ let t = {peers: [], vertices: [], edges: [], routes: {}, index: 0};
 const dark = true;
 const $ = id => document.getElementById(id), byID = new Map(t.vertices.map(v => [v.id,v]));
 const peer = i => t.peers.find(p => p.index === Number(i));
-const label = v => v ? `${v.addr}${v.port ? ':'+v.port : ''}` : '—';
+const label = v => v ? `${v.port && v.addr.includes(':') ? '['+v.addr+']' : v.addr}${v.port ? ':'+v.port : ''}` : '—';
 const epFor = index => t.vertices.filter(v => v.owner === index && v.port);
 const ipVertex = index => t.vertices.find(v => !v.port && v.addr === peer(index)?.intip);
 const active = p => !!ipVertex(p.index);

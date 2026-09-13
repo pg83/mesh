@@ -13,6 +13,10 @@ func appendEndpoint(out []byte, ep Endpoint) []byte {
 	switch ep.Proto {
 	case "udp":
 		kind = 1
+
+		if ep.ipv6() {
+			kind = 4
+		}
 	case "ws":
 		kind = 2
 	case "wss":
@@ -24,8 +28,12 @@ func appendEndpoint(out []byte, ep Endpoint) []byte {
 	out = append(out, kind)
 	out = binary.LittleEndian.AppendUint16(out, ep.Port)
 
-	if kind == 1 {
-		ip := net.ParseIP(ep.Addr).To4()
+	if kind == 1 || kind == 4 {
+		ip := ep.ip().To16()
+
+		if kind == 1 {
+			ip = ip.To4()
+		}
 
 		if ip == nil {
 			throwFmt("bad UDP address %q", ep.Addr)
@@ -62,6 +70,15 @@ func decodeEndpoint(data []byte) (Endpoint, []byte, bool) {
 		ep.Addr = net.IP(data[:4]).String()
 
 		return ep, data[4:], true
+	case 4:
+		if len(data) < 16 {
+			return Endpoint{}, nil, false
+		}
+
+		ep.Proto = "udp"
+		ep.Addr = net.IP(data[:16]).String()
+
+		return ep, data[16:], true
 	case 2:
 		ep.Proto = "ws"
 	case 3:

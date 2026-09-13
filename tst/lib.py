@@ -13,6 +13,7 @@ import fcntl
 import heapq
 import hashlib
 import json
+import ipaddress
 import http.client
 import os
 import shutil
@@ -62,7 +63,7 @@ def endpoint_address(ep):
 
 
 def endpoint_hash(ep):
-    if ep['addr'] in ('', '0.0.0.0'):
+    if ep['addr'] in ('', '0.0.0.0', '::'):
         return 0
     value = '\0'.join([ep['proto'], ep['addr'].lower(), str(ep['port']), ep.get('path', '')])
     return int.from_bytes(hashlib.sha256(value.encode()).digest()[:8], 'little')
@@ -82,6 +83,14 @@ def segaddr(seg, index):
     return f"10.{seg}.0.{index}"
 
 
+def ipbytes(address):
+    return ipaddress.ip_address(address).packed
+
+
+def prefix(address):
+    return f'{address}/{64 if ":" in address else 24}'
+
+
 class Node:
     def __init__(self, name, index):
         self.name = name
@@ -96,12 +105,13 @@ class Node:
 
 
 class Lab:
-    def __init__(self, nodes, segments, statics=None):
+    def __init__(self, nodes, segments, statics=None, ipv6=()):
         """nodes: names, index is position + 1. segments: {seg: [names]}.
         statics: names that publish their segment addresses; default all."""
         self.nodes = {n: Node(n, i + 1) for i, n in enumerate(nodes)}
         self.segments = segments
         self.statics = set(nodes if statics is None else statics)
+        self.ipv6 = set(ipv6)
         self.dir = Path(tempfile.mkdtemp(prefix="mesh-lab-"))
         self.tuns = {}  # fd -> (seg, node)
         self.ports = {}  # (seg, addr bytes) -> fd
@@ -167,15 +177,16 @@ class Lab:
         os.setns(mine, os.CLONE_NEWNET)
         os.close(nsfd)
         os.close(mine)
-        addr = segaddr(seg, node.index)
+        addr = f'2001:db8:{seg}::{node.index}' if seg in self.ipv6 else segaddr(seg, node.index)
         node.addresses[seg] = addr
-        self.nsenter(node, "ip", "addr", "add", f"{addr}/24", "dev", name, check=True)
+        self.nsenter(node, "ip", "addr", "add", prefix(addr), "dev", name,
+                     *(['nodad'] if seg in self.ipv6 else []), check=True)
         # A full periodic graph fanout can exceed the default 500-packet TUN
         # queue before the userspace switch is scheduled. Faults are injected
         # by the switch; leave room for a publication in the 18-node topology.
         self.nsenter(node, "ip", "link", "set", name, "txqueuelen", "4096", "up", check=True)
         self.tuns[fd] = (seg, node)
-        self.ports[(seg, socket.inet_aton(addr))] = fd
+        self.ports[(seg, ipbytes(addr))] = fd
 
     def block(self, src, dst, seg=None, both=True):
         with self.lock:
@@ -249,6 +260,8 @@ class Lab:
                 name, seg, socket.inet_aton(self.nodes[name].addresses[seg]), bind_port)
 
     def route_packet(self, source, seg, packet):
+        if packet[0] >> 4 == 6:
+            return self.ports.get((seg, packet[24:40])), packet
         out = self.ports.get((seg, packet[16:20]))
         head = (packet[0] & 15) * 4
         if packet[9] != 17 or len(packet) < head + 8:
@@ -288,7 +301,8 @@ class Lab:
                         self.deliver(out, packet, key)
                     for fd in ready:
                         packet = os.read(fd, 65536)
-                        if len(packet) < 20 or packet[0] >> 4 != 4:
+                        version = packet[0] >> 4
+                        if len(packet) < (40 if version == 6 else 20) or version not in (4, 6):
                             continue
                         seg, src = self.tuns[fd]
                         out, packet = self.route_packet(src.name, seg, packet)
@@ -299,15 +313,18 @@ class Lab:
                         if key in self.blocked or (src.name, dst.name, None) in self.blocked:
                             self.counts[(*key, 'dropped')] += 1
                             continue
-                        head = (packet[0] & 15) * 4
-                        payload = packet[head + 8:] if packet[9] == 17 else b''
+                        head = 40 if version == 6 else (packet[0] & 15) * 4
+                        proto = packet[6] if version == 6 else packet[9]
+                        source_ip = packet[8:24] if version == 6 else packet[12:16]
+                        target_ip = packet[24:40] if version == 6 else packet[16:20]
+                        payload = packet[head + 8:] if proto == 17 else b''
                         for rule in self.rules:
                             if (rule['src'] != src.name or rule['dst'] != dst.name
-                                    or (rule['source_ip'] is not None and packet[12:16] != socket.inet_aton(rule['source_ip']))
-                                    or (rule['target_ip'] is not None and packet[16:20] != socket.inet_aton(rule['target_ip']))
-                                    or (rule['syn'] and (packet[9] != 6 or len(packet) < head+20 or packet[head+13] & 0x12 != 0x02))
-                                    or (rule['source_port'] is not None and (packet[9] not in (6, 17) or struct.unpack_from('!H', packet, head)[0] != rule['source_port']))
-                                    or (rule['target_port'] is not None and (packet[9] not in (6, 17) or struct.unpack_from('!H', packet, head + 2)[0] != rule['target_port']))
+                                    or (rule['source_ip'] is not None and source_ip != ipbytes(rule['source_ip']))
+                                    or (rule['target_ip'] is not None and target_ip != ipbytes(rule['target_ip']))
+                                    or (rule['syn'] and (proto != 6 or len(packet) < head+20 or packet[head+13] & 0x12 != 0x02))
+                                    or (rule['source_port'] is not None and (proto not in (6, 17) or struct.unpack_from('!H', packet, head)[0] != rule['source_port']))
+                                    or (rule['target_port'] is not None and (proto not in (6, 17) or struct.unpack_from('!H', packet, head + 2)[0] != rule['target_port']))
                                     or rule['count'] == 0
                                     or rule['seg'] not in (None, seg)
                                     or len(payload) < rule['min_size']
@@ -356,18 +373,20 @@ class Lab:
 
     def add_address(self, name, seg, address):
         node = self.nodes[name]
-        self.nsenter(node, 'ip', 'addr', 'add', f'{address}/24', 'dev', f's{seg}', check=True)
+        self.nsenter(node, 'ip', 'addr', 'add', prefix(address), 'dev', f's{seg}',
+                     *(['nodad'] if ':' in address else []), check=True)
         with self.lock:
-            self.ports[(seg, socket.inet_aton(address))] = self.ports[(seg, socket.inet_aton(node.addresses[seg]))]
+            self.ports[(seg, ipbytes(address))] = self.ports[(seg, ipbytes(node.addresses[seg]))]
 
     def set_address(self, name, seg, address):
         node = self.nodes[name]
         with self.lock:
             old = node.addresses[seg]
-            fd = self.ports.pop((seg, socket.inet_aton(old)))
-            self.nsenter(node, 'ip', 'addr', 'del', f'{old}/24', 'dev', f's{seg}', check=True)
-            self.nsenter(node, 'ip', 'addr', 'add', f'{address}/24', 'dev', f's{seg}', check=True)
-            self.ports[(seg, socket.inet_aton(address))] = fd
+            fd = self.ports.pop((seg, ipbytes(old)))
+            self.nsenter(node, 'ip', 'addr', 'del', prefix(old), 'dev', f's{seg}', check=True)
+            self.nsenter(node, 'ip', 'addr', 'add', prefix(address), 'dev', f's{seg}',
+                         *(['nodad'] if ':' in address else []), check=True)
+            self.ports[(seg, ipbytes(address))] = fd
             node.addresses[seg] = address
 
     def command(self, name, argv, user=False):
@@ -435,7 +454,8 @@ class Lab:
         cfg = {
             "index": node.index,
             "key": node.keys["key"],
-            "endpoint": [dict(proto="udp", addr="0.0.0.0", port=PORT)],
+            "endpoint": [dict(proto="udp", addr=addr, port=PORT)
+                         for addr in (['0.0.0.0', '::'] if self.ipv6 else ['0.0.0.0'])],
             "subnet": SUBNET,
             "control": CONTROL,
             "registry": self.registry(),

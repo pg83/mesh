@@ -43,6 +43,10 @@ func (n *Node) publishSnapshot() {
 					continue
 				}
 
+				if ip := n.addresses[dst].ip(); ip != nil && n.local[src].address.ipv6() != (ip.To4() == nil) {
+					continue
+				}
+
 				edge := Edge{From: src, To: dst}
 
 				n.edgePair(edge, index)
@@ -111,6 +115,11 @@ func (n *Node) graphLoop() {
 		select {
 		case event := <-n.events.out:
 			switch v := event.(type) {
+			case InterfaceState:
+				n.local = n.scanLocal(v)
+				n.refresh(time.Now())
+				n.publishSnapshot()
+				dirty = false
 			case *Ad:
 				n.handleAd(v)
 				dirty = true

@@ -7,8 +7,6 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-
-	"golang.org/x/net/ipv4"
 )
 
 const (
@@ -18,8 +16,13 @@ const (
 
 type UDPSocket struct {
 	guard net.Listener
-	conn  *ipv4.PacketConn
+	read  func([]byte) (int, net.IP, net.Addr, error)
 	port  uint16
+}
+
+type SocketKey struct {
+	port uint16
+	ipv6 bool
 }
 
 type LocalEndpoint struct {
@@ -34,7 +37,7 @@ type Node struct {
 	key        DHKey
 	log        *slog.Logger
 	subnet     *net.IPNet
-	sockets    map[uint16]*UDPSocket
+	sockets    map[SocketKey]*UDPSocket
 	listeners  map[string]*WSListener
 	tlsCA      map[uint64]string
 	endpoints  []SocketEndpoint
@@ -101,7 +104,9 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	}
 
 	_, n.subnet = throw3(net.ParseCIDR(cfg.Subnet))
-	n.sockets = map[uint16]*UDPSocket{}
+
+	n.sockets = map[SocketKey]*UDPSocket{}
+	n.local = map[uint64]*LocalEndpoint{}
 
 	for _, config := range append(append([]EndpointConfig{}, cfg.Endpoint...), me.endpoints...) {
 		config.validate()
@@ -109,15 +114,15 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		public := config.description()
 		bind := config.binding()
 
-		if public.Addr == "" || bind.IP.To4() == nil {
+		if public.Addr == "" || bind.IP == nil {
 			continue
 		}
 
 		local := endpoint(bind.IP, bind.Port)
 
 		if config.Proto == "udp" {
-			if n.sockets[local.Port] == nil {
-				n.sockets[local.Port] = newUDPSocket(local.Port)
+			if n.sockets[local.socketKey()] == nil {
+				n.sockets[local.socketKey()] = newUDPSocket(local.socketKey())
 			}
 		} else {
 			n.listenWS(config)
@@ -138,6 +143,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 
 func (n *Node) run() {
 	n.publishSnapshot()
+	go n.loop("interfaces", n.watchInterfaces)
 
 	for _, listener := range n.listeners {
 		go n.loop("websocket listener", func() { throw(listener.server.Serve(listener.conn)) })

@@ -13,57 +13,47 @@ type Ad struct {
 	Endpoints []Endpoint `json:"endpoints"`
 }
 
-func (n *Node) scanLocal() map[uint64]*LocalEndpoint {
+func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalEndpoint {
 	local := map[uint64]*LocalEndpoint{}
 	incoming := map[Endpoint]uint64{}
 
-	for _, iface := range throw2(net.Interfaces()) {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 || iface.Name == n.cfg.Tun {
-			continue
-		}
+	for _, addr := range addresses {
+		ip := net.IP(addr.ip.AsSlice())
 
-		for _, addr := range throw2(iface.Addrs()) {
-			ip, _ := throw3(net.ParseCIDR(addr.String()))
+		for _, config := range n.endpoints {
+			wire := endpoint(ip, int(config.bind.Port))
 
-			if ip.To4() == nil || ip.IsLinkLocalUnicast() || n.subnet.Contains(ip) {
+			if config.bind.ipv6() != wire.ipv6() || (!config.bind.ip().IsUnspecified() && config.bind.Addr != wire.Addr) {
 				continue
 			}
 
-			for _, config := range n.endpoints {
-				wire := endpoint(ip, int(config.bind.Port))
+			public := config.public
 
-				if config.bind.Addr != "0.0.0.0" && config.bind.Addr != wire.Addr {
-					continue
-				}
-
-				public := config.public
-
-				if public.Addr == "0.0.0.0" {
-					public.Addr = wire.Addr
-				}
-
-				if previous, exists := incoming[wire]; public.Proto == "udp" && exists && previous != public.hash() {
-					throwFmt("ambiguous endpoint binding: %s", wire.string())
-				}
-
-				if previous := local[public.hash()]; previous != nil && previous.address != wire {
-					throwFmt("ambiguous public endpoint: %s", public.string())
-				}
-
-				if public.Proto == "udp" {
-					incoming[wire] = n.remember(public)
-				} else {
-					n.remember(public)
-				}
-
-				binding := &LocalEndpoint{address: wire, iface: iface.Index}
-
-				if public.Proto == "udp" {
-					binding.socket = n.sockets[wire.Port]
-				}
-
-				local[public.hash()] = binding
+			if public.ip().IsUnspecified() {
+				public.Addr = wire.Addr
 			}
+
+			if previous, exists := incoming[wire]; public.Proto == "udp" && exists && previous != public.hash() {
+				throwFmt("ambiguous endpoint binding: %s", wire.string())
+			}
+
+			if previous := local[public.hash()]; previous != nil && previous.address != wire {
+				throwFmt("ambiguous public endpoint: %s", public.string())
+			}
+
+			if public.Proto == "udp" {
+				incoming[wire] = n.remember(public)
+			} else {
+				n.remember(public)
+			}
+
+			binding := &LocalEndpoint{address: wire, iface: addr.iface}
+
+			if public.Proto == "udp" {
+				binding.socket = n.sockets[wire.socketKey()]
+			}
+
+			local[public.hash()] = binding
 		}
 	}
 
@@ -73,8 +63,6 @@ func (n *Node) scanLocal() map[uint64]*LocalEndpoint {
 }
 
 func (n *Node) refresh(now time.Time) {
-	n.local = n.scanLocal()
-
 	desired := map[Edge]bool{}
 	me := n.reg.byIndex[n.cfg.Index].endpoint().hash()
 

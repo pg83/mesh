@@ -42,7 +42,10 @@ fields are ignored.
 {
   "index": 1,
   "key": "<base64 private key>",
-  "endpoint": [{"proto": "udp", "addr": "0.0.0.0", "port": 7000}],
+  "endpoint": [
+    {"proto": "udp", "addr": "0.0.0.0", "port": 7000},
+    {"proto": "udp", "addr": "::", "port": 7000}
+  ],
   "subnet": "10.77.0.0/24",
   "control": "127.0.0.1:8058",
   "registry": [
@@ -73,8 +76,13 @@ Old configurations must be converted to this format.
 | `bind_addr`, `bind_port` | Local address and port; omitted values default to `addr` and `port` |
 | `path` | WebSocket request path including query, default `/` |
 
-For UDP, `addr: "0.0.0.0"` expands to eligible IPv4 interface addresses
-on this host, refreshed every second. A concrete address selects that
+For UDP, `addr: "0.0.0.0"` expands to eligible IPv4 interface addresses;
+`addr: "::"` expands to global or ULA IPv6 addresses. Include both for dual stack.
+Link-local addresses are excluded because their scope is local to an interface.
+An independent interface actor scans at startup, on OS address/link events
+(Linux netlink, Darwin routing socket), and every 30 seconds as a fallback.
+The graph receives an immutable address list; interface enumeration errors
+do not terminate mesh. A concrete address selects that
 interface address. Loopback, link-local and mesh-subnet addresses are excluded.
 Multiple entries can use the same local port. Each endpoint pair has a connected
 UDP socket and its own receive queue; a listener on the same port handles
@@ -144,10 +152,11 @@ there is no separate advertisement signature or signing key.
 
 All multibyte integers in the mesh protocol use little-endian order.
 Encapsulated IP packets retain their standard network format. The key
-context is `mesh/8`; older wire formats are incompatible.
+context is `mesh/9`; upgrade all peers together. Releases 6–8 use `mesh/8`
+and cannot exchange traffic with this version.
 
 Each registered pair derives a shared secret with X25519 and directional
-keys with HKDF-SHA256. The context contains `mesh/8`, the sender's public key
+keys with HKDF-SHA256. The context contains `mesh/9`, the sender's public key
 and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
@@ -167,8 +176,9 @@ exact next destination. Local delivery verifies the destination mesh IP.
 Inner gossip starts with `2`, edge count (2), and endpoint count (2), followed
 by the edges and then the endpoint descriptions. Each edge is 25 bytes:
 source hash (8), destination hash (8), record ID (8), and alive (1, either 0
-or 1). Endpoint descriptions start with protocol (1: UDP=1, WS=2, WSS=3) and
-port (2). UDP then carries four IPv4 octets. WS/WSS carry the address and path
+or 1). Endpoint descriptions start with kind (1: UDP/IPv4=1, WS=2, WSS=3,
+UDP/IPv6=4) and port (2). UDP then carries four IPv4 or sixteen IPv6 octets.
+WS/WSS carry the address and path
 as two strings, each prefixed by its byte length (2). Strings use UTF-8.
 
 Counts and lengths are checked against the remaining packet before allocating

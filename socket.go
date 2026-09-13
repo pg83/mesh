@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 type SocketEndpoint struct {
@@ -70,7 +71,7 @@ func udpControl(iface int) func(string, string, syscall.RawConn) error {
 	return func(network, address string, raw syscall.RawConn) error {
 		var result error
 
-		err := raw.Control(func(fd uintptr) { result = socketReuse(int(fd), iface) })
+		err := raw.Control(func(fd uintptr) { result = socketReuse(int(fd), iface, strings.HasSuffix(network, "6")) })
 
 		if err != nil {
 			result = err
@@ -80,23 +81,69 @@ func udpControl(iface int) func(string, string, syscall.RawConn) error {
 	}
 }
 
-func newUDPSocket(port uint16) *UDPSocket {
-	guard := udpGuard(port)
+func (k SocketKey) network(proto string) string {
+	if k.ipv6 {
+		return proto + "6"
+	}
+
+	return proto + "4"
+}
+
+func (k SocketKey) wildcard() string {
+	if k.ipv6 {
+		return "::"
+	}
+
+	return "0.0.0.0"
+}
+
+func newUDPSocket(key SocketKey) *UDPSocket {
+	guard := udpGuard(key)
 	lc := net.ListenConfig{Control: udpControl(0)}
-	udp := throw2(lc.ListenPacket(context.Background(), "udp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(int(port))))).(*net.UDPConn)
+	udp := throw2(lc.ListenPacket(context.Background(), key.network("udp"), net.JoinHostPort(key.wildcard(), strconv.Itoa(int(key.port))))).(*net.UDPConn)
 
 	throw(udp.SetReadBuffer(1 << 20))
 
-	conn := ipv4.NewPacketConn(udp)
+	socket := &UDPSocket{port: key.port, guard: guard}
 
-	throw(conn.SetControlMessage(ipv4.FlagDst, true))
+	if key.ipv6 {
+		conn := ipv6.NewPacketConn(udp)
 
-	return &UDPSocket{conn: conn, port: port, guard: guard}
+		throw(conn.SetControlMessage(ipv6.FlagDst, true))
+		socket.read = func(buf []byte) (int, net.IP, net.Addr, error) {
+			size, control, remote, err := conn.ReadFrom(buf)
+
+			var dst net.IP
+
+			if control != nil {
+				dst = control.Dst
+			}
+
+			return size, dst, remote, err
+		}
+	} else {
+		conn := ipv4.NewPacketConn(udp)
+
+		throw(conn.SetControlMessage(ipv4.FlagDst, true))
+		socket.read = func(buf []byte) (int, net.IP, net.Addr, error) {
+			size, control, remote, err := conn.ReadFrom(buf)
+
+			var dst net.IP
+
+			if control != nil {
+				dst = control.Dst
+			}
+
+			return size, dst, remote, err
+		}
+	}
+
+	return socket
 }
 
 func connectUDP(local *LocalEndpoint, remote Endpoint) *net.UDPConn {
 	dialer := net.Dialer{LocalAddr: local.address.addr(), Control: udpControl(local.iface)}
-	conn := throw2(dialer.Dial("udp4", remote.string())).(*net.UDPConn)
+	conn := throw2(dialer.Dial(local.address.socketKey().network("udp"), remote.string())).(*net.UDPConn)
 
 	throw(conn.SetReadBuffer(1 << 20))
 

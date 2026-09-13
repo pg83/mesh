@@ -14,7 +14,7 @@ func echoProbe(path, remote string, index uint16) {
 	me, peer := reg.byIndex[cfg.Index], reg.byIndex[index]
 	key := deriveKey(decodeKey(cfg.Key))
 	session := newSession(me, peer, key.private)
-	conn := throw2(net.ListenUDP("udp4", cfg.Endpoint[0].binding()))
+	conn := throw2(net.ListenUDP(cfg.Endpoint[0].description().socketKey().network("udp"), cfg.Endpoint[0].binding()))
 	target := parseUDPAddr(remote)
 	mine, other := cfg.Endpoint[0].description(), endpoint(target.IP, target.Port)
 	buf := make([]byte, maxPacket)
@@ -47,7 +47,7 @@ func echoProbe(path, remote string, index uint16) {
 
 		conn.SetReadDeadline(next)
 
-		size, _, err := conn.ReadFromUDP(buf)
+		size, remote, err := conn.ReadFromUDP(buf)
 
 		if err != nil {
 			continue
@@ -59,6 +59,8 @@ func echoProbe(path, remote string, index uint16) {
 			continue
 		}
 
+		target = remote
+		other = endpoint(remote.IP, remote.Port)
 		received = true
 
 		if inner[0] != innerData {

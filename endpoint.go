@@ -23,11 +23,21 @@ type Edge struct {
 }
 
 func endpoint(ip net.IP, port int) Endpoint {
-	if ip.To4() == nil {
+	if ip.To16() == nil {
 		return Endpoint{}
 	}
 
-	return Endpoint{Proto: "udp", Addr: ip.To4().String(), Port: uint16(port)}
+	return Endpoint{Proto: "udp", Addr: ip.String(), Port: uint16(port)}
+}
+
+func (e Endpoint) ipv6() bool {
+	ip := e.ip()
+
+	return ip != nil && ip.To4() == nil
+}
+
+func (e Endpoint) socketKey() SocketKey {
+	return SocketKey{port: e.Port, ipv6: e.ipv6()}
 }
 
 func (e Endpoint) canonical() Endpoint {
@@ -45,12 +55,12 @@ func (e Endpoint) canonical() Endpoint {
 }
 
 func (e Endpoint) valid() bool {
-	if e.Addr == "" || e.Addr == "0.0.0.0" || strings.ContainsRune(e.Addr, 0) || strings.ContainsRune(e.Path, 0) {
+	if e.Addr == "" || e.ip().IsUnspecified() || strings.ContainsRune(e.Addr, 0) || strings.ContainsRune(e.Path, 0) {
 		return false
 	}
 
 	if e.Proto == "udp" {
-		return net.ParseIP(e.Addr).To4() != nil && e.Path == ""
+		return e.ip() != nil && !e.ip().IsLinkLocalUnicast() && e.Path == ""
 	}
 
 	return (e.Proto == "ws" || e.Proto == "wss") && e.Port != 0 && strings.HasPrefix(e.Path, "/")

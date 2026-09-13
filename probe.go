@@ -67,7 +67,7 @@ func main() {
 		}
 	} else {
 		remote := parseUDPAddr(os.Args[2])
-		conn := throw2(net.ListenUDP("udp4", cfg.Endpoint[0].binding()))
+		conn := throw2(net.ListenUDP(cfg.Endpoint[0].description().socketKey().network("udp"), cfg.Endpoint[0].binding()))
 
 		defer conn.Close()
 

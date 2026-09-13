@@ -55,7 +55,7 @@ def test():
         cfg = json.loads(body)
         assert 'key' not in cfg and 'tun' not in cfg
         assert cfg['index'] == 2 and cfg['subnet'] == lib.SUBNET
-        assert cfg['endpoint'] == [dict(proto='udp', addr='0.0.0.0', port=lib.PORT)]
+        assert cfg['endpoint'] == [dict(proto='udp', addr=addr, port=lib.PORT) for addr in ['0.0.0.0', '::']]
         assert cfg['registry'] == lab.registry()
         assert 'attachment' in headers['Content-Disposition']
         assert json.loads(get('/api/config?node=2')[1]) == cfg

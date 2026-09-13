@@ -60,7 +60,8 @@ func (n *Node) listenWS(c EndpointConfig) {
 		throwFmt("bad bind_proto %q", proto)
 	}
 
-	address := net.JoinHostPort("0.0.0.0", strconv.Itoa(c.binding().Port))
+	key := endpoint(c.binding().IP, c.binding().Port).socketKey()
+	address := net.JoinHostPort(key.wildcard(), strconv.Itoa(int(key.port)))
 
 	if existing := n.listeners[address]; existing != nil {
 		if existing.proto != proto {
@@ -75,7 +76,7 @@ func (n *Node) listenWS(c EndpointConfig) {
 	}
 
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	listener := net.Listener(throw2(net.Listen("tcp4", address)))
+	listener := net.Listener(throw2(net.Listen(key.network("tcp"), address)))
 
 	if proto == "wss" {
 		pair := throw2(tls.LoadX509KeyPair(c.TLSCert, c.TLSKey))

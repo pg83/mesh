@@ -99,9 +99,9 @@ func (n *Node) exportConfig(w http.ResponseWriter, r *http.Request) {
 
 		port := uint16(0)
 
-		for p := range n.sockets {
-			if port == 0 || p < port {
-				port = p
+		for key := range n.sockets {
+			if port == 0 || key.port < port {
+				port = key.port
 			}
 		}
 
@@ -112,7 +112,7 @@ func (n *Node) exportConfig(w http.ResponseWriter, r *http.Request) {
 		cfg := Config{
 			Index: peer.Index, Subnet: n.cfg.Subnet, Mtu: n.cfg.Mtu,
 			Control: "127.0.0.1:8058", Registry: peers,
-			Endpoint: []EndpointConfig{{Proto: "udp", Addr: "0.0.0.0", Port: int(port)}},
+			Endpoint: []EndpointConfig{{Proto: "udp", Addr: "0.0.0.0", Port: int(port)}, {Proto: "udp", Addr: "::", Port: int(port)}},
 		}
 
 		w.Header().Set("Content-Disposition", "attachment; filename=mesh-"+strconv.Itoa(int(peer.Index))+".json")
