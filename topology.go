@@ -39,7 +39,7 @@ func (n *Node) publishSnapshot() {
 
 		for _, dst := range n.candidates(peer) {
 			for src := range n.local {
-				if (n.addresses[src].Proto == "udp") != (n.addresses[dst].Proto == "udp") {
+				if n.addresses[src].Proto != "source" {
 					continue
 				}
 
@@ -83,7 +83,6 @@ func (n *Node) observe(r EdgeReport) {
 		_, exists := n.observed[r.edge]
 
 		n.observed[r.edge] = r.seen
-		n.discovered[r.peer][r.edge.From] = r.seen
 		n.owned[r.edge] = true
 
 		if !exists {
@@ -93,9 +92,9 @@ func (n *Node) observe(r EdgeReport) {
 	}
 
 	if r.connection == nil {
-		delete(n.ws, r.edge)
+		delete(n.connection, r.edge)
 	} else {
-		n.ws[r.edge] = *r.connection
+		n.connection[r.edge] = *r.connection
 	}
 
 	if r.dialing {
@@ -120,6 +119,7 @@ func (n *Node) graphLoop() {
 		case event := <-n.events.out:
 			switch v := event.(type) {
 			case InterfaceState:
+				n.syncListeners(v)
 				n.local = n.scanLocal(v)
 				n.refresh(time.Now())
 				n.publishSnapshot()
@@ -135,36 +135,10 @@ func (n *Node) graphLoop() {
 			case EdgeReport:
 				n.observe(v)
 				dirty = true
-			case Discovery:
-				if v.session != n.session(v.peer) {
-					continue
-				}
-
-				local, ok := n.incoming[v.wire]
-
-				if !ok {
-					continue
-				}
-
-				remote := n.remember(v.remote)
-				edge := Edge{From: remote, To: local}
-				created := n.actors[edge] == nil
-
-				n.edgePair(Edge{From: local, To: remote}, v.peer)
-
-				n.observe(EdgeReport{session: v.session, edge: edge, peer: v.peer, seen: v.received.at})
-
-				if created {
-					n.publishSnapshot()
-				} else {
-					dirty = true
-				}
-
-				post(n.actors[edge].inbox.in, any(v.received))
-			case *WSConnection:
+			case *Connection:
 				if n.local[v.edge.From] == nil || n.session(v.peer) != v.session {
 					v.stop()
-					v.conn.CloseNow()
+					v.conn.close()
 
 					continue
 				}
@@ -174,7 +148,6 @@ func (n *Node) graphLoop() {
 
 				actor := n.edgePair(v.edge, v.peer)
 
-				n.discovered[v.peer][v.edge.To] = time.Now()
 				n.publishSnapshot()
 
 				post(actor.inbox.in, any(v))
@@ -185,14 +158,6 @@ func (n *Node) graphLoop() {
 			}
 		case now := <-ticker.C:
 			n.refresh(now)
-
-			for _, endpoints := range n.discovered {
-				for ep, received := range endpoints {
-					if now.Sub(received) > sessionTimeout {
-						delete(endpoints, ep)
-					}
-				}
-			}
 
 			n.publishSnapshot()
 			dirty = false

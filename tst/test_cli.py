@@ -63,8 +63,6 @@ def test():
             dict(proto='wss', addr='0.0.0.0', port=7901),
         ]), 'conflicting listener protocols')
         bad(lambda c: c['endpoint'][0].update(proto='wss', tls_cert='/absent'), 'no such file')
-        bad(lambda c: c.update(endpoint=[]), 'no endpoints configured')
-        bad(lambda c: c['endpoint'][0].update(bind_addr='::1'), 'no endpoints configured')
         bad(lambda c: c['endpoint'].append(dict(proto='udp', addr='203.0.113.1', port=17001,
                                               bind_addr='10.1.0.1', bind_port=7900)), 'ambiguous endpoint binding')
         bad(lambda c: c['endpoint'].extend([

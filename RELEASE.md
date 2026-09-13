@@ -1,10 +1,7 @@
-Mesh now exposes read-only HTTP control on localhost instead of a Unix status socket. A separate `mesh web` process serves the topology, a directed hop matrix and complete ephemeral-node configurations without private keys.
+Endpoints now describe incoming listeners only. UDP, WS and WSS connections can be initiated from every eligible local interface even when the node has no listeners. Outgoing UDP uses ephemeral ports; accepted connections carry return traffic and registry updates.
 
-- `control: "127.0.0.1:8058"` enables the API.
-- `mesh web -control 127.0.0.1:8058 -listen 127.0.0.1:8059` opens the Hosts / Endpoint / Matrix / Config interface.
-- Download `/api/config?node=mini`, then run `sudo mesh run -c mesh.json -key-file ~/.ssh/mini.key`.
-- Native Darwin TUN support on Apple Silicon and Intel. Leave `tun` unset for automatic `utun` allocation; Linux defaults to `mesh0`.
+The graph separates ingress endpoints from source vertices. UDP bindings preserve one-way links without waiting for a response. Explicit binds track interface appearance/removal, including loopback origins behind a WebSocket reverse proxy. Darwin no longer reserves a TCP port for each UDP listener.
 
-The transport remains compatible with release 6. Configurations using `status` must switch to `control`; `mesh status` now accepts `-control` instead of `-s`.
+Downloaded ephemeral configs contain no listeners or private key. The status description map is now `addresses`; the web graph distinguishes source vertices from host vertices.
 
-Release publication follows Linux e2e, Chromium UI, race detector, coverage, and native macOS TUN round-trip checks. Darwin archives contain the binaries exercised by the native CI jobs. Extract the archive for your architecture; each contains the executable `mesh`. `SHA256SUMS` covers all three archives.
+This release uses `mesh/10` and requires peers to be updated together. Releases through 10 use an incompatible transport.

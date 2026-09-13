@@ -58,6 +58,10 @@ def endpoint(address, port=PORT):
     return dict(proto='udp', addr=address, port=port)
 
 
+def source(address, node):
+    return dict(proto="source", node=node, addr=address, port=0)
+
+
 def endpoint_address(ep):
     return ep['addr']
 
@@ -66,12 +70,14 @@ def endpoint_hash(ep):
     if ep['addr'] in ('', '0.0.0.0', '::'):
         return 0
     value = '\0'.join([ep['proto'], ep['addr'].lower(), str(ep['port']), ep.get('path', '')])
+    if ep['proto'] == 'source':
+        value = str(ep['node']) + '\0' + value
     return int.from_bytes(hashlib.sha256(value.encode()).digest()[:8], 'little')
 
 
 def wire_ad(ad):
     descriptors = {endpoint_hash(e[k]): e[k] for e in ad['edges'] for k in ('from', 'to')}
-    return dict(ad, endpoints=list(descriptors.values()),
+    return dict(ad, vertices=list(descriptors.values()),
                 edges=[dict(e, **{k: endpoint_hash(e[k]) for k in ('from', 'to')}) for e in ad['edges']])
 
 
@@ -600,7 +606,7 @@ class Lab:
         except OSError as error:
             raise OSError(f'{name}: status failed: {error}') from error
         status = json.loads(data)
-        descriptors = status['endpoints']
+        descriptors = status['addresses']
         def decode(edge):
             return dict(edge, **{k: descriptors[str(edge[k])] for k in ('from', 'to')})
         status['vertices'] = [descriptors[str(i)] for i in status['vertices']]

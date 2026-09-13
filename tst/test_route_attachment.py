@@ -12,7 +12,7 @@ def test():
         udp = workload.UdpClient(lab, 'a', 'b')
         probe = workload.Probe(lab, 'r', 'a')
         source = lib.endpoint(lab.nodes['a'].addresses[1])
-        target = lib.endpoint(lab.nodes['b'].addresses[1])
+        target = lib.source(lab.nodes['b'].addresses[1], lab.nodes['b'].index)
         internal = lib.endpoint(lib.intip(lab.nodes['b'].index), 0)
         lab.intercept('a', 'b', 'drop', kind=4, count=-1)
         probe.send(op='ad', body=dict(edges=[lib.edge(internal, target, time.time_ns(), alive=False)]))

@@ -15,7 +15,7 @@ var webFiles embed.FS
 
 type TopologyVertex struct {
 	ID string `json:"id"`
-	Endpoint
+	Vertex
 	Owner uint16 `json:"owner"`
 }
 
@@ -44,15 +44,15 @@ func topology(status *Status, peers []PeerConfig) *Topology {
 	owners := map[uint64]uint16{}
 
 	for _, peer := range peers {
-		owners[endpoint(net.ParseIP(peer.Intip), 0).hash()] = peer.Index
+		owners[udpVertex(net.ParseIP(peer.Intip), 0).hash()] = peer.Index
 	}
 
 	for _, edge := range status.Graph {
-		if index := owners[edge.From]; index != 0 && status.Endpoints[edge.From].Port == 0 {
+		if index := owners[edge.From]; index != 0 && status.Addresses[edge.From].isHost() {
 			owners[edge.To] = index
 		}
 
-		if index := owners[edge.To]; index != 0 && status.Endpoints[edge.To].Port == 0 {
+		if index := owners[edge.To]; index != 0 && status.Addresses[edge.To].isHost() {
 			owners[edge.From] = index
 		}
 
@@ -60,7 +60,7 @@ func topology(status *Status, peers []PeerConfig) *Topology {
 	}
 
 	for _, id := range status.Vertices {
-		result.Vertices = append(result.Vertices, TopologyVertex{ID: strconv.FormatUint(id, 10), Endpoint: status.Endpoints[id], Owner: owners[id]})
+		result.Vertices = append(result.Vertices, TopologyVertex{ID: strconv.FormatUint(id, 10), Vertex: status.Addresses[id], Owner: owners[id]})
 	}
 
 	for destination, path := range status.Routes {

@@ -3,9 +3,10 @@ let t = {peers: [], vertices: [], edges: [], routes: {}, index: 0};
 const dark = true;
 const $ = id => document.getElementById(id), byID = new Map(t.vertices.map(v => [v.id,v]));
 const peer = i => t.peers.find(p => p.index === Number(i));
-const label = v => v ? `${v.port && v.addr.includes(':') ? '['+v.addr+']' : v.addr}${v.port ? ':'+v.port : ''}` : '—';
+const isHost = v => v?.proto === 'udp' && v.port === 0;
+const label = v => v?.proto === 'source' ? '↑ '+v.addr : v ? `${v.port && v.addr.includes(':') ? '['+v.addr+']' : v.addr}${v.port ? ':'+v.port : ''}` : '—';
 const epFor = index => t.vertices.filter(v => v.owner === index && v.port);
-const ipVertex = index => t.vertices.find(v => !v.port && v.addr === peer(index)?.intip);
+const ipVertex = index => t.vertices.find(v => isHost(v) && v.addr === peer(index)?.intip);
 const active = p => !!ipVertex(p.index);
 const colors = dark ? ['#93c4a4','#9aaed0','#c0b48c','#7cb9bf'] : ['#6484eb','#8e7ed0','#55a5a1','#c89a65'];
 const nodeColor = index => colors[Math.max(0,t.peers.findIndex(p=>p.index===index))%colors.length];
@@ -49,9 +50,9 @@ function buildGraph(preserve = false) {
   for(const e of t.edges) {const a=byID.get(e.source)?.owner,b=byID.get(e.target)?.owner;if(a && b && a!==b){const id=`n${a}:n${b}`;const old=pairs.get(id);if(old) old.data.count++;else pairs.set(id,{data:{id,source:'n'+a,target:'n'+b,count:1},classes:'aggregate'});}}
   elements.push(...pairs.values());
  } else {
-  for(const v of t.vertices) elements.push({data:{id:v.id,owner:v.owner,vertex:v,label:v.port?label(v):`${peer(v.owner)?.name || 'unregistered'}\n${v.addr}`,color:nodeColor(v.owner)},classes:v.port?'':'ip'});
+  for(const v of t.vertices) elements.push({data:{id:v.id,owner:v.owner,vertex:v,label:!isHost(v)?label(v):`${peer(v.owner)?.name || 'unregistered'}\n${v.addr}`,color:nodeColor(v.owner)},classes:isHost(v)?'ip':v.proto==='source'?'source':''});
   for(const p of t.peers) if(!active(p)) elements.push({data:{id:'n'+p.index,owner:p.index,label:`${p.name}\n${p.intip}`,color:nodeColor(p.index)},classes:'host offline'});
-  for(const e of t.edges) elements.push({data:{id:e.source+':'+e.target,source:e.source,target:e.target},classes:!byID.get(e.source)?.port || !byID.get(e.target)?.port?'attachment':''});
+  for(const e of t.edges) elements.push({data:{id:e.source+':'+e.target,source:e.source,target:e.target},classes:isHost(byID.get(e.source)) || isHost(byID.get(e.target))?'attachment':''});
  }
  cy.batch(()=>{cy.elements().remove();cy.add(elements);});
  $('hosts-mode').classList.toggle('active',mode==='hosts');$('endpoints-mode').classList.toggle('active',mode==='endpoints');
@@ -64,7 +65,7 @@ function inspect(index, highlight=true) {
  $('selected-note').textContent=index===t.index?'Локальная нода.':active(p)?'Есть в графе достижимости.':'В registry. В снимке маршрута до ноды нет.';
  $('endpoints').replaceChildren();const endpoints=epFor(index);$('endpoint-count').textContent=endpoints.length;
  for(const e of endpoints){const row=document.createElement('div');row.className='endpoint-row';const proto=document.createElement('span');proto.textContent=e.proto.toUpperCase();const value=document.createTextNode(label(e));const button=document.createElement('button');button.textContent='↗';button.title='Показать endpoint';button.onclick=()=>{setPage('endpoints');focusVertex(e.id);};row.append(proto,value,button);$('endpoints').append(row);}
- if(!endpoints.length){const note=document.createElement('p');note.textContent='Endpoint появятся при подключении.';note.style.fontSize='10px';$('endpoints').append(note);}
+ if(!endpoints.length){const note=document.createElement('p');note.textContent='Нет объявленных точек входа.';note.style.fontSize='10px';$('endpoints').append(note);}
  if(highlight){clear();const nodes=cy.nodes().filter(n=>n.data('owner')===index);const edges=nodes.connectedEdges();cy.elements().addClass('dim');nodes.union(edges).union(edges.connectedNodes()).removeClass('dim');nodes.addClass('focus');edges.addClass('focus');}
 }
 function focusVertex(id){clear();const n=cy.getElementById(id);cy.elements().addClass('dim');n.closedNeighborhood().removeClass('dim');n.connectedEdges().addClass('focus');n.addClass('focus');}

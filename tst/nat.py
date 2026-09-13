@@ -1,5 +1,7 @@
 """Port-forwarded UDP endpoints used by the NAT application scenarios."""
 import lib
+import socket
+import struct
 
 
 class Lab(lib.Lab):
@@ -37,3 +39,12 @@ class Lab(lib.Lab):
         # destination is local after DNAT. Cut both directions of this mapping.
         return [self.intercept('a', 'b', 'drop', count=-1, target_port=port),
                 self.intercept('b', 'a', 'drop', count=-1, source_port=port + 10000)]
+
+    def route_packet(self, source, seg, packet):
+        if not self.lan and packet[0] >> 4 == 4 and packet[9] == 17:
+            port = struct.unpack_from('!H', packet, (packet[0] & 15) * 4)[0]
+            local = (source, seg, packet[12:16], port)
+            if local not in self.forwards.values():
+                public = socket.inet_aton(f'198.51.100.{self.nodes[source].index}')
+                self.forwards[(public, port)] = local
+        return super().route_packet(source, seg, packet)

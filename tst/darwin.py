@@ -44,7 +44,7 @@ with software_checksums(), tempfile.TemporaryDirectory(prefix='mesh-darwin-') as
     capture_log = open(root/'udp-checksums.log', 'w+')
     capture_err = open(root/'tcpdump.log', 'w+')
     capture = subprocess.Popen(['/usr/sbin/tcpdump', '-i', 'lo0', '-nn', '-l', '-vv',
-        'udp and src port 17001 and dst port 17002'], stdout=capture_log, stderr=capture_err)
+        'udp and dst port 17002'], stdout=capture_log, stderr=capture_err)
     peer_log = open(root/'peer.log', 'w+')
     peer_process = subprocess.Popen([probe, 'echo', root/'peer.json', f'{host}:17001', '1'], stdout=peer_log, stderr=peer_log)
     try:
@@ -59,6 +59,9 @@ with software_checksums(), tempfile.TemporaryDirectory(prefix='mesh-darwin-') as
             raise AssertionError('tcpdump did not start')
         # A second run verifies that utun and its route disappear on exit.
         for attempt in range(2):
+            cfg=json.loads((root/'node.json').read_text())
+            cfg['endpoint']=[] if attempt==0 else [dict(proto=proto,addr=host,port=17001) for proto in ['udp','ws']]
+            (root/'node.json').write_text(json.dumps(cfg))
             node_log = open(root/f'node-{attempt}.log', 'w+')
             node = subprocess.Popen([binary, 'run', '-c', root/'node.json', '-key-file', root/'key'], stdout=node_log, stderr=node_log)
             try:
@@ -137,7 +140,7 @@ def status():
 
 def attached(address):
     state = status()
-    endpoints = state.get('endpoints', {})
+    endpoints = state.get('addresses', {})
     return any(e['alive'] and endpoints[str(e['from'])]['addr'] == '10.77.0.1'
                and endpoints[str(e['to'])]['addr'] == address for e in state.get('graph', []))
 
@@ -169,7 +172,7 @@ with software_checksums(), ipv6_addresses(iface, [old, peer_addr]) as aliases, t
          open(root/'packets.log', 'w+') as packets_log, open(root/'capture.log', 'w+') as capture_log:
         try:
             capture = subprocess.Popen(['/usr/sbin/tcpdump', '-i', 'lo0', '-nn', '-l', '-vv',
-                'ip6 and udp and src port 17001 and dst port 17002'], stdout=packets_log, stderr=capture_log)
+                'ip6 and udp and dst port 17002'], stdout=packets_log, stderr=capture_log)
             processes.append(capture)
             def capture_ready():
                 capture_log.seek(0)

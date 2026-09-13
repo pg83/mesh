@@ -10,11 +10,12 @@ import (
 	"strings"
 )
 
-type Endpoint struct {
+type Vertex struct {
 	Proto string `json:"proto"`
 	Addr  string `json:"addr"`
 	Port  uint16 `json:"port"`
 	Path  string `json:"path,omitempty"`
+	Node  uint16 `json:"node,omitempty"`
 }
 
 type Edge struct {
@@ -22,25 +23,25 @@ type Edge struct {
 	To   uint64 `json:"to"`
 }
 
-func endpoint(ip net.IP, port int) Endpoint {
+func udpVertex(ip net.IP, port int) Vertex {
 	if ip.To16() == nil {
-		return Endpoint{}
+		return Vertex{}
 	}
 
-	return Endpoint{Proto: "udp", Addr: ip.String(), Port: uint16(port)}
+	return Vertex{Proto: "udp", Addr: ip.String(), Port: uint16(port)}
 }
 
-func (e Endpoint) ipv6() bool {
+func (e Vertex) ipv6() bool {
 	ip := e.ip()
 
 	return ip != nil && ip.To4() == nil
 }
 
-func (e Endpoint) socketKey() SocketKey {
-	return SocketKey{port: e.Port, ipv6: e.ipv6()}
+func (e Vertex) socketKey() SocketKey {
+	return SocketKey{addr: e.Addr, port: e.Port, ipv6: e.ipv6()}
 }
 
-func (e Endpoint) canonical() Endpoint {
+func (e Vertex) canonical() Vertex {
 	e.Addr = strings.ToLower(e.Addr)
 
 	if ip := net.ParseIP(e.Addr); ip != nil {
@@ -54,8 +55,16 @@ func (e Endpoint) canonical() Endpoint {
 	return e
 }
 
-func (e Endpoint) valid() bool {
+func (e Vertex) valid() bool {
 	if e.Addr == "" || e.ip().IsUnspecified() || strings.ContainsRune(e.Addr, 0) || strings.ContainsRune(e.Path, 0) {
+		return false
+	}
+
+	if e.Proto == "source" {
+		return e.Node != 0 && e.Port == 0 && e.Path == "" && e.ip() != nil
+	}
+
+	if e.Node != 0 {
 		return false
 	}
 
@@ -66,25 +75,35 @@ func (e Endpoint) valid() bool {
 	return (e.Proto == "ws" || e.Proto == "wss") && e.Port != 0 && strings.HasPrefix(e.Path, "/")
 }
 
-func (e Endpoint) hash() uint64 {
+func (e Vertex) hash() uint64 {
 	if !e.valid() {
 		return 0
 	}
 
-	sum := sha256.Sum256([]byte(e.Proto + "\x00" + e.Addr + "\x00" + strconv.Itoa(int(e.Port)) + "\x00" + e.Path))
+	prefix := ""
+
+	if e.Proto == "source" {
+		prefix = strconv.Itoa(int(e.Node)) + "\x00"
+	}
+
+	sum := sha256.Sum256([]byte(prefix + e.Proto + "\x00" + e.Addr + "\x00" + strconv.Itoa(int(e.Port)) + "\x00" + e.Path))
 
 	return binary.LittleEndian.Uint64(sum[:8])
 }
 
-func (e Endpoint) ip() net.IP {
+func (e Vertex) ip() net.IP {
 	return net.ParseIP(e.Addr)
 }
 
-func (e Endpoint) addr() *net.UDPAddr {
+func (e Vertex) addr() *net.UDPAddr {
 	return &net.UDPAddr{IP: e.ip(), Port: int(e.Port)}
 }
 
-func (e Endpoint) string() string {
+func (e Vertex) string() string {
+	if e.Proto == "source" {
+		return "source:" + strconv.Itoa(int(e.Node)) + ":" + e.Addr
+	}
+
 	address := net.JoinHostPort(e.Addr, strconv.Itoa(int(e.Port)))
 
 	if e.Proto == "udp" {
@@ -94,7 +113,7 @@ func (e Endpoint) string() string {
 	return e.Proto + "://" + address + e.Path
 }
 
-func (e Endpoint) url() string {
+func (e Vertex) url() string {
 	path := throw2(url.ParseRequestURI(e.Path))
 
 	path.Scheme, path.Host = e.Proto, net.JoinHostPort(e.Addr, strconv.Itoa(int(e.Port)))
@@ -102,7 +121,7 @@ func (e Endpoint) url() string {
 	return path.String()
 }
 
-func compareEndpoint(a, b Endpoint) int {
+func compareVertex(a, b Vertex) int {
 	if v := cmp.Compare(a.Proto, b.Proto); v != 0 {
 		return v
 	}
@@ -134,11 +153,11 @@ func compareEdge(a, b Edge) int {
 	return cmp.Compare(a.To, b.To)
 }
 
-func (p *Peer) endpoint() Endpoint {
-	return endpoint(net.IP(p.intip[:]), 0)
+func (p *Peer) vertex() Vertex {
+	return udpVertex(net.IP(p.intip[:]), 0)
 }
 
-func (n *Node) remember(e Endpoint) uint64 {
+func (n *Node) remember(e Vertex) uint64 {
 	e = e.canonical()
 
 	id := e.hash()
@@ -154,4 +173,67 @@ func (n *Node) remember(e Endpoint) uint64 {
 	n.addresses[id] = e
 
 	return id
+}
+
+func (v Vertex) isHost() bool {
+	return v.Proto == "udp" && v.Port == 0
+}
+
+func (v Vertex) isEndpoint() bool {
+	return v.Proto != "source" && !v.isHost()
+}
+
+func sourceVertex(node uint16, ip net.IP) Vertex {
+	return Vertex{Proto: "source", Node: node, Addr: ip.String()}
+}
+
+func (v Vertex) endpoint() Endpoint {
+	return Endpoint{Proto: v.Proto, Addr: v.Addr, Port: v.Port, Path: v.Path}
+}
+
+type Endpoint struct {
+	Proto string `json:"proto"`
+	Addr  string `json:"addr"`
+	Port  uint16 `json:"port"`
+	Path  string `json:"path,omitempty"`
+}
+
+func (e Endpoint) vertex() Vertex {
+	return Vertex{Proto: e.Proto, Addr: e.Addr, Port: e.Port, Path: e.Path}
+}
+
+func (e Endpoint) valid() bool {
+	return e.Port != 0 && e.vertex().isEndpoint() && e.vertex().valid()
+}
+
+func (e Endpoint) canonical() Endpoint {
+	return e.vertex().canonical().endpoint()
+}
+
+func (e Endpoint) hash() uint64 {
+	if !e.valid() {
+		return 0
+	}
+
+	return e.vertex().hash()
+}
+
+func (e Endpoint) ip() net.IP {
+	return e.vertex().ip()
+}
+
+func (e Endpoint) ipv6() bool {
+	return e.vertex().ipv6()
+}
+
+func (e Endpoint) socketKey() SocketKey {
+	return e.vertex().socketKey()
+}
+
+func (e Endpoint) string() string {
+	return e.vertex().string()
+}
+
+func (e Endpoint) url() string {
+	return e.vertex().url()
 }

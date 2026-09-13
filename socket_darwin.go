@@ -2,18 +2,22 @@ package main
 
 import (
 	"golang.org/x/sys/unix"
-	"net"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 )
 
-func udpGuard(key SocketKey) net.Listener {
-	addr := "127.0.0.1"
+func udpGuard(key SocketKey) io.Closer {
+	path := filepath.Join(os.TempDir(), "mesh-"+key.network("udp")+"-"+key.addr+"-"+strconv.Itoa(int(key.port))+".lock")
+	f := throw2(os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600))
 
-	if key.ipv6 {
-		addr = "::1"
+	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		f.Close()
+		throw(err)
 	}
 
-	return throw2(net.Listen(key.network("tcp"), net.JoinHostPort(addr, strconv.Itoa(int(key.port)))))
+	return f
 }
 
 func socketReuse(fd, iface int, v6 bool) error {
@@ -31,6 +35,14 @@ func socketReuse(fd, iface int, v6 bool) error {
 	}).asError()
 }
 
-func (u *UDPLink) write(packet []byte) {
-	u.conn.Write(packet)
+func (u *UDPStream) writePacket(packet []byte) {
+	throw2(u.conn.Write(packet))
+}
+
+func socketInterface(fd, iface int, v6 bool) error {
+	if v6 {
+		return unix.SetsockoptInt(fd, unix.IPPROTO_IPV6, unix.IPV6_BOUND_IF, iface)
+	}
+
+	return unix.SetsockoptInt(fd, unix.IPPROTO_IP, unix.IP_BOUND_IF, iface)
 }

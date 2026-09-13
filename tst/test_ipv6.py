@@ -33,7 +33,7 @@ def test():
         stream.progress()
         # Rapid interface disappearance while the scanner is reading addresses.
         for _ in range(12):
-            lab.run('laptop', ['ip', 'link', 'add', 'temporary', 'type', 'dummy'])
+            lab.run('laptop', ['ip', 'tuntap', 'add', 'dev', 'temporary', 'mode', 'tun'])
             lab.run('laptop', ['ip', '-6', 'addr', 'add', '2001:db8:9::1/64', 'dev', 'temporary', 'nodad'])
             lab.run('laptop', ['ip', 'link', 'set', 'temporary', 'up'])
             lab.run('laptop', ['ip', 'link', 'del', 'temporary'])

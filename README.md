@@ -20,7 +20,7 @@ and retransmits come later.
 ```
 mesh keygen                 # prints {"pub": ..., "key": ...}
 mesh run -c config.json     # runs a node
-mesh run -c config.json -key-file /home/pg/.ssh/home.key
+mesh run -c config.json -key-file /path/to/private-key
 mesh status -control 127.0.0.1:8058
 mesh web -control 127.0.0.1:8058 -listen 127.0.0.1:8059
 ```
@@ -83,8 +83,9 @@ no separate origin signature. Registry changes publish immutable actor snapshots
 and a public-key change replaces the affected sessions. The running node's own
 key and mesh IP stay fixed by its local configuration.
 
-Both the host and registry use the same flat `endpoint` objects. The node
-opens the union of its host list and its own registry list. Other nodes
+Both the host and registry use the same flat `endpoint` objects. Endpoints describe incoming listeners only. The node
+opens the union of its host list and its own registry list. An empty list is valid.
+UDP, WS and WSS dialing is always available independently of these listeners. Other nodes
 use only the advertised `addr` and `port` from that registry entry.
 There is no global `port`, separate `static` list, or `forwards` section.
 Old configurations must be converted to this format.
@@ -102,14 +103,26 @@ Link-local addresses are excluded because their scope is local to an interface.
 An independent interface actor scans at startup, on OS address/link events
 (Linux netlink, Darwin routing socket), and every 30 seconds as a fallback.
 The graph receives an immutable address list; interface enumeration errors
-do not terminate mesh. A concrete address selects that
-interface address. Loopback, link-local and mesh-subnet addresses are excluded.
-Multiple entries can use the same local port. Each endpoint pair has a connected
-UDP socket and its own receive queue; a listener on the same port handles
-authenticated packets from previously unknown endpoints. Outgoing packets select
-the configured source IP and interface. Reception accepts only configured
-local address/port pairs. Each local pair must map to one advertised pair,
-and each advertised pair to one local pair. Exact duplicate entries are harmless.
+do not terminate mesh. Explicit binds listen on exactly that address. A concrete
+bind waits while its address is absent, appears when the address is added, and
+closes when the address disappears. Loopback binds are allowed explicitly;
+wildcards do not advertise loopback. Link-local and mesh-subnet addresses are excluded.
+Multiple paths or duplicate declarations can share an explicitly configured listener.
+
+Outgoing connections are created for eligible interface addresses and known remote
+endpoints. Their local UDP/TCP port is assigned by the OS; UDP never reuses a
+configured listener's port to initiate a connection. Each socket has its own I/O.
+The graph distinguishes ingress endpoints, host vertices, and source vertices
+identified by node index and local IP. A source vertex is not a dial target; its
+identity remains stable across reconnections with different ephemeral ports.
+Accepted connections carry reverse traffic through the same socket.
+
+UDP begins with an authenticated binding naming the source vertex and destination
+endpoint. The receiver connects a socket from the addressed listener port to the
+observed sender address. The initiator repeats its binding with periodic gossip;
+it sends immediately without waiting for a reply, preserving one-way UDP links.
+Registry, graph updates and IP packets can travel in both directions on accepted
+connections. Learned source addresses never become advertised listeners.
 
 Each directed transport edge has a goroutine and an unbounded FIFO mailbox. Edge actors
 handle authentication, gossip and forwarding directly to the next edge actor;
@@ -129,11 +142,10 @@ The example above uses two different addresses and two different ports:
 ```
 
 The router forwards inbound UDP to `192.168.1.20:7001` and translates
-outbound packets from that pair to `203.0.113.10:17001`. Configure that
+replies from that pair to `203.0.113.10:17001`. Configure that
 mapping on the router separately; mesh does not configure NAT. Correct
 outbound translation matters too: peers must observe the advertised source
-pair. The dedicated local port distinguishes this mapping from ordinary
-LAN traffic on port 7000. The graph uses the public pair for this socket;
+pair. Outgoing connections use ordinary dynamic NAT mappings and ephemeral ports. The graph uses the public endpoint for the accepting side;
 its private pair is used only to send and receive packets. To use the LAN
 address directly too, keep the separate port-7000 entry shown above.
 
@@ -149,7 +161,7 @@ and explicitly select plaintext WS on the local binding:
 
 ```json
 {"proto":"wss","addr":"mesh.example.net","port":443,"path":"/mesh",
- "bind_proto":"ws","bind_addr":"192.168.1.20","bind_port":8080}
+ "bind_proto":"ws","bind_addr":"127.0.0.1","bind_port":8080}
 ```
 
 The proxy must preserve the public HTTP Host and request path and support
@@ -172,11 +184,11 @@ there is no separate advertisement signature or signing key.
 
 All multibyte integers in the mesh protocol use little-endian order.
 Encapsulated IP packets retain their standard network format. The key
-context is `mesh/9`; upgrade all peers together. Releases 6–8 use `mesh/8`
-and cannot exchange traffic with this version.
+context is `mesh/10`; upgrade all peers together. Releases through 10 use earlier wire formats and cannot exchange traffic with this
+version. Update peers together.
 
 Each registered pair derives a shared secret with X25519 and directional
-keys with HKDF-SHA256. The context contains `mesh/9`, the sender's public key
+keys with HKDF-SHA256. The context contains `mesh/10`, the sender's public key
 and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
@@ -188,7 +200,7 @@ The header is authenticated as associated data. Every packet gets a fresh
 random nonce, including after a process restart.
 
 Inner data starts with `1`, hop count (1), cursor (1), then the route. Each
-hop is a pair of endpoints: source endpoint hash (8), destination endpoint hash (8). The original IP packet follows. At most 16 transport
+hop is a pair of endpoints: source vertex hash (8), destination vertex hash (8). The original IP packet follows. At most 16 transport
 hops are allowed. A relay checks the receiving pair against the route,
 advances the cursor, and sends from the exact next source endpoint to the
 exact next destination. Local delivery verifies the destination mesh IP.
@@ -197,7 +209,7 @@ Inner gossip starts with `2`, edge count (2), and endpoint count (2), followed
 by the edges and then the endpoint descriptions. Each edge is 25 bytes:
 source hash (8), destination hash (8), record ID (8), and alive (1, either 0
 or 1). Endpoint descriptions start with kind (1: UDP/IPv4=1, WS=2, WSS=3,
-UDP/IPv6=4) and port (2). UDP then carries four IPv4 or sixteen IPv6 octets.
+UDP/IPv6=4, source=5) and port (2). UDP then carries four IPv4 or sixteen IPv6 octets.
 WS/WSS carry the address and path
 as two strings, each prefixed by its byte length (2). Strings use UTF-8.
 
@@ -205,6 +217,8 @@ Counts and lengths are checked against the remaining packet before allocating
 or reading. Truncated packets, unknown protocol codes, invalid alive values,
 and trailing bytes are rejected as a whole. Descriptions appear once per
 message; each message includes the descriptions referenced by its edges.
+A source description is kind 5, node index (2), and a 16-byte IP address
+(IPv4 uses its mapped IPv6 representation). It is not an endpoint.
 Publications split at eight records or roughly 1000 inner bytes; a single
 large endpoint record can exceed that target. There is no dependency on an
 earlier gossip message arriving first. Other nodes can use these descriptions
@@ -215,8 +229,10 @@ from other members. An omitted pair is unchanged; a newer record replaces
 an older one. Gossip remains periodic, once per second.
 
 A WebSocket binary message contains one mesh transport packet. The first
-packet on a connection contains inner type `3` followed by a JSON object
-with the source and destination endpoint descriptions. Both ends validate
+packet on a connection contains inner type `3` followed by a JSON binding
+with source and destination vertex descriptions. A response has `reply: true`.
+The source must name the authenticated sender; the destination must be an
+explicit local listener. The same binding is used for UDP. Both ends validate
 this binding with the existing derived keys; no new session keys are negotiated.
 Subsequent messages carry the existing data and gossip packets. The receiving
 endpoint comes from this authenticated binding, not the proxy's TCP address.
@@ -410,14 +426,14 @@ Hosts, Endpoint, Matrix and Config tabs. Matrix entries count transport hops
 between nodes in the directed graph; local attachment edges cost zero.
 Clicking a matrix cell highlights its path. Data refreshes every three seconds;
 unchanged topology preserves the viewport and dragged vertex positions.
-`/config` opens the configuration tab, and `/api/config?node=mini` downloads JSON.
+`/config` opens the configuration tab, and `/api/config?node=client` downloads JSON.
 The web listener can bind a LAN or mesh address; control stays on loopback.
 
 For example:
 
 ```sh
-curl -f 'http://lab1.mesh:8059/api/config?node=mini' -o mini.json
-sudo mesh run -c mini.json -key-file ~/.ssh/mini.key
+curl -f 'http://gateway.example:8059/api/config?node=client' -o config.json
+sudo mesh run -c config.json -key-file /path/to/private-key
 ```
 
 Registry entries may include a `name` used for display and configuration
@@ -446,3 +462,9 @@ Use **Actions → Release → Run workflow** on `master`, as in `shitty`. Leave
 CI runs Linux e2e, browser, race and coverage checks and native Darwin tests,
 packages the tested binaries, creates a draft, attests the archives and
 publishes the release. Development stays on `master`; releases create tags.
+
+Exported ephemeral configurations include the selected node and peers with static
+endpoints, default registry version 1, and no listeners. Add local endpoints only
+when that node should accept new incoming connections. The status API exposes
+all graph descriptions under `addresses`; source vertices use `proto: "source"`
+and `node`, while ingress descriptors retain `udp`, `ws`, or `wss`.

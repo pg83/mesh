@@ -5,7 +5,7 @@ import "time"
 const registryInterval = 5 * time.Second
 
 func (a *EdgeActor) exchangeRegistry(now time.Time) {
-	if !a.outgoing || a.view == nil || !a.view.enabled[a.edge] || now.Before(a.nextRegistry) {
+	if !a.outgoing || a.view == nil || !a.enabled() || now.Before(a.nextRegistry) {
 		return
 	}
 
@@ -47,14 +47,10 @@ func (n *Node) handleRegistry(records RegistryRecords) bool {
 
 			reg.byIndex[peer.index] = peer
 			reg.byIntip[peer.intip] = peer
-			n.remember(peer.endpoint())
+			n.remember(peer.vertex())
 
 			for _, ep := range peer.addresses {
-				n.remember(ep)
-			}
-
-			if peer.index != n.cfg.Index && n.discovered[peer.index] == nil {
-				n.discovered[peer.index] = map[uint64]time.Time{}
+				n.remember(ep.vertex())
 			}
 
 			n.log.Info("registry updated", "index", peer.index, "version", peer.version)

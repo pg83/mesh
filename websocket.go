@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/binary"
-	"encoding/json"
 	"net"
 	"net/http"
 	"os"
@@ -17,40 +16,15 @@ import (
 )
 
 type WSListener struct {
-	server *http.Server
-	conn   net.Listener
-	proto  string
-	tls    *tls.Config
-}
-type WSBinding struct {
-	From Endpoint `json:"from"`
-	To   Endpoint `json:"to"`
-}
-type WSConnection struct {
-	session *Session
-	conn    *websocket.Conn
-	edge    Edge
-	source  Endpoint
-	target  Endpoint
-	peer    uint16
-	origin  uint64
-	id      uint64
-	queue   *Mailbox[[]byte]
-	ctx     context.Context
-	cancel  context.CancelFunc
+	server  *http.Server
+	conn    net.Listener
+	proto   string
+	tls     *tls.Config
+	started bool
 }
 
-type DialResult struct{ conn *WSConnection }
-
-func connectionKey(edge Edge) Edge {
-	if edge.From > edge.To {
-		return Edge{From: edge.To, To: edge.From}
-	}
-
-	return edge
-}
-
-func (n *Node) listenWS(c EndpointConfig) {
+func (n *Node) listenWS(config ListenerBinding) string {
+	c := config.config
 	proto := c.BindProto
 
 	if proto == "" {
@@ -61,34 +35,54 @@ func (n *Node) listenWS(c EndpointConfig) {
 		throwFmt("bad bind_proto %q", proto)
 	}
 
-	key := endpoint(c.binding().IP, c.binding().Port).socketKey()
-	address := net.JoinHostPort(key.wildcard(), strconv.Itoa(int(key.port)))
+	bind := config.bind
+	key := bind.socketKey()
+	host := bind.Addr.String()
+	address := net.JoinHostPort(host, strconv.Itoa(int(key.port)))
+	shared := address
+	wildcard := net.JoinHostPort(key.wildcard(), strconv.Itoa(int(key.port)))
 
-	if existing := n.listeners[address]; existing != nil {
+	if n.listeners[wildcard] != nil {
+		shared = wildcard
+	}
+
+	if existing := n.listeners[shared]; existing != nil {
 		if existing.proto != proto {
 			throwFmt("conflicting listener protocols")
 		}
 
-		if proto == "wss" && c.TLSCert != "" {
-			existing.tls.Certificates = append(existing.tls.Certificates, throw2(tls.LoadX509KeyPair(c.TLSCert, c.TLSKey)))
-		}
-
-		return
+		return shared
 	}
 
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
 	listener := net.Listener(throw2(net.Listen(key.network("tcp"), address)))
 
 	if proto == "wss" {
-		pair := throw2(tls.LoadX509KeyPair(c.TLSCert, c.TLSKey))
+		loaded := map[string]bool{}
 
-		tlsConfig.Certificates = []tls.Certificate{pair}
+		for _, entry := range n.endpoints {
+			other := entry.config
+
+			if other.TLSCert == "" || entry.bind.Port != bind.Port || entry.bind.ipv6() != bind.ipv6() || (!bind.ip().IsUnspecified() && entry.bind != bind) || loaded[other.TLSCert] {
+				continue
+			}
+
+			tlsConfig.Certificates = append(tlsConfig.Certificates, throw2(tls.LoadX509KeyPair(other.TLSCert, other.TLSKey)))
+			loaded[other.TLSCert] = true
+		}
+
+		if len(tlsConfig.Certificates) == 0 {
+			throwFmt("TLS listener needs tls_cert and tls_key")
+		}
+
 		listener = tls.NewListener(listener, tlsConfig)
 	}
 
 	server := &http.Server{Handler: http.HandlerFunc(n.acceptWS), ReadHeaderTimeout: time.Minute}
 
 	n.listeners[address] = &WSListener{server: server, conn: listener, proto: proto, tls: tlsConfig}
+
+	return address
 }
 
 func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +104,7 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 		for id, local := range view.local {
 			ep := view.addresses[id]
 
-			if local.socket == nil && local.address == endpoint(address.IP, address.Port) && ep.Path == r.URL.RequestURI() && strings.EqualFold(ep.Addr, host) {
+			if ep.isEndpoint() && ep.Proto != "udp" && local.address == socketAddress(address.IP, address.Port) && ep.Path == r.URL.RequestURI() && strings.EqualFold(ep.Addr, host) {
 				destinations[id] = true
 			}
 		}
@@ -130,15 +124,15 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 		packet := readWS(ctx, socket)
 		session, binding, ok := n.readBinding(packet, view)
 
-		if !ok || !destinations[binding.To.hash()] {
+		if !ok || binding.Reply || !destinations[binding.To.hash()] {
 			return
 		}
 
-		response := bindingPacket(session, binding.To, binding.From, uint64(time.Now().UnixNano()))
+		response := bindingReply(session, binding.To, binding.From, uint64(time.Now().UnixNano()))
 
 		throw(socket.Write(ctx, websocket.MessageBinary, response))
 
-		c := newWSConnection(socket, binding.To, binding.From, session.peer, binding.From.hash(), binary.LittleEndian.Uint64(packet[3:]))
+		c := newConnection(&WSStream{socket}, binding.To, binding.From, session.peer, binding.From.hash(), binary.LittleEndian.Uint64(packet[3:]))
 
 		c.session = session
 
@@ -158,193 +152,25 @@ func readWS(ctx context.Context, conn *websocket.Conn) []byte {
 	return packet
 }
 
-func (n *Node) readBinding(packet []byte, view *Snapshot) (*Session, WSBinding, bool) {
-	binding := WSBinding{}
+func (n *Node) dialWebSocket(ctx context.Context, local *LocalAddress, target Endpoint) PacketStream {
+	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: local.address.ip()}, Control: tcpControl(local.iface)}
+	transport := &http.Transport{DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
 
-	if len(packet) < headerTransport {
-		return nil, binding, false
-	}
+	defer transport.CloseIdleConnections()
 
-	peer := binary.LittleEndian.Uint16(packet[1:])
+	if ca := n.tlsCA[target.hash()]; ca != "" {
+		pool := throw2(x509.SystemCertPool())
 
-	if peer == n.cfg.Index || view.registry.byIndex[peer] == nil {
-		return nil, binding, false
-	}
-
-	session := view.registry.byIndex[peer].session
-	inner, ok := session.open(packet)
-
-	if !ok || len(inner) == 0 || inner[0] != innerBinding || json.Unmarshal(inner[1:], &binding) != nil {
-		return nil, binding, false
-	}
-
-	binding.From = binding.From.canonical()
-	binding.To = binding.To.canonical()
-
-	if !binding.From.valid() || !binding.To.valid() || binding.From.Proto == "udp" || binding.To.Proto == "udp" {
-		return nil, binding, false
-	}
-
-	if owner := view.owners[binding.From.hash()]; owner != 0 && owner != peer {
-		return nil, binding, false
-	}
-
-	return session, binding, true
-}
-
-func bindingPacket(session *Session, source, target Endpoint, id uint64) []byte {
-	blob := throw2(json.Marshal(WSBinding{From: source, To: target}))
-
-	return session.seal(append([]byte{innerBinding}, blob...), id)
-}
-
-func newWSConnection(socket *websocket.Conn, source, target Endpoint, peer uint16, origin, id uint64) *WSConnection {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	return &WSConnection{conn: socket, edge: Edge{From: source.hash(), To: target.hash()}, source: source, target: target,
-		peer: peer, origin: origin, id: id, queue: newMailbox[[]byte](ctx.Done()), ctx: ctx, cancel: cancel}
-}
-
-func (c *WSConnection) stop() {
-	c.cancel()
-}
-
-func (a *EdgeActor) sendWS(packet []byte) {
-	if a.ws != nil {
-		select {
-		case a.ws.queue.in <- packet:
-		case <-a.ws.ctx.Done():
+		if !pool.AppendCertsFromPEM(throw2(os.ReadFile(ca))) {
+			throwFmt("invalid TLS CA")
 		}
 
-		return
+		transport.TLSClientConfig.RootCAs = pool
 	}
 
-	if a.dial != nil {
-		return
-	}
+	socket, _ := throw3(websocket.Dial(ctx, target.url(), &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, Subprotocols: []string{protocol}}))
 
-	local := a.view.local[a.edge.From]
+	socket.SetReadLimit(maxPacket)
 
-	if local == nil {
-		return
-	}
-
-	result := make(chan DialResult, 1)
-
-	a.dial = result
-	a.packetID++
-
-	source, target := a.view.addresses[a.edge.From], a.view.addresses[a.edge.To]
-	first := bindingPacket(a.session, source, target, a.packetID)
-	view := a.view
-
-	go a.node.dialWS(result, view, local.address.ip(), source, target, a.peer, first)
-	a.report()
-}
-
-func (n *Node) dialWS(result chan<- DialResult, view *Snapshot, local net.IP, source, target Endpoint, peer uint16, first []byte) {
-	var socket *websocket.Conn
-	var established *WSConnection
-
-	defer func() {
-		if established == nil && socket != nil {
-			socket.CloseNow()
-		}
-
-		result <- DialResult{conn: established}
-	}()
-
-	try(func() {
-		dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: local}}
-		transport := &http.Transport{DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
-
-		defer transport.CloseIdleConnections()
-
-		if ca := n.tlsCA[target.hash()]; ca != "" {
-			pool := throw2(x509.SystemCertPool())
-
-			if !pool.AppendCertsFromPEM(throw2(os.ReadFile(ca))) {
-				throwFmt("invalid TLS CA")
-			}
-
-			transport.TLSClientConfig.RootCAs = pool
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-
-		defer cancel()
-
-		socket, _ = throw3(websocket.Dial(ctx, target.url(), &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}, Subprotocols: []string{protocol}}))
-		socket.SetReadLimit(maxPacket)
-		throw(socket.Write(ctx, websocket.MessageBinary, first))
-
-		packet := readWS(ctx, socket)
-		session, binding, ok := n.readBinding(packet, view)
-
-		if !ok || session.peer != peer || binding.From.hash() != target.hash() || binding.To.hash() != source.hash() {
-			return
-		}
-
-		established = newWSConnection(socket, source, target, peer, source.hash(), binary.LittleEndian.Uint64(first[3:]))
-		established.session = session
-	}).catch(func(e *Exception) { n.log.Debug("websocket dial failed", "endpoint", target.string(), "err", e) })
-}
-
-func (a *EdgeActor) attachWS(c *WSConnection) {
-	old := a.ws
-
-	if a.view == nil || c.session != a.session || a.view.local[a.edge.From] == nil || (old != nil && (old.origin < c.origin || (old.origin == c.origin && old.id >= c.id))) {
-		c.stop()
-		c.conn.CloseNow()
-
-		return
-	}
-
-	if old != nil {
-		old.stop()
-	}
-
-	a.ws = c
-
-	input := a.view.actors[Edge{From: a.edge.To, To: a.edge.From}]
-
-	go c.run(input, a.node)
-	a.report()
-}
-
-func (c *WSConnection) run(input chan any, n *Node) {
-	defer c.conn.CloseNow()
-
-	defer c.stop()
-
-	errors := make(chan *Exception, 2)
-
-	go func() {
-		errors <- try(func() {
-			for {
-				packet := readWS(c.ctx, c.conn)
-
-				post(input, any(Received{packet: packet, at: time.Now(), ws: c}))
-			}
-		})
-	}()
-
-	go func() {
-		errors <- try(func() {
-			for {
-				select {
-				case packet := <-c.queue.out:
-					throw(c.conn.Write(c.ctx, websocket.MessageBinary, packet))
-				case <-c.ctx.Done():
-					return
-				}
-			}
-		})
-	}()
-
-	select {
-	case err := <-errors:
-		err.catch(func(e *Exception) { n.log.Debug("websocket stopped", "err", e) })
-	case <-c.ctx.Done():
-	}
+	return &WSStream{socket}
 }

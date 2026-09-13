@@ -12,12 +12,12 @@ def test():
         lab.configs['b'] = dict(endpoint=[dict(proto="udp", addr="0.0.0.0", port=7001)])
         lab.start_node('b')
         lab.wait(lambda: lab.selected_endpoint('a', 'b') == '10.1.0.2:7001', 'new destination port')
-        sent = lab.intercept('b', 'a', 'copy', kind=3, count=-1)
+        sent = lab.intercept('a', 'b', 'copy', kind=3, count=-1, target_port=7001)
         stream.progress()
         stream.progress()
         assert sent['held']
         for _, packet, _ in sent['held']:
-            assert struct.unpack_from('!H', packet, (packet[0] & 15)*4)[0] == 7001
+            assert struct.unpack_from('!H', packet, (packet[0] & 15)*4+2)[0] == 7001
         stream.finish()
 
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -15,19 +16,20 @@ const (
 )
 
 type UDPSocket struct {
-	guard net.Listener
+	guard io.Closer
+	conn  *net.UDPConn
 	read  func([]byte) (int, net.IP, net.Addr, error)
 	port  uint16
 }
 
 type SocketKey struct {
+	addr string
 	port uint16
 	ipv6 bool
 }
 
-type LocalEndpoint struct {
-	socket  *UDPSocket
-	address Endpoint
+type LocalAddress struct {
+	address SocketAddress
 	iface   int
 }
 
@@ -40,23 +42,21 @@ type Node struct {
 	sockets    map[SocketKey]*UDPSocket
 	listeners  map[string]*WSListener
 	tlsCA      map[uint64]string
-	endpoints  []SocketEndpoint
+	endpoints  []ListenerBinding
 	tun        *Tun
 	events     *Mailbox[any]
 	tunInbox   *Mailbox[any]
 	tunWrites  *Mailbox[[]byte]
 	actors     map[Edge]*EdgeActor
 	snapshot   *Snapshot
-	ws         map[Edge]WSStatus
+	connection map[Edge]ConnectionStatus
 	dialing    map[Edge]bool
 	packetID   uint64
 	graph      map[Edge]State
 	owned      map[Edge]bool
 	observed   map[Edge]time.Time
-	discovered map[uint16]map[uint64]time.Time
-	local      map[uint64]*LocalEndpoint
-	incoming   map[Endpoint]uint64
-	addresses  map[uint64]Endpoint
+	local      map[uint64]*LocalAddress
+	addresses  map[uint64]Vertex
 	owners     map[uint64]uint16
 	routes     map[uint64][]Edge
 }
@@ -75,10 +75,10 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		events: newMailbox[any](nil), tunInbox: newMailbox[any](nil), tunWrites: newMailbox[[]byte](nil), actors: map[Edge]*EdgeActor{},
 		cfg: cfg, reg: reg, key: dh, log: log,
 		graph: map[Edge]State{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
-		discovered: map[uint16]map[uint64]time.Time{}, owners: map[uint64]uint16{},
+		owners:   map[uint64]uint16{},
 		routes:   map[uint64][]Edge{},
-		packetID: uint64(time.Now().UnixNano()), addresses: map[uint64]Endpoint{},
-		ws: map[Edge]WSStatus{}, dialing: map[Edge]bool{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
+		packetID: uint64(time.Now().UnixNano()), addresses: map[uint64]Vertex{},
+		connection: map[Edge]ConnectionStatus{}, dialing: map[Edge]bool{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
 	}
 
 	if string(n.key.public) != string(me.pub) {
@@ -90,7 +90,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 			peer.session = newSession(me, peer, dh.private)
 		}
 
-		n.remember(peer.endpoint())
+		n.remember(peer.vertex())
 
 		for _, config := range peer.endpoints {
 			if config.TLSCA != "" {
@@ -99,18 +99,14 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		}
 
 		for _, ep := range peer.addresses {
-			n.remember(ep)
-		}
-
-		if index != cfg.Index {
-			n.discovered[index] = map[uint64]time.Time{}
+			n.remember(ep.vertex())
 		}
 	}
 
 	_, n.subnet = throw3(net.ParseCIDR(cfg.Subnet))
 
 	n.sockets = map[SocketKey]*UDPSocket{}
-	n.local = map[uint64]*LocalEndpoint{}
+	n.local = map[uint64]*LocalAddress{}
 
 	for _, config := range append(append([]EndpointConfig{}, cfg.Endpoint...), me.endpoints...) {
 		config.validate()
@@ -118,25 +114,13 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		public := config.description()
 		bind := config.binding()
 
-		if public.Addr == "" || bind.IP == nil || bind.IP.IsLoopback() || bind.IP.IsLinkLocalUnicast() {
+		if public.Addr == "" || bind.IP == nil || bind.IP.IsLinkLocalUnicast() {
 			continue
 		}
 
-		local := endpoint(bind.IP, bind.Port)
+		local := socketAddress(bind.IP, bind.Port)
 
-		if config.Proto == "udp" {
-			if n.sockets[local.socketKey()] == nil {
-				n.sockets[local.socketKey()] = newUDPSocket(local.socketKey())
-			}
-		} else {
-			n.listenWS(config)
-		}
-
-		n.endpoints = append(n.endpoints, SocketEndpoint{public: public, bind: local})
-	}
-
-	if len(n.endpoints) == 0 {
-		throwFmt("no endpoints configured")
+		n.endpoints = append(n.endpoints, ListenerBinding{config: config, public: public, bind: local})
 	}
 
 	n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
@@ -148,14 +132,6 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 func (n *Node) run() {
 	n.publishSnapshot()
 	go n.loop("interfaces", n.watchInterfaces)
-
-	for _, listener := range n.listeners {
-		go n.loop("websocket listener", func() { throw(listener.server.Serve(listener.conn)) })
-	}
-
-	for _, socket := range n.sockets {
-		go n.loop("UDP discovery", func() { n.discoverUDP(socket) })
-	}
 
 	go n.loop("TUN reader", n.readTun)
 	go n.loop("TUN actor", n.tunLoop)

@@ -49,7 +49,7 @@ def test():
             send(packet[:end])
         send(packet + b'\0')
         mutations = [(1, b'\xff\xff'), (3, b'\xff\xff'), (5 + 24, b'\x02'),
-                     (offsets[0], b'\x00'), (offsets[2], b'\x05'),
+                     (offsets[0], b'\x00'), (offsets[2], b'\xff'),
                      (offsets[2] + 3, b'\xff\xff'),
                      (offsets[2] + 5 + len(endpoints[2]['addr']), b'\xff\xff')]
         for offset, value in mutations:

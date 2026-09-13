@@ -11,8 +11,8 @@ def test():
         probe = workload.Probe(lab, 'r', 'a')
         ident = time.time_ns() + 1_000_000_000
         mesh = lib.endpoint(lib.intip(3), 0)
-        ep = lib.endpoint('10.2.0.3')
-        old = [lib.edge(mesh, ep, ident), lib.edge(ep, mesh, ident)]
+        endpoints = [lib.endpoint('10.2.0.3'), lib.source('10.2.0.3', 3)]
+        old = [edge for ep in endpoints for edge in [lib.edge(mesh, ep, ident), lib.edge(ep, mesh, ident)]]
         probe.send(op='ad', body=dict(edges=old))
         withdrawn = [dict(e, id=ident + 1, alive=False) for e in old]
         probe.send(op='ad', body=dict(edges=withdrawn))

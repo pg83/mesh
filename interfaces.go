@@ -35,7 +35,7 @@ func (n *Node) interfaceAddresses() (InterfaceState, error) {
 	addresses := InterfaceState{}
 
 	for _, iface := range interfaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 || iface.Name == n.cfg.Tun {
+		if iface.Flags&net.FlagUp == 0 || iface.Name == n.cfg.Tun {
 			continue
 		}
 
@@ -56,7 +56,7 @@ func (n *Node) interfaceAddresses() (InterfaceState, error) {
 
 			ip := prefix.Addr().Unmap()
 
-			if !ip.IsGlobalUnicast() || n.subnet.Contains(net.IP(ip.AsSlice())) {
+			if (!ip.IsGlobalUnicast() && !ip.IsLoopback()) || n.subnet.Contains(net.IP(ip.AsSlice())) {
 				continue
 			}
 

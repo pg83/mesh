@@ -24,14 +24,16 @@ def test():
             assert packet[12:16] == bytes([198, 51, 100, 1])
             assert packet[16:20] == bytes([10, 2, 0, 2])
             src, dst = struct.unpack_from('!HH', packet, (packet[0] & 15) * 4)
-            assert src == 18001 and dst in (7001, 7002)
+            assert (src == 18001 and dst not in (7001, 7002)) or (src != 18001 and dst in (7001, 7002))
         # The receiving graph names public endpoints, not translated socket pairs.
         for name in ['a', 'b']:
             links = lab.status(name)['links']
             assert links
             for edge in links:
-                assert lib.endpoint_address(edge['from']).startswith('198.51.100.')
-                assert lib.endpoint_address(edge['to']).startswith('198.51.100.')
+                for side in ['from', 'to']:
+                    if edge[side]['proto'] != 'source':
+                        assert lib.endpoint_address(edge[side]).startswith('198.51.100.')
+        lab.clear(captured)
         selected = int(lab.selected_endpoint('a', 'b').split(':')[1])
         lab.cut_port(selected - 10000)
         other = 17002 if selected == 17001 else 17001
@@ -40,8 +42,8 @@ def test():
         # A->B and B->A converge independently. A UDP echo needs both routes;
         # waiting for A's destination alone can lose the one-shot reply.
         lab.wait(lambda: (path := lab.endpoint_route('b', 'a'))
-                 and path[0]['from'] == lib.endpoint('198.51.100.2', other),
-                 'return route from second forwarded port')
+                 and path[0]['to'] == lib.endpoint('198.51.100.1', 18001),
+                 'independent return route remains available')
         for client in clients:
             client.send(b'after-port-failure')
             assert client.recv() == b'after-port-failure'

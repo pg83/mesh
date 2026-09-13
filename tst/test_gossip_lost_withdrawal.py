@@ -8,7 +8,7 @@ def test():
     with lib.Lab(['a', 'r', 'b'], {1: ['a', 'r'], 2: ['r', 'b']}) as lab:
         lab.wait_route('a', 'b', ['r', 'b'])
         lab.wait_route('r', 'a', ['a'])
-        source = lib.endpoint(lab.nodes['b'].addresses[2])
+        source = lib.source(lab.nodes['b'].addresses[2], lab.nodes['b'].index)
         target = lib.endpoint(lab.nodes['r'].addresses[2])
         def present():
             return any(e['from'] == source and e['to'] == target for e in lab.status('a')['graph'])

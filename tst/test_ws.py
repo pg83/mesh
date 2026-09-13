@@ -1,4 +1,4 @@
-"""Simultaneous dials leave one real TCP connection carrying traffic both ways."""
+"""Independent ingress points keep two stable, bidirectional TCP connections."""
 import time
 import lib
 import ws
@@ -14,7 +14,7 @@ def test():
         lab.release(a)
         lab.release(b)
         lab.wait_ping('a', 'b')
-        lab.wait(lab.one_connection, 'same single connection at both endpoints and in the kernel')
+        lab.wait(lambda: lab.connection_count(2), 'both connections at both peers and in the kernel')
         selected = lab.connections('a')
         for name in ['a', 'b']:
             workload.udp_server(lab, name)
@@ -25,7 +25,7 @@ def test():
                 client.send(payload)
                 assert client.recv() == payload
             time.sleep(1)
-            assert lab.one_connection()
+            assert lab.connection_count(2)
             assert lab.connections('a') == selected, 'working connection was replaced'
 
 

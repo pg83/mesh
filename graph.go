@@ -21,7 +21,7 @@ func (n *Node) recompute() {
 	owners := map[uint64]uint16{}
 
 	for index, peer := range n.reg.byIndex {
-		owners[peer.endpoint().hash()] = index
+		owners[peer.vertex().hash()] = index
 	}
 
 	for edge, record := range n.graph {
@@ -31,20 +31,20 @@ func (n *Node) recompute() {
 
 		adjacency[edge.From] = append(adjacency[edge.From], edge.To)
 
-		if index := owners[edge.From]; n.addresses[edge.From].Port == 0 && index != 0 && n.addresses[edge.To].Port != 0 {
+		if index := owners[edge.From]; n.addresses[edge.From].isHost() && index != 0 && !n.addresses[edge.To].isHost() {
 			owners[edge.To] = index
 		}
 
-		if index := owners[edge.To]; n.addresses[edge.To].Port == 0 && index != 0 && n.addresses[edge.From].Port != 0 {
+		if index := owners[edge.To]; n.addresses[edge.To].isHost() && index != 0 && !n.addresses[edge.From].isHost() {
 			owners[edge.From] = index
 		}
 	}
 
 	for _, neighbors := range adjacency {
-		slices.SortFunc(neighbors, func(a, b uint64) int { return compareEndpoint(n.addresses[a], n.addresses[b]) })
+		slices.SortFunc(neighbors, func(a, b uint64) int { return compareVertex(n.addresses[a], n.addresses[b]) })
 	}
 
-	source := n.reg.byIndex[n.cfg.Index].endpoint().hash()
+	source := n.reg.byIndex[n.cfg.Index].vertex().hash()
 	prev := map[uint64]uint64{}
 	seen := map[uint64]bool{source: true}
 	queue := []uint64{source}

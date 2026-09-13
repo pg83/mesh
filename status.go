@@ -10,22 +10,23 @@ type LinkStatus struct {
 	Idle int `json:"idle"`
 }
 
-type WSStatus struct {
+type ConnectionStatus struct {
+	Transport string `json:"transport"`
 	Edge
 	Origin uint64 `json:"origin"`
 	ID     uint64 `json:"id"`
 }
 
 type Status struct {
-	Registry    []RegistryRecord    `json:"registry"`
-	Connections []WSStatus          `json:"connections"`
-	Dialing     int                 `json:"dialing"`
-	Endpoints   map[uint64]Endpoint `json:"endpoints"`
-	Index       uint16              `json:"index"`
-	Links       []LinkStatus        `json:"links"`
-	Graph       []Update            `json:"graph"`
-	Vertices    []uint64            `json:"vertices"`
-	Routes      map[string][]Edge   `json:"routes"`
+	Registry    []RegistryRecord   `json:"registry"`
+	Connections []ConnectionStatus `json:"connections"`
+	Dialing     int                `json:"dialing"`
+	Addresses   map[uint64]Vertex  `json:"addresses"`
+	Index       uint16             `json:"index"`
+	Links       []LinkStatus       `json:"links"`
+	Graph       []Update           `json:"graph"`
+	Vertices    []uint64           `json:"vertices"`
+	Routes      map[string][]Edge  `json:"routes"`
 }
 
 func (n *Node) status() *Status {
@@ -33,16 +34,16 @@ func (n *Node) status() *Status {
 	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Update{}, Vertices: []uint64{}, Routes: map[string][]Edge{}}
 
 	st.Registry = n.reg.records()
-	st.Endpoints = map[uint64]Endpoint{}
+	st.Addresses = map[uint64]Vertex{}
 
 	for id, ep := range n.addresses {
-		st.Endpoints[id] = ep
+		st.Addresses[id] = ep
 	}
 
-	st.Connections = []WSStatus{}
+	st.Connections = []ConnectionStatus{}
 	st.Dialing = len(n.dialing)
 
-	for _, c := range n.ws {
+	for _, c := range n.connection {
 		st.Connections = append(st.Connections, c)
 	}
 
@@ -67,6 +68,7 @@ func (n *Node) status() *Status {
 		st.Vertices = append(st.Vertices, ep)
 	}
 
+	slices.SortFunc(st.Connections, func(a, b ConnectionStatus) int { return compareEdge(a.Edge, b.Edge) })
 	slices.Sort(st.Vertices)
 	slices.SortFunc(st.Graph, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
 	slices.SortFunc(st.Links, func(a, b LinkStatus) int { return compareEdge(a.Edge, b.Edge) })

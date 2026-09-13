@@ -17,7 +17,7 @@ class Paths(ws.Lab):
 def test():
     with Paths() as lab:
         lab.wait_ping('a', 'b')
-        lab.wait(lambda: len(lab.connections('a')) == len(lab.connections('b')) == 2,
+        lab.wait(lambda: len(lab.connections('a')) == len(lab.connections('b')) == 3,
                  'two paths remain distinct connections')
         workload.udp_server(lab, 'b')
         client = workload.UdpClient(lab, 'a', 'b')
@@ -29,7 +29,7 @@ def test():
         lab.configs['b'] = dict(endpoint=[])
         lab.start_node('b')
         lab.wait_ping('a', 'b')
-        lab.wait(lambda: len(lab.connections('a')) == len(lab.connections('b')) == 1,
+        lab.wait(lambda: len(lab.connections('a')) == len(lab.connections('b')) == 2,
                  'old reader cannot delete replacement connection')
         assert lab.endpoint_route('a', 'b')[0]['to']['path'] == '/other?channel=2'
         assert lab.connections('a') != old

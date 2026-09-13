@@ -9,19 +9,29 @@ import (
 const gossipBatchSize = 8
 
 type Ad struct {
-	Edges     []Update   `json:"edges"`
-	Endpoints []Endpoint `json:"endpoints"`
+	Edges    []Update `json:"edges"`
+	Vertices []Vertex `json:"vertices"`
 }
 
-func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalEndpoint {
-	local := map[uint64]*LocalEndpoint{}
-	incoming := map[Endpoint]uint64{}
+func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalAddress {
+	local := map[uint64]*LocalAddress{}
+	incoming := map[SocketAddress]uint64{}
 
 	for _, addr := range addresses {
 		ip := net.IP(addr.ip.AsSlice())
 
+		if !ip.IsLoopback() {
+			id := n.remember(sourceVertex(n.cfg.Index, ip))
+
+			local[id] = &LocalAddress{address: socketAddress(ip, 0), iface: addr.iface}
+		}
+
 		for _, config := range n.endpoints {
-			wire := endpoint(ip, int(config.bind.Port))
+			if ip.IsLoopback() && !config.bind.ip().IsLoopback() {
+				continue
+			}
+
+			wire := socketAddress(ip, int(config.bind.Port))
 
 			if config.bind.ipv6() != wire.ipv6() || (!config.bind.ip().IsUnspecified() && config.bind.Addr != wire.Addr) {
 				continue
@@ -30,7 +40,7 @@ func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalEndpoint {
 			public := config.public
 
 			if public.ip().IsUnspecified() {
-				public.Addr = wire.Addr
+				public.Addr = wire.Addr.String()
 			}
 
 			if previous, exists := incoming[wire]; public.Proto == "udp" && exists && previous != public.hash() {
@@ -42,29 +52,23 @@ func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalEndpoint {
 			}
 
 			if public.Proto == "udp" {
-				incoming[wire] = n.remember(public)
+				incoming[wire] = n.remember(public.vertex())
 			} else {
-				n.remember(public)
+				n.remember(public.vertex())
 			}
 
-			binding := &LocalEndpoint{address: wire, iface: addr.iface}
-
-			if public.Proto == "udp" {
-				binding.socket = n.sockets[wire.socketKey()]
-			}
+			binding := &LocalAddress{address: wire, iface: addr.iface}
 
 			local[public.hash()] = binding
 		}
 	}
-
-	n.incoming = incoming
 
 	return local
 }
 
 func (n *Node) refresh(now time.Time) {
 	desired := map[Edge]bool{}
-	me := n.reg.byIndex[n.cfg.Index].endpoint().hash()
+	me := n.reg.byIndex[n.cfg.Index].vertex().hash()
 
 	for ep := range n.local {
 		desired[Edge{From: me, To: ep}] = true
@@ -112,7 +116,7 @@ func (n *Node) advertisements() [][]byte {
 			for _, u := range ad.Edges {
 				for _, id := range []uint64{u.From, u.To} {
 					if !seen[id] {
-						ad.Endpoints = append(ad.Endpoints, n.addresses[id])
+						ad.Vertices = append(ad.Vertices, n.addresses[id])
 						seen[id] = true
 					}
 				}
@@ -133,7 +137,7 @@ func (n *Node) advertisements() [][]byte {
 }
 
 func (n *Node) handleAd(ad *Ad) {
-	for _, ep := range ad.Endpoints {
+	for _, ep := range ad.Vertices {
 		n.remember(ep)
 	}
 
@@ -154,7 +158,7 @@ func (n *Node) candidates(peer *Peer) []uint64 {
 	addrs := []uint64{}
 
 	for _, ep := range peer.addresses {
-		if id := n.remember(ep); id != 0 {
+		if id := n.remember(ep.vertex()); id != 0 {
 			addrs = append(addrs, id)
 		}
 	}
@@ -162,13 +166,7 @@ func (n *Node) candidates(peer *Peer) []uint64 {
 	for id, index := range n.owners {
 		ep := n.addresses[id]
 
-		if index == peer.index && ep.Port != 0 && !n.subnet.Contains(ep.ip()) {
-			addrs = append(addrs, id)
-		}
-	}
-
-	for id := range n.discovered[peer.index] {
-		if !n.subnet.Contains(n.addresses[id].ip()) {
+		if index == peer.index && ep.isEndpoint() && !n.subnet.Contains(ep.ip()) {
 			addrs = append(addrs, id)
 		}
 	}

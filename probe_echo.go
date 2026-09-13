@@ -4,6 +4,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"net"
 	"time"
 )
@@ -16,7 +17,7 @@ func echoProbe(path, remote string, index uint16) {
 	session := newSession(me, peer, key.private)
 	conn := throw2(net.ListenUDP(cfg.Endpoint[0].description().socketKey().network("udp"), cfg.Endpoint[0].binding()))
 	target := parseUDPAddr(remote)
-	mine, other := cfg.Endpoint[0].description(), endpoint(target.IP, target.Port)
+	mine, other := cfg.Endpoint[0].description().vertex(), sourceVertex(index, target.IP)
 	buf := make([]byte, maxPacket)
 	received := false
 	next := time.Time{}
@@ -29,19 +30,22 @@ func echoProbe(path, remote string, index uint16) {
 
 	for {
 		if time.Now().After(next) {
-			edges := []Edge{{From: me.endpoint().hash(), To: mine.hash()}, {From: mine.hash(), To: me.endpoint().hash()}}
+			edges := []Edge{{From: me.vertex().hash(), To: mine.hash()}, {From: mine.hash(), To: me.vertex().hash()}}
 
 			if received {
 				edges = append(edges, Edge{From: other.hash(), To: mine.hash()})
 			}
 
-			ad := &Ad{Endpoints: []Endpoint{me.endpoint(), mine, other}}
+			ad := &Ad{Vertices: []Vertex{me.vertex(), mine, other}}
 
 			for _, edge := range edges {
 				ad.Edges = append(ad.Edges, Update{Edge: edge, State: State{ID: uint64(time.Now().UnixNano()), Alive: true}})
 			}
 
-			send(encodeAd(ad))
+			if received {
+				send(encodeAd(ad))
+			}
+
 			next = time.Now().Add(200 * time.Millisecond)
 		}
 
@@ -59,9 +63,18 @@ func echoProbe(path, remote string, index uint16) {
 			continue
 		}
 
-		target = remote
-		other = endpoint(remote.IP, remote.Port)
-		received = true
+		if inner[0] == innerBinding {
+			var binding Binding
+
+			if json.Unmarshal(inner[1:], &binding) == nil && !binding.Reply && binding.To.hash() == mine.hash() && binding.From.Node == peer.index {
+				target = remote
+				other = binding.From
+				received = true
+				send(bindingInner(Binding{From: mine, To: other, Reply: true}))
+			}
+
+			continue
+		}
 
 		if inner[0] != innerData {
 			continue

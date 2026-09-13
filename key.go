@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const protocol = "mesh/9"
+const protocol = "mesh/10"
 
 type DHKey struct {
 	private []byte

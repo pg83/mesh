@@ -14,7 +14,7 @@ def test():
         client = workload.UdpClient(lab, 'a', 'b')
         client.send(b'accepted-socket-is-bidirectional')
         assert client.recv() == b'accepted-socket-is-bidirectional'
-        assert blocked['hits'] == 0, 'reverse traffic unnecessarily started another connection'
+        assert lab.one_connection(), 'return traffic requires only the accepted connection'
 
 
 lib.main(test)

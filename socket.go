@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -12,9 +13,10 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
-type SocketEndpoint struct {
+type ListenerBinding struct {
+	config EndpointConfig
 	public Endpoint
-	bind   Endpoint
+	bind   SocketAddress
 }
 
 func (c EndpointConfig) validate() {
@@ -61,7 +63,7 @@ func (c EndpointConfig) description() Endpoint {
 	if c.Proto == "udp" {
 		a := c.address()
 
-		return endpoint(a.IP, a.Port)
+		return udpVertex(a.IP, a.Port).endpoint()
 	}
 
 	return (Endpoint{Proto: c.Proto, Addr: c.Addr, Port: uint16(c.Port), Path: c.Path}).canonical()
@@ -100,11 +102,11 @@ func (k SocketKey) wildcard() string {
 func newUDPSocket(key SocketKey) *UDPSocket {
 	guard := udpGuard(key)
 	lc := net.ListenConfig{Control: udpControl(0)}
-	udp := throw2(lc.ListenPacket(context.Background(), key.network("udp"), net.JoinHostPort(key.wildcard(), strconv.Itoa(int(key.port))))).(*net.UDPConn)
+	udp := throw2(lc.ListenPacket(context.Background(), key.network("udp"), net.JoinHostPort(key.addr, strconv.Itoa(int(key.port))))).(*net.UDPConn)
 
 	throw(udp.SetReadBuffer(1 << 20))
 
-	socket := &UDPSocket{port: key.port, guard: guard}
+	socket := &UDPSocket{conn: udp, port: key.port, guard: guard}
 
 	if key.ipv6 {
 		conn := ipv6.NewPacketConn(udp)
@@ -141,11 +143,47 @@ func newUDPSocket(key SocketKey) *UDPSocket {
 	return socket
 }
 
-func connectUDP(local *LocalEndpoint, remote Endpoint) *net.UDPConn {
-	dialer := net.Dialer{LocalAddr: local.address.addr(), Control: udpControl(local.iface)}
-	conn := throw2(dialer.Dial(local.address.socketKey().network("udp"), remote.string())).(*net.UDPConn)
+type SocketAddress struct {
+	Addr netip.Addr
+	Port uint16
+}
 
-	throw(conn.SetReadBuffer(1 << 20))
+func socketAddress(ip net.IP, port int) SocketAddress {
+	addr, _ := netip.AddrFromSlice(ip)
 
-	return conn
+	return SocketAddress{Addr: addr.Unmap(), Port: uint16(port)}
+}
+
+func (s SocketAddress) ip() net.IP {
+	return net.IP(s.Addr.AsSlice())
+}
+
+func (s SocketAddress) ipv6() bool {
+	return s.Addr.Is6()
+}
+
+func (s SocketAddress) addr() *net.UDPAddr {
+	return &net.UDPAddr{IP: s.ip(), Port: int(s.Port)}
+}
+
+func (s SocketAddress) socketKey() SocketKey {
+	return SocketKey{addr: s.Addr.String(), port: s.Port, ipv6: s.ipv6()}
+}
+
+func (s SocketAddress) string() string {
+	return net.JoinHostPort(s.Addr.String(), strconv.Itoa(int(s.Port)))
+}
+
+func tcpControl(iface int) func(string, string, syscall.RawConn) error {
+	return func(network, address string, raw syscall.RawConn) error {
+		var result error
+
+		err := raw.Control(func(fd uintptr) { result = socketInterface(int(fd), iface, strings.HasSuffix(network, "6")) })
+
+		if err != nil {
+			result = err
+		}
+
+		return result
+	}
 }

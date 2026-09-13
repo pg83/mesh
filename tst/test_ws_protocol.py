@@ -9,7 +9,8 @@ def test():
         lab.wait_ping('b', 'c')
         lab.wait(lambda: lab.known_nodes('b') == [1, 2, 3], 'endpoint owners known')
         lab.stop_node('a')
-        a, b, c = [dict(proto='ws', addr=f'10.1.0.{i}', port=7100, path='/mesh') for i in (1, 2, 3)]
+        a = lib.source('10.1.0.1', 1)
+        b, c = [dict(proto='ws', addr=f'10.1.0.{i}', port=7100, path='/mesh') for i in (2, 3)]
         cases = [dict(op='raw', hex='00'), dict(op='raw', hex='03' + '00' * 50),
                  dict(op='raw', hex='030100' + '00' * 32),
                  dict(op='inner', hex=''), dict(op='inner', hex='ff'), dict(op='inner', hex='037b'),

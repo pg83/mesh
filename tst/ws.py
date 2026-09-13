@@ -29,17 +29,21 @@ class Lab(lib.Lab):
         return sum(row.split()[3] == '01' and any(int(pair.split(':')[1], 16) == 7100
                    for pair in row.split()[1:3]) for row in rows)
 
-    def one_connection(self):
+    def connection_count(self, count):
         a, b = self.connections('a'), self.connections('b')
-        return (len(a) == len(b) == 1 and a == b
-                and self.tcp_connections('a') == self.tcp_connections('b') == 1)
+        return (len(a) == len(b) == count and a == b
+                and self.tcp_connections('a') == self.tcp_connections('b') == count)
+
+    def one_connection(self):
+        return self.connection_count(1)
 
 
 class TLSLab(Lab):
-    def __init__(self, mixed=False, proxy=False, trusted=True):
+    def __init__(self, mixed=False, proxy=False, trusted=True, bind='10.1.0.2'):
         import subprocess
         super().__init__(mixed=mixed)
         self.proxy, self.trusted = proxy, trusted
+        self.bind = bind
         self.cert, self.key = self.dir / 'cert.pem', self.dir / 'key.pem'
         subprocess.run(['openssl', 'req', '-config', '/dev/null', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
                         '-subj', '/CN=mesh-test', '-addext', 'subjectAltName=IP:10.1.0.2,IP:10.1.0.99',
@@ -51,7 +55,7 @@ class TLSLab(Lab):
 
     def server_endpoint(self):
         return dict(proto='wss', addr='10.1.0.99' if self.proxy else '10.1.0.2',
-                    port=7443 if self.proxy else 7100, path='/mesh', bind_addr='10.1.0.2',
+                    port=7443 if self.proxy else 7100, path='/mesh', bind_addr=self.bind,
                     bind_port=7101 if self.proxy else 7100, bind_proto='ws' if self.proxy else 'wss',
                     tls_cert=str(self.cert), tls_key=str(self.key), tls_ca=str(self.cert) if self.trusted else '')
 
@@ -71,8 +75,9 @@ class TLSLab(Lab):
         import os
         import workload
         if self.proxy and name == 'b':
+            host = f'[{self.bind}]' if ':' in self.bind else self.bind
             proc = self.spawn('b', [os.environ['MESH_TEST_PROBE'], 'proxy', '10.1.0.99:7443',
-                                  'http://10.1.0.2:7101', self.cert, self.key], 'tls-proxy')
+                                  f'http://{host}:7101', self.cert, self.key], 'tls-proxy')
             workload.wait_port(self, 'b', '10.1.0.99', 7443, proc)
         super().start_node(name)
 

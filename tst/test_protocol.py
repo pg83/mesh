@@ -32,7 +32,8 @@ def test():
         def data(path, cursor=0, payload=b''):
             return bytes([1, len(path), cursor]) + b''.join(struct.pack('<Q', lib.endpoint_hash(ep))
                      for edge in path for ep in edge) + payload
-        a, b, c = [lib.endpoint(f'10.1.0.{i}') for i in (1, 2, 3)]
+        a = lib.source('10.1.0.1', 1)
+        b, c = [lib.endpoint(f'10.1.0.{i}') for i in (2, 3)]
         for packet in [b'', b'\xff', b'\x01', b'\x01\0\0', b'\x01\x11\0',
                        data([(a,b)], cursor=1), data([(a,c)]), data([(a,b),(b,lib.endpoint('10.1.0.99'))]),
                        b'\x02', b'\x02{']:
@@ -83,7 +84,7 @@ def test():
         probe.stdin.close()
         assert probe.wait(timeout=10) == 0
         lab.wait_links('b', ['c'])
-        attempt = lab.intercept('b', 'a', 'copy', kind=4)
+        attempt = lab.intercept('b', 'a', 'copy', kind=3)
         lab.wait(lambda: attempt['hits'] == 1, 'gossip after local link timeout')
 
 

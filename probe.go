@@ -67,11 +67,33 @@ func main() {
 		}
 	} else {
 		remote := parseUDPAddr(os.Args[2])
-		conn := throw2(net.ListenUDP(cfg.Endpoint[0].description().socketKey().network("udp"), cfg.Endpoint[0].binding()))
+		conn := throw2(net.DialUDP(cfg.Endpoint[0].description().socketKey().network("udp"), &net.UDPAddr{IP: cfg.Endpoint[0].binding().IP}, remote))
 
 		defer conn.Close()
 
-		sendPacket = func(packet []byte, text bool) { throw2(conn.WriteToUDP(packet, remote)) }
+		source := sourceVertex(cfg.Index, conn.LocalAddr().(*net.UDPAddr).IP)
+		first := bindingPacket(session, source, udpVertex(remote.IP, remote.Port), packetID)
+		deadline := time.Now().Add(5 * time.Second)
+
+		for {
+			throw2(conn.Write(first))
+			throw(conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond)))
+
+			buf := make([]byte, maxPacket)
+			n, err := conn.Read(buf)
+
+			if err == nil {
+				if body, ok := session.open(buf[:n]); ok && len(body) > 0 && body[0] == innerBinding {
+					break
+				}
+			}
+
+			if time.Now().After(deadline) {
+				throwFmt("UDP probe handshake timed out")
+			}
+		}
+
+		sendPacket = func(packet []byte, text bool) { throw2(conn.Write(packet)) }
 	}
 
 	encoder := json.NewEncoder(os.Stdout)
