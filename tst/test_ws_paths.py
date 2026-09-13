@@ -31,7 +31,11 @@ def test():
         lab.wait_ping('a', 'b')
         lab.wait(lambda: len(lab.connections('a')) == len(lab.connections('b')) == 2,
                  'old reader cannot delete replacement connection')
-        assert lab.endpoint_route('a', 'b')[0]['to']['path'] == '/other?channel=2'
+        # A successful ping may use B's accepted connection in reverse before
+        # gossip has installed the replacement outgoing route from A.
+        lab.wait(lambda: (path := lab.endpoint_route('a', 'b'))
+                 and path[0]['to'].get('path') == '/other?channel=2',
+                 'replacement outgoing route uses the surviving path')
         assert lab.connections('a') != old
         client.send(b'after-restart')
         assert client.recv() == b'after-restart'

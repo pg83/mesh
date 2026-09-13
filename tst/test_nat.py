@@ -9,8 +9,11 @@ def test():
     with nat.Lab() as lab:
         lab.wait_ping('a', 'b')
         lab.wait_ping('b', 'a')
-        assert lab.selected_endpoint('a', 'b') in ('198.51.100.2:17001', '198.51.100.2:17002')
-        assert lab.selected_endpoint('b', 'a') == '198.51.100.1:18001'
+        # Ping can already use an accepted connection in reverse while the
+        # independently initiated path is still being learned through gossip.
+        lab.wait(lambda: lab.selected_endpoint('a', 'b') in ('198.51.100.2:17001', '198.51.100.2:17002')
+                 and lab.selected_endpoint('b', 'a') == '198.51.100.1:18001',
+                 'both outgoing routes through the advertised mappings')
         for name in ['a', 'b']:
             workload.udp_server(lab, name)
         clients = [workload.UdpClient(lab, 'a', 'b'), workload.UdpClient(lab, 'b', 'a')]
