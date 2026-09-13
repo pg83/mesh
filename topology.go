@@ -28,6 +28,17 @@ func (n *Node) edgePair(edge Edge, peer uint16) *EdgeActor {
 	return actor
 }
 
+func (n *Node) excludesDial(from, to Vertex) bool {
+	if len(n.noDial) == 0 || from.Proto != "source" || from.Node != n.cfg.Index || !to.isEndpoint() {
+		return false
+	}
+
+	src, _ := netip.ParseAddr(from.Addr)
+	dst, _ := netip.ParseAddr(to.Addr)
+
+	return n.noDial[DialPair{From: src.Unmap(), To: dst.Unmap()}]
+}
+
 func (n *Node) publishSnapshot() {
 	n.recompute()
 
@@ -39,8 +50,6 @@ func (n *Node) publishSnapshot() {
 		}
 
 		for _, dst := range n.candidates(peer) {
-			to, _ := netip.ParseAddr(n.addresses[dst].Addr)
-
 			for src := range n.local {
 				if n.addresses[src].Proto != "source" {
 					continue
@@ -50,7 +59,7 @@ func (n *Node) publishSnapshot() {
 					continue
 				}
 
-				if n.noDial[DialPair{From: n.local[src].address.Addr, To: to.Unmap()}] {
+				if n.excludesDial(n.addresses[src], n.addresses[dst]) {
 					continue
 				}
 

@@ -13,6 +13,31 @@ class Lab(lib.Lab):
         return registry
 
 
+def rolling_restart():
+    with lib.Lab(['a', 'b', 'observer'], {1: ['a', 'b', 'observer'], 2: ['a', 'b']}) as lab:
+        lab.wait_ping('a', 'b')
+        lab.wait_ping('observer', 'a')
+        for name, other in [('a', 'b'), ('b', 'a')]:
+            lab.configs[name] = dict(no_dial=[
+                {'from': lab.nodes[name].addresses[1], 'to': lab.nodes[other].addresses[1]}])
+            lab.stop_node(name)
+            lab.start_node(name)
+        lab.wait_ping('observer', 'a')
+        lab.wait_ping('observer', 'b')
+
+        def clean():
+            for name in lab.nodes:
+                for edge in lab.status(name)['graph']:
+                    if (edge['from']['addr'], edge['to']['addr']) in [
+                            ('10.1.0.1', '10.1.0.2'), ('10.1.0.2', '10.1.0.1')]:
+                        return False
+            return True
+
+        lab.wait(clean, 'old excluded links withdrawn after rolling restart', timeout=12)
+        lab.wait_ping('a', 'b')
+        lab.wait_ping('b', 'a')
+
+
 def test():
     lab = Lab(['a', 'b', 'laptop'], {1: ['a', 'b', 'laptop'], 2: ['a', 'b'], 3: ['a', 'b']},
               ipv6=[3], statics=['a', 'b'])
@@ -62,6 +87,7 @@ def test():
             result = lab.run('a', [lib.MESH, 'run', '-c', path], check=False)
             assert result.returncode != 0
             assert 'no_dial requires' in result.stderr or 'ParseAddr' in result.stderr, result.stderr
+    rolling_restart()
 
 
 lib.main(test)

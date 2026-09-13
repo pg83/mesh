@@ -85,7 +85,7 @@ func (n *Node) refresh(now time.Time) {
 	}
 
 	for edge, record := range n.graph {
-		if record.Alive && !desired[edge] && (n.owned[edge] || edge.From == me || edge.To == me) {
+		if record.Alive && !desired[edge] && (n.owned[edge] || edge.From == me || edge.To == me || n.excludesDial(n.addresses[edge.From], n.addresses[edge.To]) || n.excludesDial(n.addresses[edge.To], n.addresses[edge.From])) {
 			n.record(edge, false)
 		}
 	}
