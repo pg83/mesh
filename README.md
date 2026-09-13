@@ -129,10 +129,11 @@ WebSocket upgrades. `bind_proto` defaults to `proto`. UDP and TCP may use the
 same port. WS and native WSS need different TCP ports. Mesh authenticates
 and encrypts its packets even when TLS terminates at a proxy.
 
-The TUN interface persists across daemon exits, so a restart does not remove
+On Linux, the TUN interface persists across daemon exits, so a restart does not remove
 the application's local address and route. The next process reattaches to
 that interface. When changing the configured TUN name or removing mesh,
 remove the old interface explicitly with `ip link del <name>`.
+On macOS, closing the process's utun descriptor removes the interface and route.
 
 `key` is one 32-byte seed from which the X25519 static keypair (`pub`) is
 derived. Every transport packet, including gossip, is authenticated by the
@@ -405,3 +406,11 @@ The Darwin UDP listener reserves the corresponding localhost TCP port to
 prevent two mesh processes from sharing it accidentally. Linux keeps its
 namespace-local UDP port guard. Native macOS CI checks creation, encrypted
 ICMP round trips at two packet sizes, and restart on both architectures.
+
+## Releases
+
+Use **Actions → Release → Run workflow** on `master`, as in `shitty`. Leave
+`tag` empty to pick the next numeric release, or supply that next number.
+CI runs Linux e2e, browser, race and coverage checks and native Darwin tests,
+packages the tested binaries, creates a draft, attests the archives and
+publishes the release. Development stays on `master`; releases create tags.

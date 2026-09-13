@@ -5,8 +5,8 @@ on:
   push:
     branches:
       - master
-      - "release/*"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -61,6 +61,13 @@ jobs:
 
       - name: Build and test
         run: ./build -k -j 4 test
+
+      - name: Save tested Linux binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mesh-linux-amd64
+          path: .build/bin/mesh
+          retention-days: 7
 
       - name: Save web screenshot and failure diagnostics
         if: always()
@@ -181,37 +188,3 @@ jobs:
           name: mesh-${{ matrix.os }}
           path: .build/bin/mesh
           retention-days: 7
-
-  release:
-    name: Publish release
-    if: startsWith(github.ref, 'refs/heads/release/')
-    needs: [test, race, coverage, darwin]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      actions: read
-    concurrency:
-      group: publish-${{ github.ref }}
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: false
-      - name: Collect tested Darwin binaries and build Linux
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh run download "$GITHUB_RUN_ID" -n mesh-macos-15 -D artifacts/darwin-arm64
-          gh run download "$GITHUB_RUN_ID" -n mesh-macos-15-intel -D artifacts/darwin-amd64
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o artifacts/linux-amd64/mesh .
-          python3 dev/release.py
-      - name: Create tag and publish immutable release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          release_tag="${GITHUB_REF_NAME#release/}"
-          [[ "$release_tag" =~ ^[0-9]+$ ]]
-          gh release create "$release_tag" --target "$GITHUB_SHA" --title "Mesh $release_tag" --notes-file RELEASE.md dist/*

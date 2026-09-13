@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: release tag (empty picks the next number)
+        required: false
+
+permissions:
+  attestations: write
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    if: github.ref == 'refs/heads/master'
+    uses: ./.github/workflows/ci.yml
+
+  package-release:
+    name: Package and publish release
+    needs: checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Download tested Linux binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mesh-linux-amd64
+          path: ${{ runner.temp }}/release-input/linux-amd64
+
+      - name: Download tested Darwin arm64 binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mesh-macos-15
+          path: ${{ runner.temp }}/release-input/darwin-arm64
+
+      - name: Download tested Darwin amd64 binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mesh-macos-15-intel
+          path: ${{ runner.temp }}/release-input/darwin-amd64
+
+      - name: Let the release push tags
+        run: |
+          git config user.name "mesh release bot"
+          git config user.email "noreply@github.com"
+
+      - name: Create draft release
+        run: |
+          args=()
+          if [[ -n "$RELEASE_TAG" ]]; then args+=("$RELEASE_TAG"); fi
+          python3 dev/release.py "${args[@]}" --sha "$GITHUB_SHA" --generate-notes \
+            --artifacts-directory "$RUNNER_TEMP/release-artifacts" --draft \
+            --tag-file "$RUNNER_TEMP/release-tag" \
+            --binaries-directory "$RUNNER_TEMP/release-input"
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Attest release artifacts
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: '${{ runner.temp }}/release-artifacts/*.tar.gz'
+
+      - name: Publish release
+        run: gh release edit "$(cat "$RUNNER_TEMP/release-tag")" --draft=false --repo "$GITHUB_REPOSITORY"
+        env:
+          GH_TOKEN: ${{ github.token }}
