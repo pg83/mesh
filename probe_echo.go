@@ -9,41 +9,35 @@ import (
 	"time"
 )
 
-func echoProbe(path, remote string, index uint16) {
+func echoProbe(path, _ string, index uint16) {
 	cfg := loadConfig(path)
 	reg := newRegistry(cfg.Registry, cfg.RegistryVersion)
 	me, peer := reg.byIndex[cfg.Index], reg.byIndex[index]
 	key := deriveKey(decodeKey(cfg.Key))
 	session := newSession(me, peer, key.private)
 	conn := throw2(net.ListenUDP(cfg.Endpoint[0].description().socketKey().network("udp"), cfg.Endpoint[0].binding()))
-	target := parseUDPAddr(remote)
-	mine, other := cfg.Endpoint[0].description().vertex(), sourceVertex(index, target.IP)
+	mine := cfg.Endpoint[0].description().vertex()
+	clients := map[SocketAddress]Vertex{}
 	buf := make([]byte, maxPacket)
-	received := false
 	next := time.Time{}
 	id := uint64(time.Now().UnixNano())
 
-	send := func(inner []byte) {
+	send := func(target *net.UDPAddr, inner []byte) {
 		id++
 		throw2(conn.WriteToUDP(session.seal(inner, id), target))
 	}
 
 	for {
 		if time.Now().After(next) {
-			edges := []Edge{{From: me.vertex().hash(), To: mine.hash()}, {From: mine.hash(), To: me.vertex().hash()}}
+			for target, other := range clients {
+				edges := []Edge{{From: me.vertex().hash(), To: mine.hash()}, {From: mine.hash(), To: me.vertex().hash()}, {From: other.hash(), To: mine.hash()}}
+				ad := &Ad{Vertices: []Vertex{me.vertex(), mine, other}}
 
-			if received {
-				edges = append(edges, Edge{From: other.hash(), To: mine.hash()})
-			}
+				for _, edge := range edges {
+					ad.Edges = append(ad.Edges, Update{Edge: edge, State: State{ID: uint64(time.Now().UnixNano()), Alive: true}})
+				}
 
-			ad := &Ad{Vertices: []Vertex{me.vertex(), mine, other}}
-
-			for _, edge := range edges {
-				ad.Edges = append(ad.Edges, Update{Edge: edge, State: State{ID: uint64(time.Now().UnixNano()), Alive: true}})
-			}
-
-			if received {
-				send(encodeAd(ad))
+				send(target.addr(), encodeAd(ad))
 			}
 
 			next = time.Now().Add(200 * time.Millisecond)
@@ -67,16 +61,16 @@ func echoProbe(path, remote string, index uint16) {
 			var binding Binding
 
 			if json.Unmarshal(inner[1:], &binding) == nil && !binding.Reply && binding.To.hash() == mine.hash() && binding.From.Node == peer.index {
-				target = remote
-				other = binding.From
-				received = true
-				send(bindingInner(Binding{From: mine, To: other, Reply: true}))
+				clients[socketAddress(remote.IP, remote.Port)] = binding.From
+				send(remote, bindingInner(Binding{From: mine, To: binding.From, Reply: true}))
 			}
 
 			continue
 		}
 
-		if inner[0] != innerData {
+		other, known := clients[socketAddress(remote.IP, remote.Port)]
+
+		if inner[0] != innerData || !known {
 			continue
 		}
 
@@ -99,7 +93,7 @@ func echoProbe(path, remote string, index uint16) {
 		packet[10], packet[11], packet[head+2], packet[head+3] = 0, 0, 0, 0
 		binary.BigEndian.PutUint16(packet[10:12], internetChecksum(packet[:head]))
 		binary.BigEndian.PutUint16(packet[head+2:head+4], internetChecksum(packet[head:]))
-		send(encodeData(&Data{path: []Edge{{From: mine.hash(), To: other.hash()}}, ip: packet}))
+		send(remote, encodeData(&Data{path: []Edge{{From: mine.hash(), To: other.hash()}}, ip: packet}))
 	}
 }
 
