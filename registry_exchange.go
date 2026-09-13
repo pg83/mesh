@@ -4,7 +4,7 @@ import "time"
 
 const registryInterval = 5 * time.Second
 
-func (a *EdgeActor) exchangeRegistry(now time.Time) {
+func (a *Channel) exchangeRegistry(now time.Time) {
 	if !a.outgoing || a.view == nil || !a.enabled() || now.Before(a.nextRegistry) {
 		return
 	}

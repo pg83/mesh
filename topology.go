@@ -7,23 +7,15 @@ import (
 	"time"
 )
 
-func (n *Node) edgeActor(edge Edge, peer uint16, outgoing bool) *EdgeActor {
-	actor := n.actors[edge]
+func (n *Node) channel(edge Edge, peer uint16, outgoing bool) *Channel {
+	actor := n.channels[edge]
 
 	if actor == nil {
-		actor = &EdgeActor{node: n, edge: edge, peer: peer, outgoing: outgoing, inbox: newMailbox[any](nil),
+		actor = &Channel{node: n, edge: edge, peer: peer, outgoing: outgoing, inbox: newMailbox[any](nil),
 			session: n.session(peer), packetID: uint64(time.Now().UnixNano())}
-		n.actors[edge] = actor
-		go n.loop("edge", actor.run)
+		n.channels[edge] = actor
+		go n.loop("channel", actor.run)
 	}
-
-	return actor
-}
-
-func (n *Node) edgePair(edge Edge, peer uint16) *EdgeActor {
-	actor := n.edgeActor(edge, peer, true)
-
-	n.edgeActor(Edge{From: edge.To, To: edge.From}, peer, false)
 
 	return actor
 }
@@ -65,37 +57,44 @@ func (n *Node) publishSnapshot() {
 
 				edge := Edge{From: src, To: dst}
 
-				n.edgePair(edge, index)
+				n.channel(edge, index, true)
 				enabled[edge] = true
 			}
 		}
 	}
 
-	actors := map[Edge]chan any{}
+	channels := map[Edge]chan any{}
 
-	for edge, actor := range n.actors {
-		actors[edge] = actor.inbox.in
+	for edge, actor := range n.channels {
+		channels[edge] = actor.inbox.in
 	}
 
 	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local), owners: maps.Clone(n.owners),
-		routes: n.routes, actors: actors, enabled: enabled}
+		routes: n.routes, channels: channels, enabled: enabled}
 
 	view.gossip = n.advertisements()
 	n.snapshot = view
 
-	for _, actor := range n.actors {
+	for _, actor := range n.channels {
 		post(actor.inbox.in, any(view))
 	}
 
 	post(n.tunInbox.in, any(view))
 }
 
-func (n *Node) observe(r EdgeReport) {
+func (n *Node) observe(r ChannelReport) {
 	if r.session != n.session(r.peer) {
 		return
 	}
 
-	if !r.seen.IsZero() && time.Since(r.seen) < sessionTimeout && r.seen.After(n.observed[r.edge]) {
+	if r.status == nil {
+		if _, exists := n.observed[r.edge]; exists {
+			delete(n.observed, r.edge)
+			n.record(r.edge, false)
+		}
+	}
+
+	if r.status != nil && !r.seen.IsZero() && time.Since(r.seen) < sessionTimeout && r.seen.After(n.observed[r.edge]) {
 		_, exists := n.observed[r.edge]
 
 		n.observed[r.edge] = r.seen
@@ -107,10 +106,10 @@ func (n *Node) observe(r EdgeReport) {
 		}
 	}
 
-	if r.connection == nil {
-		delete(n.connection, r.edge)
+	if r.status == nil {
+		delete(n.channelStatus, r.edge)
 	} else {
-		n.connection[r.edge] = *r.connection
+		n.channelStatus[r.edge] = *r.status
 	}
 
 	if r.dialing {
@@ -154,13 +153,18 @@ func (n *Node) graphLoop() {
 					n.publishSnapshot()
 					dirty = false
 				}
-			case EdgeReport:
+			case ChannelReport:
 				n.observe(v)
 				dirty = true
-			case *Connection:
-				if n.local[v.edge.From] == nil || n.session(v.peer) != v.session {
+			case *ChannelIO:
+				local := v.edge.To
+
+				if v.outgoing {
+					local = v.edge.From
+				}
+
+				if n.local[local] == nil || n.session(v.peer) != v.session {
 					v.stop()
-					v.conn.close()
 
 					continue
 				}
@@ -168,10 +172,9 @@ func (n *Node) graphLoop() {
 				n.remember(v.source)
 				n.remember(v.target)
 
-				actor := n.edgePair(v.edge, v.peer)
+				actor := n.channel(v.edge, v.peer, v.outgoing)
 
 				n.publishSnapshot()
-
 				post(actor.inbox.in, any(v))
 			case chan *Snapshot:
 				post(v, n.snapshot)

@@ -67,15 +67,24 @@ func (t *Tun) read(buf []byte) []byte {
 	for {
 		n := throw2(t.file.Read(buf))
 
-		if n >= 4 && binary.BigEndian.Uint32(buf[:4]) == unix.AF_INET {
+		if n >= 4 && (binary.BigEndian.Uint32(buf[:4]) == unix.AF_INET || binary.BigEndian.Uint32(buf[:4]) == unix.AF_INET6) {
 			return buf[4:n]
 		}
 	}
 }
 
 func (t *Tun) write(packet []byte) {
-	out := make([]byte, 4, len(packet)+4)
+	if ipDestination(packet) == nil {
+		return
+	}
 
-	binary.BigEndian.PutUint32(out, unix.AF_INET)
+	out := make([]byte, 4, len(packet)+4)
+	family := uint32(unix.AF_INET)
+
+	if packet[0]>>4 == 6 {
+		family = unix.AF_INET6
+	}
+
+	binary.BigEndian.PutUint32(out, family)
 	throw2(t.file.Write(append(out, packet...)))
 }

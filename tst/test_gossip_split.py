@@ -102,7 +102,7 @@ def test():
         updates = [lib.edge(v, x, ident) for v in vertices]
         probe.send(op='ad', body=dict(edges=updates))
         lab.wait(lambda: all(present(edge) for edge in updates), 'large graph installed')
-        captured = lab.intercept('a', 'r', 'copy', source_port=7000, count=-1)
+        captured = lab.intercept('a', 'r', 'copy', target_port=7000, count=-1)
         cursor = 0
         rounds = []
         current = None

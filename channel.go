@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/json"
-	"net"
 	"time"
 )
 
@@ -14,30 +12,33 @@ type Snapshot struct {
 	local     map[uint64]*LocalAddress
 	owners    map[uint64]uint16
 	routes    map[uint64][]Edge
-	actors    map[Edge]chan any
+	channels  map[Edge]chan any
 	enabled   map[Edge]bool
 	gossip    [][]byte
 }
 
 type Received struct {
-	packet     []byte
-	at         time.Time
-	connection *Connection
+	packet []byte
+	at     time.Time
+	io     *ChannelIO
 }
 
 type Outbound struct{ inner []byte }
-type TunPacket struct{ ip []byte }
-
-type EdgeReport struct {
-	session    *Session
-	edge       Edge
-	peer       uint16
-	seen       time.Time
-	connection *ConnectionStatus
-	dialing    bool
+type TunPacket struct {
+	payload     []byte
+	destination uint64
 }
 
-type EdgeActor struct {
+type ChannelReport struct {
+	session *Session
+	edge    Edge
+	peer    uint16
+	seen    time.Time
+	status  *ChannelStatus
+	dialing bool
+}
+
+type Channel struct {
 	node         *Node
 	edge         Edge
 	peer         uint16
@@ -48,11 +49,11 @@ type EdgeActor struct {
 	packetID     uint64
 	seen         time.Time
 	nextRegistry time.Time
-	connection   *Connection
+	io           *ChannelIO
 	dial         <-chan DialResult
 }
 
-func (a *EdgeActor) run() {
+func (a *Channel) run() {
 	ticker := time.NewTicker(tickInterval)
 
 	defer ticker.Stop()
@@ -60,8 +61,8 @@ func (a *EdgeActor) run() {
 	for {
 		var closed <-chan struct{}
 
-		if a.connection != nil {
-			closed = a.connection.ctx.Done()
+		if a.io != nil {
+			closed = a.io.ctx.Done()
 		}
 
 		select {
@@ -88,19 +89,20 @@ func (a *EdgeActor) run() {
 				a.receive(v)
 			case Outbound:
 				a.send(v.inner)
-			case *Connection:
-				a.attachConnection(v)
+			case *ChannelIO:
+				a.attachIO(v)
 			}
 		case result := <-a.dial:
 			a.dial = nil
 
-			if result.conn != nil {
-				a.attachConnection(result.conn)
+			for _, io := range result.channels {
+				post(a.node.events.in, any(io))
 			}
 
 			a.report()
 		case <-closed:
-			a.connection = nil
+			a.io = nil
+			a.seen = time.Time{}
 			a.report()
 		case <-ticker.C:
 			a.report()
@@ -111,21 +113,30 @@ func (a *EdgeActor) run() {
 	}
 }
 
-func (a *EdgeActor) closeTransport() {
-	if a.connection != nil {
-		a.connection.stop()
-		a.connection = nil
+func (a *Channel) closeTransport() {
+	if a.io != nil {
+		a.io.stop()
+		a.io = nil
+		a.seen = time.Time{}
+		a.report()
 	}
 }
 
-func (a *EdgeActor) gossip() {
+func (a *Channel) gossip() {
 	if a.outgoing && a.view != nil && a.enabled() {
 		a.updateTransport()
 
-		if a.connection != nil && a.connection.source.Proto == "source" && a.connection.target.Proto == "udp" {
-			packet := bindingPacket(a.session, a.connection.source, a.connection.target, a.connection.id)
+		if a.io == nil {
+			a.startDial()
+		}
 
-			post(a.connection.queue.in, packet)
+		if a.io != nil && a.io.source.Proto == "source" && a.io.target.Proto == "udp" {
+			packet := bindingPacket(a.session, a.io.source, a.io.target, a.io.id)
+
+			select {
+			case a.io.queue.in <- packet:
+			case <-a.io.ctx.Done():
+			}
 		}
 
 		for _, inner := range a.view.gossip {
@@ -134,27 +145,27 @@ func (a *EdgeActor) gossip() {
 	}
 }
 
-func (a *EdgeActor) report() {
-	report := EdgeReport{session: a.session, edge: a.edge, peer: a.peer, seen: a.seen, dialing: a.dial != nil}
+func (a *Channel) report() {
+	report := ChannelReport{session: a.session, edge: a.edge, peer: a.peer, seen: a.seen, dialing: a.dial != nil}
 
-	if a.connection != nil {
-		report.connection = &ConnectionStatus{Transport: a.connection.transport(), Edge: connectionKey(a.edge), Origin: a.connection.origin, ID: a.connection.id}
+	if a.io != nil && a.io.ctx.Err() == nil {
+		report.status = &ChannelStatus{Transport: a.io.transport(), Edge: a.edge, Outgoing: a.outgoing, ID: a.io.id}
 	}
 
 	post(a.node.events.in, any(report))
 }
 
-func (a *EdgeActor) enabled() bool {
-	return a.view != nil && a.view.local[a.edge.From] != nil && (a.view.enabled[a.edge] || a.connection != nil)
+func (a *Channel) enabled() bool {
+	return a.view != nil && a.view.local[a.edge.From] != nil && (a.view.enabled[a.edge] || (a.io != nil && a.io.write != nil))
 }
 
-func (a *EdgeActor) updateTransport() {
-	if a.outgoing && !a.enabled() {
+func (a *Channel) updateTransport() {
+	if a.view == nil || (a.outgoing && !a.enabled()) || (!a.outgoing && a.view.local[a.edge.To] == nil) {
 		a.closeTransport()
 	}
 }
 
-func (a *EdgeActor) send(inner []byte) {
+func (a *Channel) send(inner []byte) {
 	if a.view == nil || !a.outgoing || !a.enabled() {
 		return
 	}
@@ -163,17 +174,17 @@ func (a *EdgeActor) send(inner []byte) {
 
 	packet := a.session.seal(inner, a.packetID)
 
-	a.sendConnection(packet)
+	a.sendChannel(packet)
 }
 
-func (a *EdgeActor) receive(r Received) {
+func (a *Channel) receive(r Received) {
 	if a.outgoing || a.view == nil || a.view.local[a.edge.To] == nil || len(r.packet) < headerTransport {
 		return
 	}
 
-	if r.connection != nil {
+	if r.io != nil {
 		select {
-		case <-r.connection.ctx.Done():
+		case <-r.io.ctx.Done():
 			return
 		default:
 		}
@@ -204,12 +215,6 @@ func (a *EdgeActor) receive(r Received) {
 	}
 
 	switch inner[0] {
-	case innerBinding:
-		var binding Binding
-
-		if json.Unmarshal(inner[1:], &binding) == nil && !binding.Reply && binding.From.hash() == a.edge.From && binding.To.hash() == a.edge.To {
-			post(a.view.actors[Edge{From: a.edge.To, To: a.edge.From}], any(Outbound{inner: bindingInner(Binding{From: binding.To, To: binding.From, Reply: true})}))
-		}
 	case innerEdges:
 		a.edges(inner)
 	case innerVertices:
@@ -223,7 +228,7 @@ func (a *EdgeActor) receive(r Received) {
 	}
 }
 
-func (a *EdgeActor) edges(inner []byte) {
+func (a *Channel) edges(inner []byte) {
 	updates, ok := decodeEdges(inner)
 
 	if !ok {
@@ -239,7 +244,7 @@ func (a *EdgeActor) edges(inner []byte) {
 	}
 }
 
-func (a *EdgeActor) vertices(inner []byte) {
+func (a *Channel) vertices(inner []byte) {
 	vertices, ok := decodeVertices(inner)
 
 	if !ok {
@@ -257,24 +262,45 @@ func (a *EdgeActor) vertices(inner []byte) {
 	}
 }
 
-func (a *EdgeActor) forward(inner []byte) {
+func (a *Channel) forward(inner []byte) {
 	d, ok := decodeData(inner)
 
 	if !ok || d.path[d.cursor] != a.edge {
 		return
 	}
 
-	if d.cursor == len(d.path)-1 {
-		if validIPv4(d.ip) && udpVertex(net.IP(d.ip[16:20]), 0).hash() == a.view.registry.byIndex[a.node.cfg.Index].vertex().hash() {
-			post(a.node.tunWrites.in, d.ip)
+	d.cursor++
+	a.node.routeData(a.view, d, inner)
+}
+
+func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
+	me := view.registry.byIndex[n.cfg.Index].vertex().hash()
+	local := func(id uint64) bool { return id == me || view.local[id] != nil }
+
+	for d.cursor < len(d.path) {
+		edge := d.path[d.cursor]
+
+		if !local(edge.From) {
+			return
 		}
 
-		return
+		if !local(edge.To) {
+			advanceCursor(inner, d.cursor)
+			post(view.channels[edge], any(Outbound{inner: inner}))
+
+			return
+		}
+
+		if !view.graph[edge].Alive {
+			return
+		}
+
+		d.cursor++
 	}
 
-	d.cursor++
-	advanceCursor(inner, d.cursor)
-	post(a.view.actors[d.path[d.cursor]], any(Outbound{inner: inner}))
+	if d.path[len(d.path)-1].To == me {
+		post(n.tunWrites.in, d.payload)
+	}
 }
 
 func (n *Node) readTun() {
@@ -283,8 +309,8 @@ func (n *Node) readTun() {
 	for {
 		packet := n.tun.read(buf)
 
-		if validIPv4(packet) {
-			post(n.tunInbox.in, any(TunPacket{ip: append([]byte(nil), packet...)}))
+		if destination := ipDestination(packet); destination != nil {
+			post(n.tunInbox.in, any(TunPacket{payload: append([]byte(nil), packet...), destination: udpVertex(destination, 0).hash()}))
 		}
 	}
 }
@@ -301,10 +327,12 @@ func (n *Node) tunLoop() {
 				continue
 			}
 
-			path := view.routes[udpVertex(net.IP(v.ip[16:20]), 0).hash()]
+			path := view.routes[v.destination]
 
 			if len(path) != 0 {
-				post(view.actors[path[0]], any(Outbound{inner: encodeData(&Data{path: path, ip: v.ip})}))
+				d := &Data{path: path, payload: v.payload}
+
+				n.routeData(view, d, encodeData(d))
 			}
 		}
 	}

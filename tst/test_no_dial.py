@@ -62,15 +62,18 @@ def test():
         exported = json.loads(body)
         assert 'no_dial' not in exported and 'key' not in exported
 
+        udp_back = [lab.intercept('a', 'b', 'observe', seg=s, target_port=7000, count=-1) for s in [1, 3]]
         lab.stop_node('b')
         lab.configs['b']['no_dial'] = []
         lab.start_node('b')
         lab.wait(lambda: all(lab.traffic(a, b, seg) > 0
-                            for a, b in [('a', 'b'), ('b', 'a')] for seg in [1, 3]),
-                 'the reverse dial and its return traffic are allowed')
+                            for a, b in [('b', 'a')] for seg in [1, 3]),
+                 'the independently enabled reverse direction sends packets')
+        time.sleep(2)
+        assert all(rule['hits'] == 0 for rule in udp_back), 'receiving UDP created a return channel'
         lab.wait_ping('a', 'b')
         status = lab.status('a')
-        for connection in status['connections']:
+        for connection in status['channels']:
             vertices = [status['addresses'][str(connection[k])] for k in ['from', 'to']]
             for source, target in [vertices, vertices[::-1]]:
                 if source['proto'] == 'source' and source.get('node') == 1:

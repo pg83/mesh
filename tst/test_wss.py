@@ -11,7 +11,7 @@ def test():
     lab.intercept('b', 'a', 'drop', syn=True, count=-1)
     with lab:
         time.sleep(3)
-        assert not lab.connections('a') and not lab.connections('b'), 'untrusted certificate accepted'
+        assert not lab.channels('a') and not lab.channels('b'), 'untrusted certificate accepted'
         lab.stop_node('a')
         invalid_ca = lab.dir / 'invalid-ca.pem'
         invalid_ca.write_text('not a PEM certificate\n')
@@ -30,7 +30,7 @@ def test():
             else:
                 os.environ['SSL_CERT_FILE'] = previous
         time.sleep(3)
-        assert not lab.connections('a') and not lab.connections('b'), 'invalid CA accepted'
+        assert not lab.channels('a') and not lab.channels('b'), 'invalid CA accepted'
         lab.stop_node('a')
         del lab.configs['a']['registry']
         lab.trusted = True

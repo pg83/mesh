@@ -31,35 +31,36 @@ type SocketKey struct {
 type LocalAddress struct {
 	address SocketAddress
 	iface   int
+	receive bool
 }
 
 type Node struct {
-	cfg        *Config
-	reg        *Registry
-	key        DHKey
-	log        *slog.Logger
-	subnet     *net.IPNet
-	sockets    map[SocketKey]*UDPSocket
-	listeners  map[string]*WSListener
-	tlsCA      map[uint64]string
-	noDial     map[DialPair]bool
-	endpoints  []ListenerBinding
-	tun        *Tun
-	events     *Mailbox[any]
-	tunInbox   *Mailbox[any]
-	tunWrites  *Mailbox[[]byte]
-	actors     map[Edge]*EdgeActor
-	snapshot   *Snapshot
-	connection map[Edge]ConnectionStatus
-	dialing    map[Edge]bool
-	packetID   uint64
-	graph      map[Edge]State
-	owned      map[Edge]bool
-	observed   map[Edge]time.Time
-	local      map[uint64]*LocalAddress
-	addresses  map[uint64]Vertex
-	owners     map[uint64]uint16
-	routes     map[uint64][]Edge
+	cfg           *Config
+	reg           *Registry
+	key           DHKey
+	log           *slog.Logger
+	subnet        *net.IPNet
+	sockets       map[SocketKey]*UDPSocket
+	listeners     map[string]*WSListener
+	tlsCA         map[uint64]string
+	noDial        map[DialPair]bool
+	endpoints     []ListenerBinding
+	tun           *Tun
+	events        *Mailbox[any]
+	tunInbox      *Mailbox[any]
+	tunWrites     *Mailbox[[]byte]
+	channels      map[Edge]*Channel
+	snapshot      *Snapshot
+	channelStatus map[Edge]ChannelStatus
+	dialing       map[Edge]bool
+	packetID      uint64
+	graph         map[Edge]State
+	owned         map[Edge]bool
+	observed      map[Edge]time.Time
+	local         map[uint64]*LocalAddress
+	addresses     map[uint64]Vertex
+	owners        map[uint64]uint16
+	routes        map[uint64][]Edge
 }
 
 func newNode(cfg *Config, log *slog.Logger) *Node {
@@ -73,13 +74,13 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	dh := deriveKey(decodeKey(cfg.Key))
 
 	n := &Node{
-		events: newMailbox[any](nil), tunInbox: newMailbox[any](nil), tunWrites: newMailbox[[]byte](nil), actors: map[Edge]*EdgeActor{},
+		events: newMailbox[any](nil), tunInbox: newMailbox[any](nil), tunWrites: newMailbox[[]byte](nil), channels: map[Edge]*Channel{},
 		cfg: cfg, reg: reg, key: dh, log: log,
 		graph: map[Edge]State{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
 		owners:   map[uint64]uint16{},
 		routes:   map[uint64][]Edge{},
 		packetID: uint64(time.Now().UnixNano()), addresses: map[uint64]Vertex{},
-		connection: map[Edge]ConnectionStatus{}, dialing: map[Edge]bool{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
+		channelStatus: map[Edge]ChannelStatus{}, dialing: map[Edge]bool{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
 		noDial: map[DialPair]bool{},
 	}
 

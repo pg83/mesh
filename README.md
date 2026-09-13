@@ -92,10 +92,10 @@ Old configurations must be converted to this format.
 
 `no_dial` is an optional local list of directed IP pairs, for example
 `[{"from":"10.0.0.64","to":"10.0.0.68"}]`. A pair disables initiating
-connections from that local IP to endpoints with that literal destination IP,
+outgoing channels from that local IP to endpoints with that literal destination IP,
 regardless of port or transport. IPv4 and IPv6 addresses are matched exactly;
-there are no subnets or DNS matching. Incoming connections and their return
-traffic are allowed. To stop both nodes initiating, configure each direction
+there are no subnets or DNS matching. Incoming channels are allowed. An accepted WS connection can provide a separate
+return channel; receiving UDP never creates one. To stop both nodes initiating, configure each direction
 on its source node. These rules are not exchanged in the registry or included
 in exported configurations.
 
@@ -118,23 +118,24 @@ closes when the address disappears. Loopback binds are allowed explicitly;
 wildcards do not advertise loopback. Link-local and mesh-subnet addresses are excluded.
 Multiple paths or duplicate declarations can share an explicitly configured listener.
 
-Outgoing connections are created for eligible interface addresses and known remote
-endpoints. Their local UDP/TCP port is assigned by the OS; UDP never reuses a
-configured listener's port to initiate a connection. Each socket has its own I/O.
-The graph distinguishes ingress endpoints, host vertices, and source vertices
-identified by node index and local IP. A source vertex is not a dial target; its
-identity remains stable across reconnections with different ephemeral ports.
-Accepted connections carry reverse traffic through the same socket.
+Outgoing channels are created for eligible interface addresses and known remote
+endpoints. The OS assigns their local UDP/TCP port. UDP never reuses a configured
+listener's port for outgoing traffic. The graph distinguishes ingress endpoints,
+host vertices, and source vertices identified by node index and local IP.
+Source vertices are not dial targets and remain stable when ephemeral ports change.
 
-UDP begins with an authenticated binding naming the source vertex and destination
-endpoint. The receiver connects a socket from the addressed listener port to the
-observed sender address. The initiator repeats its binding with periodic gossip;
-it sends immediately without waiting for a reply, preserving one-way UDP links.
-Registry, graph updates and IP packets can travel in both directions on accepted
-connections. Learned source addresses never become advertised listeners.
+All transport traffic goes through a directed `Channel` with its own protocol actor.
+UDP has no connection abstraction: an outgoing channel writes datagrams from an
+unconnected socket; a listening socket dispatches datagrams to receiving channels.
+The first authenticated binding names the source vertex and destination endpoint.
+Bindings repeat with periodic gossip to recover lost initial packets. The receiver
+sends no binding reply, gossip, registry or data back through that channel.
+Return traffic requires an independently created outgoing channel to a known listener,
+or another route through the mesh. UDP-only nodes need a reachable advertised listener
+for return traffic; WS/WSS clients can receive through an outgoing connection without one.
 
-Each directed transport edge has a goroutine and an unbounded FIFO mailbox. Edge actors
-handle authentication, gossip and forwarding directly to the next edge actor;
+Each Channel has a goroutine and an unbounded FIFO mailbox. Channel actors
+handle authentication, gossip and forwarding directly to the next channel;
 inactive candidates remain available for rediscovery. One graph goroutine merges
 observations and advertisements and periodically publishes a shared immutable
 snapshot, including routes, to the actors and TUN. Each mailbox has a channel-driven
@@ -152,13 +153,12 @@ The example above uses two different addresses and two different ports:
 
 The router forwards inbound UDP to `192.168.1.20:7001` and translates
 replies from that pair to `203.0.113.10:17001`. Configure that
-mapping on the router separately; mesh does not configure NAT. Correct
-outbound translation matters too: peers must observe the advertised source
-pair. Outgoing connections use ordinary dynamic NAT mappings and ephemeral ports. The graph uses the public endpoint for the accepting side;
-its private pair is used only to send and receive packets. To use the LAN
+mapping on the router separately; mesh does not configure NAT. Outgoing channels use ordinary dynamic NAT mappings and ephemeral ports.
+The graph uses the public endpoint for the receiving side; its private pair is
+used to receive the forwarded datagrams. To use the LAN
 address directly too, keep the separate port-7000 entry shown above.
 
-WS/WSS uses the same endpoint shape. Each connection carries both directions.
+WS/WSS uses the same endpoint shape. Each connection backs two independent directed channels.
 For native TLS, set `tls_cert` and `tls_key` on the local endpoint. The client
 checks the certificate and advertised hostname/IP against system trust roots;
 `tls_ca` on a registry endpoint adds a private CA bundle. TLS files are local
@@ -193,11 +193,11 @@ there is no separate advertisement signature or signing key.
 
 All multibyte integers in the mesh protocol use little-endian order.
 Encapsulated IP packets retain their standard network format. The key
-context is `mesh/11`; upgrade all peers together. Releases through 12 use earlier wire formats and cannot exchange traffic with this
+context is `mesh/12`; upgrade all peers together. Releases through 13 use earlier channel semantics or wire formats and cannot exchange traffic with this
 version. Update peers together.
 
 Each registered pair derives a shared secret with X25519 and directional
-keys with HKDF-SHA256. The context contains `mesh/11`, the sender's public key
+keys with HKDF-SHA256. The context contains `mesh/12`, the sender's public key
 and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
@@ -210,14 +210,19 @@ and the receiver's public key. There is no handshake or forward secrecy.
 The header is authenticated as associated data. Every packet gets a fresh
 random nonce, including after a process restart.
 
-Inner data starts with `1`, hop count (1), cursor (1), then the route. Each
-hop is a pair of endpoints: source vertex hash (8), destination vertex hash (8). The original IP packet follows. At most 16 transport
-hops are allowed. A relay checks the receiving pair against the route,
-advances the cursor, and sends from the exact next source endpoint to the
-exact next destination. Local delivery verifies the destination mesh IP.
+Inner data starts with `1`, edge count (1), cursor (1), then the route. Each
+edge is a pair of vertices: source vertex hash (8), destination vertex hash (8). The opaque payload follows. The complete route includes the source and destination
+mesh vertices and all local attachment edges. Routes allow at most 16 network
+hops and 48 total edges. Disconnected, zero-length and malformed paths are rejected.
+A relay checks its receiving channel against the current edge, follows the explicit
+local edges, and sends through the next outgoing channel. Local edges must be
+currently available. Only a path ending at the node's TUN vertex delivers to TUN.
+The transport never reads the payload to find an address or choose a destination.
+The TUN adapter handles IPv4/IPv6 packet framing and destination lookup on ingress;
+node address allocation in the current registry remains IPv4.
 
 Edges and vertices are sent in separate packet types every second. Each vertex
-appears once per round on a connection. An edge whose source or destination is
+appears once per round on an outgoing channel. An edge whose source or destination is
 unknown is discarded; a later round can deliver it after the vertices arrive.
 
 Inner edges start with `2`, edge count (2), followed by the edges. Each edge is 25 bytes:
@@ -245,7 +250,7 @@ an older one. Gossip remains periodic, once per second.
 
 A WebSocket binary message contains one mesh transport packet. The first
 packet on a connection contains inner type `3` followed by a JSON binding
-with source and destination vertex descriptions. A response has `reply: true`.
+with source and destination vertex descriptions. The WS handshake response has `reply: true`. UDP does not send a reply.
 The source must name the authenticated sender; the destination must be an
 explicit local listener. The same binding is used for UDP. Both ends validate
 this binding with the existing derived keys; no new session keys are negotiated.
@@ -270,24 +275,31 @@ descriptions with the same hash fail explicitly.
 
 The graph remains a map of directed endpoint pairs;
 registry indexes identify encryption keys, not graph vertices. An internal
-mesh address is represented as `(meshIP, 0)`. Each host supplies both edges
-between that vertex and each of its advertised transport endpoints with an active local binding. It withdraws
-its obsolete local attachments, including those learned after a restart. Static
-registry addresses are discovery candidates, not evidence of a live edge.
+mesh address is represented as `(meshIP, 0)`. Local graph edges describe actual input/output directions. An open listener
+advertises `endpoint -> meshIP` before accepting any peer. An outgoing channel
+adds `meshIP -> local source`; an incoming channel adds `local destination -> meshIP`.
+The graph owner takes the union of these capabilities, so closing one channel
+cannot withdraw a direction still provided by another channel or listener.
+A WS return channel can add `meshIP -> listener` on the server and
+`source -> meshIP` on the client. Neither direction is implied by the address or
+transport name. Obsolete local edges, including those learned after a restart,
+are withdrawn independently. Static registry addresses are discovery candidates,
+not evidence of a live network edge.
 
-Receiving an authenticated packet observes precisely its UDP
-source and destination pair. Connected sockets identify the pair directly;
-discovery uses socket packet metadata. The local address is translated to the
-configured public pair for a forwarded endpoint. That incoming edge remains locally alive while packets arrive,
-and is withdrawn after five seconds of silence. The reverse edge is
-independent. Any accepted data or gossip packet refreshes the observation.
+Receiving an authenticated packet observes precisely its directed channel.
+UDP discovery obtains the local destination from socket packet metadata and
+checks the binding against that listener. Subsequent packets are dispatched by
+sender address, destination address and peer identity, then authenticated by
+the receiving channel. A forwarded listener uses its configured public endpoint
+in the graph. The observed edge expires after five seconds without packets;
+closing its channel withdraws it without inventing the reverse edge.
 
-Every second each host sends its known graph through all combinations of
-local endpoints and candidate remote endpoints. Candidates come from the
-registry, graph endpoint ownership, and authenticated source addresses.
-Learned addresses within the mesh subnet are filtered. Sending uses the
-selected source address and interface through UDP socket control metadata.
-Discovery does not depend on an existing route or a reverse connection.
+Every second each host sends its known graph on outgoing channels only.
+Dial candidates combine local source addresses with remote listening endpoints
+from the registry and learned graph. Learned source vertices are never listeners.
+Addresses within the mesh subnet are filtered. UDP writes use the selected source
+address and interface through socket control metadata. Establishing a channel
+is independent of graph payload availability and of any reverse channel.
 
 Gossip merges each directed pair independently. An omitted pair is unchanged;
 a newer record replaces an older version of that pair. Receiving gossip updates
@@ -299,8 +311,8 @@ parts of the graph is not implemented.
 Local observations generate fresh versions each second.
 
 BFS follows the directed endpoint graph, with stable endpoint ordering for
-identical path lengths. The resulting path is compiled into concrete transport
-hops; movements between endpoints on the same host require no packet. The
+identical path lengths. The complete path is carried unchanged, including local attachment edges;
+movements between endpoints on the same host require no network packet. The
 return path is computed independently. There is no separate per-host
 endpoint selector. Graph changes and the one-second local observation pass
 rebuild routes.
@@ -309,20 +321,20 @@ Status exposes incoming endpoint pairs, the live graph, its vertices, and
 routes keyed by destination endpoint. Each edge reports its latest observation
 periodically; the graph owner publishes immutable snapshots through the same
 mailboxes used for packets.
-WS connections are indexed by an unordered endpoint pair, so incoming and
-outgoing routes use one connection. Simultaneous dials prefer the connection
-initiated by the smaller endpoint hash; duplicate attempts from that same
-endpoint prefer the larger first-packet ID. A sole working connection stays
-open regardless of initiator. There is at most one pending dial per pair,
-and a new timer tick never restarts that attempt. Each WS connection has a
-reader and writer, with an unbounded outgoing mailbox so a stalled write does
-not block other transports. Closing a connection releases its pending queue. Dial, HTTP upgrade, authentication
-exchange, and socket writes run independently of graph updates. Old connection
-cleanup cannot remove its replacement. Five seconds of silence withdraws
-incoming liveness independently of TCP connection state.
-Status also shows selected WS connections (pair, initiator, first-packet ID)
-and the number of pending dials. Crypto keys stay
-shared across a peer's endpoints and survive local link expiry. Transport duplicate detection is not implemented.
+Channel identity is a directed endpoint pair. Duplicate WS attachments prefer
+the smaller origin hash, then the larger initial packet ID, independently for each
+direction. There is at most one pending dial per candidate channel. Accepted WS
+connections stay private to the transport and supply a writer and a reader to
+separate channels. Each channel can stop or be replaced without stopping its sibling.
+Only after both channels are closed is the shared WS socket released. The reader
+continues draining WS frames when its mesh receive channel is closed, and closing
+one channel does not cancel the shared socket context. Socket failures are handled
+by the affected reader/writer. Writes use an unbounded mailbox and run independently
+of graph updates. Closing a channel discards its pending queue.
+Status exposes `channels` with directed `from`, `to`, `transport`, `outgoing` and
+attachment `id`, plus the number of pending dials. It exposes no connections.
+Crypto keys are shared across a peer's channels and survive local link expiry.
+Transport duplicate detection is not implemented.
 
 ## Development
 

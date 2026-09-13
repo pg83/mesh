@@ -17,26 +17,26 @@ class Paths(ws.Lab):
 def test():
     with Paths() as lab:
         lab.wait_ping('a', 'b')
-        lab.wait(lambda: len(lab.connections('a')) == len(lab.connections('b')) == 3,
+        lab.wait(lambda: len(lab.channels('a')) == len(lab.channels('b')) == 6,
                  'two paths remain distinct connections')
         workload.udp_server(lab, 'b')
         client = workload.UdpClient(lab, 'a', 'b')
         client.send(b'before-restart')
         assert client.recv() == b'before-restart'
-        old = lab.connections('a')
+        old = lab.channels('a')
         lab.stop_node('b')
         lab.second_only = True
         lab.configs['b'] = dict(endpoint=[])
         lab.start_node('b')
         lab.wait_ping('a', 'b')
-        lab.wait(lambda: len(lab.connections('a')) == len(lab.connections('b')) == 2,
+        lab.wait(lambda: len(lab.channels('a')) == len(lab.channels('b')) == 4,
                  'old reader cannot delete replacement connection')
         # A successful ping may use B's accepted connection in reverse before
         # gossip has installed the replacement outgoing route from A.
         lab.wait(lambda: (path := lab.endpoint_route('a', 'b'))
                  and path[0]['to'].get('path') == '/other?channel=2',
                  'replacement outgoing route uses the surviving path')
-        assert lab.connections('a') != old
+        assert lab.channels('a') != old
         client.send(b'after-restart')
         assert client.recv() == b'after-restart'
 

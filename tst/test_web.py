@@ -63,7 +63,7 @@ def test():
         lab.stop_node('mini')
         key = lab.dir / 'mini.key'
         key.write_text(lab.nodes['mini'].keys['key'])
-        lab.configs['mini'] = dict(cfg, key='')
+        lab.configs['mini'] = dict(cfg, key='', endpoint=[lib.endpoint('0.0.0.0')])
         lab.run_args['mini'] = ['-key-file', str(key)]
         lab.start_node('mini')
         lab.wait_ping('mini', 'work')
@@ -72,7 +72,7 @@ def test():
         lab.block('a', 'work')
         lab.wait_route('a', 'work', ['mini', 'work'])
         topo = json.loads(get('/api/topology')[1])
-        assert len(topo['routes'][lib.intip(3) + ':0']) == 2
+        assert len(topo['routes'][lib.intip(3) + ':0']) == 6
         if python := os.environ.get('MESH_TEST_BROWSER_PYTHON'):
             lab.run('a', [python, str(lib.Path(__file__).with_name('browser.py'))],
                     timeout=90, capture_output=False)

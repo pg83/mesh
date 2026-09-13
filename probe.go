@@ -51,6 +51,8 @@ func main() {
 
 	var sendPacket func([]byte, bool)
 	var ws *websocket.Conn
+	var halves *WSConnection
+	var received *Mailbox[any]
 
 	if strings.HasPrefix(os.Args[2], "ws") {
 		ws, _ = throw3(websocket.Dial(context.Background(), os.Args[2], nil))
@@ -74,25 +76,8 @@ func main() {
 
 		source := sourceVertex(cfg.Index, conn.LocalAddr().(*net.UDPAddr).IP)
 		first := bindingPacket(session, source, udpVertex(remote.IP, remote.Port), packetID)
-		deadline := time.Now().Add(5 * time.Second)
 
-		for {
-			throw2(conn.Write(first))
-			throw(conn.SetReadDeadline(time.Now().Add(300 * time.Millisecond)))
-
-			buf := make([]byte, maxPacket)
-			n, err := conn.Read(buf)
-
-			if err == nil {
-				if body, ok := session.open(buf[:n]); ok && len(body) > 0 && body[0] == innerBinding {
-					break
-				}
-			}
-
-			if time.Now().After(deadline) {
-				throwFmt("UDP probe handshake timed out")
-			}
-		}
+		throw2(conn.Write(first))
 
 		sendPacket = func(packet []byte, text bool) { throw2(conn.Write(packet)) }
 	}
@@ -117,6 +102,35 @@ func main() {
 		var out []byte
 
 		switch command.Op {
+		case "wrap":
+			var binding Binding
+			throw(json.Unmarshal(command.Body, &binding))
+			halves = newWSConnection(ws, session, binding.From, binding.To, binding.From.hash(), packetID)
+			received = newMailbox[any](halves.done)
+			go halves.receive.read(received.in)
+			sendPacket = func(packet []byte, text bool) {
+				throw(halves.send.ctx.Err())
+				halves.send.write(context.Background(), packet)
+			}
+			throw(encoder.Encode(map[string]bool{"wrapped": true}))
+
+			continue
+		case "stop-send", "stop-receive":
+			if command.Op == "stop-send" {
+				halves.send.stop()
+			} else {
+				halves.receive.stop()
+			}
+
+			closed := halves.send.ctx.Err() != nil && halves.receive.ctx.Err() != nil
+
+			if closed {
+				<-halves.done
+			}
+
+			throw(encoder.Encode(map[string]bool{"closed": closed}))
+
+			continue
 		case "read":
 		case "raw":
 			out = throw2(hex.DecodeString(command.Hex))
@@ -160,9 +174,26 @@ func main() {
 
 		if command.Read {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, packet, err := ws.Read(ctx)
 
-			report["closed"] = err != nil && ctx.Err() == nil
+			var packet []byte
+
+			if halves == nil {
+				_, p, err := ws.Read(ctx)
+
+				packet = p
+				report["closed"] = err != nil && ctx.Err() == nil
+			} else {
+				select {
+				case message := <-received.out:
+					packet = message.(Received).packet
+					report["closed"] = false
+				case <-halves.done:
+					report["closed"] = true
+				case <-ctx.Done():
+					throw(ctx.Err())
+				}
+			}
+
 			cancel()
 			report["hex"] = hex.EncodeToString(packet)
 		}

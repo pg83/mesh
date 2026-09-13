@@ -9,8 +9,6 @@ def test():
     with nat.Lab() as lab:
         lab.wait_ping('a', 'b')
         lab.wait_ping('b', 'a')
-        # Ping can already use an accepted connection in reverse while the
-        # independently initiated path is still being learned through gossip.
         lab.wait(lambda: lab.selected_endpoint('a', 'b') in ('198.51.100.2:17001', '198.51.100.2:17002')
                  and lab.selected_endpoint('b', 'a') == '198.51.100.1:18001',
                  'both outgoing routes through the advertised mappings')
@@ -27,7 +25,7 @@ def test():
             assert packet[12:16] == bytes([198, 51, 100, 1])
             assert packet[16:20] == bytes([10, 2, 0, 2])
             src, dst = struct.unpack_from('!HH', packet, (packet[0] & 15) * 4)
-            assert (src == 18001 and dst not in (7001, 7002)) or (src != 18001 and dst in (7001, 7002))
+            assert src != 18001 and dst in (7001, 7002)
         # The receiving graph names public endpoints, not translated socket pairs.
         for name in ['a', 'b']:
             links = lab.status(name)['links']

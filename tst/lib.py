@@ -125,6 +125,7 @@ class Lab:
         self.lock = threading.RLock()
         self.rules = []
         self.blocked = set()
+        self.fragments = {}
         self.forwards = {}  # public UDP pair -> (node name, segment, local IP bytes, local port)
         self.counts = collections.Counter()
         self.delayed = []
@@ -295,6 +296,44 @@ class Lab:
         struct.pack_into('!H', packet, 10, ~checksum & 0xffff)
         return out, bytes(packet)
 
+    def reassemble(self, fd, packet):
+        if packet[0] >> 4 != 4:
+            return packet
+        flags, = struct.unpack_from('!H', packet, 6)
+        if not flags & 0x3fff:
+            return packet
+        now = time.monotonic()
+        self.fragments = {k: v for k, v in self.fragments.items() if now-v['at'] < 10}
+        key = (fd, packet[4:6], packet[9], packet[12:20])
+        state = self.fragments.setdefault(key, dict(at=now, parts={}, header=None, size=None))
+        head = (packet[0] & 15)*4
+        offset = (flags & 0x1fff)*8
+        state['parts'][offset] = packet[head:]
+        if offset == 0:
+            state['header'] = packet[:head]
+        if not flags & 0x2000:
+            state['size'] = offset+len(packet)-head
+        if state['header'] is None or state['size'] is None:
+            return None
+        body = bytearray()
+        for offset, part in sorted(state['parts'].items()):
+            if offset != len(body):
+                return None
+            body.extend(part)
+        if len(body) != state['size']:
+            return None
+        del self.fragments[key]
+        packet = bytearray(state['header'])+body
+        struct.pack_into('!H', packet, 6, 0)
+        struct.pack_into('!H', packet, 2, len(packet))
+        packet[10:12] = b'\0\0'
+        head = (packet[0] & 15)*4
+        checksum = sum(struct.unpack('!'+'H'*(head//2), packet[:head]))
+        while checksum >> 16:
+            checksum = (checksum & 0xffff)+(checksum >> 16)
+        struct.pack_into('!H', packet, 10, ~checksum & 0xffff)
+        return bytes(packet)
+
     def switch(self):
         try:
             fds = list(self.tuns)
@@ -309,6 +348,9 @@ class Lab:
                         packet = os.read(fd, 65536)
                         version = packet[0] >> 4
                         if len(packet) < (40 if version == 6 else 20) or version not in (4, 6):
+                            continue
+                        packet = self.reassemble(fd, packet)
+                        if packet is None:
                             continue
                         seg, src = self.tuns[fd]
                         out, packet = self.route_packet(src.name, seg, packet)
@@ -653,8 +695,18 @@ class Lab:
         path = self.endpoint_route(src, dst)
         return [by_address[endpoint_address(hop['to'])] for hop in path] if path else None
 
-    def endpoint_route(self, src, dst):
+    def full_route(self, src, dst):
         return self.status(src)['routes'].get(intip(self.nodes[dst].index) + ':0')
+
+    def endpoint_route(self, src, dst):
+        path = self.full_route(src, dst)
+        if path is None:
+            return None
+        assert path[0]['from'] == endpoint(intip(self.nodes[src].index), 0), path
+        assert path[-1]['to'] == endpoint(intip(self.nodes[dst].index), 0), path
+        def host(ep):
+            return ep['proto'] == 'udp' and ep['port'] == 0
+        return [edge for edge in path if not host(edge['from']) and not host(edge['to'])]
 
     def selected_endpoint(self, src, dst):
         path = self.endpoint_route(src, dst)

@@ -34,7 +34,11 @@ def test():
         probe.finish()
         probe = ws.Probe(lab)
         assert not probe.send(op='binding', body={'from': a, 'to': b}, read=True)['closed']
-        assert probe.send(op='raw', hex='00', text=True, read=True)['closed']
+        probe.send(op='raw', hex='00', text=True)
+        lab.wait(lambda: not any(c['from'] == lib.endpoint_hash(a) and not c['outgoing']
+                                for c in lab.status('b')['channels']), 'only incoming channel closed')
+        assert any(c['to'] == lib.endpoint_hash(a) and c['outgoing'] for c in lab.status('b')['channels'])
+        assert not probe.send(op='read', read=True)['closed'], 'reverse channel stopped after invalid input'
         probe.finish()
 
         # A stale connection attempt must not replace the established channel
@@ -43,8 +47,8 @@ def test():
         ident = time.time_ns() + 1_000_000_000
         assert not first.send(op='binding', body={'from': a, 'to': b}, id=ident, read=True)['closed']
         def connected_id():
-            return [connection['id'] for connection in lab.status('b')['connections']
-                    if connection['origin'] == lib.endpoint_hash(a)]
+            return [connection['id'] for connection in lab.status('b')['channels']
+                    if connection['from'] == lib.endpoint_hash(a) and not connection['outgoing']]
         lab.wait(lambda: connected_id() == [ident], 'new authenticated connection installed')
         stale = ws.Probe(lab)
         stale.send(op='binding', body={'from': a, 'to': b}, id=ident - 1, read=True)

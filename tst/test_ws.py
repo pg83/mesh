@@ -15,7 +15,7 @@ def test():
         lab.release(b)
         lab.wait_ping('a', 'b')
         lab.wait(lambda: lab.connection_count(2), 'both connections at both peers and in the kernel')
-        selected = lab.connections('a')
+        selected = lab.channels('a')
         for name in ['a', 'b']:
             workload.udp_server(lab, name)
         clients = [workload.UdpClient(lab, 'a', 'b'), workload.UdpClient(lab, 'b', 'a')]
@@ -26,7 +26,7 @@ def test():
                 assert client.recv() == payload
             time.sleep(1)
             assert lab.connection_count(2)
-            assert lab.connections('a') == selected, 'working connection was replaced'
+            assert lab.channels('a') == selected, 'working connection was replaced'
 
 
 lib.main(test)

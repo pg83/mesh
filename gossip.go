@@ -55,7 +55,7 @@ func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalAddress {
 				n.remember(public.vertex())
 			}
 
-			binding := &LocalAddress{address: wire, iface: addr.iface}
+			binding := &LocalAddress{address: wire, iface: addr.iface, receive: true}
 
 			local[public.hash()] = binding
 		}
@@ -68,9 +68,22 @@ func (n *Node) refresh(now time.Time) {
 	desired := map[Edge]bool{}
 	me := n.reg.byIndex[n.cfg.Index].vertex().hash()
 
-	for ep := range n.local {
-		desired[Edge{From: me, To: ep}] = true
-		desired[Edge{From: ep, To: me}] = true
+	for ep, local := range n.local {
+		if local.receive {
+			desired[Edge{From: ep, To: me}] = true
+		}
+	}
+
+	for edge, channel := range n.channelStatus {
+		if channel.Outgoing {
+			if n.local[edge.From] != nil {
+				desired[Edge{From: me, To: edge.From}] = true
+			}
+		} else {
+			if n.local[edge.To] != nil {
+				desired[Edge{From: edge.To, To: me}] = true
+			}
+		}
 	}
 
 	for edge, received := range n.observed {
@@ -83,7 +96,7 @@ func (n *Node) refresh(now time.Time) {
 	}
 
 	for edge, record := range n.graph {
-		if record.Alive && !desired[edge] && (n.owned[edge] || edge.From == me || edge.To == me || n.excludesDial(n.addresses[edge.From], n.addresses[edge.To]) || n.excludesDial(n.addresses[edge.To], n.addresses[edge.From])) {
+		if record.Alive && !desired[edge] && (n.owned[edge] || edge.From == me || edge.To == me || n.excludesDial(n.addresses[edge.From], n.addresses[edge.To])) {
 			n.record(edge, false)
 		}
 	}

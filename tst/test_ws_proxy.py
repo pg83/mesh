@@ -17,8 +17,8 @@ def test():
             client = workload.UdpClient(lab, source, target)
             client.send(b'public-endpoint-through-proxy')
             assert client.recv() == b'public-endpoint-through-proxy'
-        assert len(lab.connections('a')) == len(lab.connections('b')) == 1
-        assert lab.connections('a') == lab.connections('b')
+        assert len(lab.channels('a')) == len(lab.channels('b')) == 2
+        assert lab.shared_channels()
 
 
 lib.main(test)

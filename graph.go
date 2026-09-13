@@ -69,16 +69,19 @@ func (n *Node) recompute() {
 
 	for dst := range seen {
 		path := []Edge{}
+		hops := 0
 
 		for cur := dst; cur != source; cur = prev[cur] {
 			from := prev[cur]
 
+			path = append(path, Edge{From: from, To: cur})
+
 			if owners[from] != owners[cur] {
-				path = append(path, Edge{From: from, To: cur})
+				hops++
 			}
 		}
 
-		if len(path) == 0 || len(path) > maxHops {
+		if hops == 0 || hops > maxHops || len(path) > maxRouteEdges {
 			continue
 		}
 

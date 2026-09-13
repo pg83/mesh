@@ -41,5 +41,9 @@ func (t *Tun) read(buf []byte) []byte {
 }
 
 func (t *Tun) write(packet []byte) {
+	if ipDestination(packet) == nil {
+		return
+	}
+
 	throw2(unix.Write(t.fd, packet))
 }

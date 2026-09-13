@@ -128,7 +128,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         name=f"e2e_{test_name}",
         inputs=[test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), "$(S)/tst/lib.py", "$(S)/tst/workload.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])],
         outputs=outputs,
-        deps=[mesh, probe] if test_name in ("echo", "protocol", "gossip_binary", "gossip_split", "registry_binary", "gossip_stale", "graph_exchange", "route_attachment", "ws_proxy", "ws_protocol", "ws_outgoing", "ws_loopback") else [mesh, quic] if test_name.startswith("quic") else [mesh],
+        deps=[mesh, probe] if test_name in ("echo", "protocol", "gossip_binary", "gossip_split", "registry_binary", "gossip_stale", "graph_exchange", "route_attachment", "ws_proxy", "ws_protocol", "ws_outgoing", "ws_loopback", "ws_channels", "route_payload") else [mesh, quic] if test_name.startswith("quic") else [mesh],
         cmd=[
             *prelude,
             ["python3", test_path],

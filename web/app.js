@@ -75,7 +75,7 @@ function showPath(path,description){
  const edges=cy.edges().filter(e=>ids.has(e.id()));cy.elements().addClass('dim');edges.union(edges.connectedNodes()).removeClass('dim').addClass('focus');
  $('route-summary').textContent=description+'\n'+path.filter(e=>byID.get(e.source)?.owner!==byID.get(e.target)?.owner).map(e=>`${label(byID.get(e.source))} → ${label(byID.get(e.target))}`).join('\n');
 }
-function localRoute(index){const p=peer(index),path=t.routes[p.intip+':0'];inspect(index,false);$('route-dest').value=String(index);showPath(path,`${peer(t.index).name} → ${p.name} · ${path?.length || 0} переходов`);}
+function localRoute(index){const p=peer(index),path=t.routes[p.intip+':0'];inspect(index,false);$('route-dest').value=String(index);showPath(path,`${peer(t.index).name} → ${p.name} · ${path?.filter(e=>byID.get(e.source)?.owner!==byID.get(e.target)?.owner).length || 0} переходов`);}
 function renderPeers() {
  const destination = $('route-dest').value;
  $('route-dest').replaceChildren(new Option('Выбрать назначение',''));

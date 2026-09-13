@@ -20,8 +20,8 @@ def test():
     with Lab() as lab:
         lab.wait_ping('a', 'b')
         lab.wait_ping('b', 'a')
-        assert lab.status('a')['connections']
-        assert lab.status('b')['connections']
+        assert lab.status('a')['channels']
+        assert lab.status('b')['channels']
 
 
 lib.main(test)

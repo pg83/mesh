@@ -33,7 +33,7 @@ def test():
             for _ in range(2):
                 lab.run('b', ['ip', 'addr', 'del', lib.prefix(lab.address), 'dev', 's1'])
                 lab.wait(lambda: not listening(), 'WS listener removed by address event', timeout=3)
-                lab.wait(lambda: not lab.status('b')['connections'], 'local WS connections closed', timeout=3)
+                lab.wait(lambda: not lab.status('b')['channels'], 'local WS connections closed', timeout=3)
                 assert stream.proc.poll() is None, 'SSH exited while the address was absent'
                 lab.run('b', ['ip', 'addr', 'add', lib.prefix(lab.address), 'dev', 's1',
                               *(['nodad'] if ipv6 else [])])

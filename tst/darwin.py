@@ -60,7 +60,7 @@ with software_checksums(), tempfile.TemporaryDirectory(prefix='mesh-darwin-') as
         # A second run verifies that utun and its route disappear on exit.
         for attempt in range(2):
             cfg=json.loads((root/'node.json').read_text())
-            cfg['endpoint']=[] if attempt==0 else [dict(proto=proto,addr=host,port=17001) for proto in ['udp','ws']]
+            cfg['endpoint']=[dict(proto=proto,addr=host,port=17001) for proto in (['udp'] if attempt==0 else ['udp','ws'])]
             (root/'node.json').write_text(json.dumps(cfg))
             node_log = open(root/f'node-{attempt}.log', 'w+')
             node = subprocess.Popen([binary, 'run', '-c', root/'node.json', '-key-file', root/'key'], stdout=node_log, stderr=node_log)

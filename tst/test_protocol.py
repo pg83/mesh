@@ -43,12 +43,13 @@ def test():
             inner(packet)
         send('short-transport')
         send('short-tag')
-        # A connected UDP socket still checks the transport type and sender.
+        # Each incoming UDP channel checks the transport type and sender.
         send('raw', hex=(b'\xff' + b'\x01\0' + b'\0' * 40).hex())
         send('raw', hex=(b'\x03' + b'\x03\0' + b'\0' * 40).hex())
         ident = time.time_ns() + 1_000_000_000
         mesh_a = lib.endpoint(lib.intip(1), 0)
-        records = [lib.edge(mesh_a, a, ident), lib.edge(a, mesh_a, ident), lib.edge(b, a, ident)]
+        a_listener = lib.endpoint('10.1.0.1')
+        records = [lib.edge(mesh_a, a, ident), lib.edge(a_listener, mesh_a, ident), lib.edge(lib.source('10.1.0.2', 2), a_listener, ident)]
         body = dict(edges=records)
         send('ad', body=body)
         lab.wait_route('b', 'a', ['a'])
@@ -59,11 +60,12 @@ def test():
         # An update to one pair does not remove another pair omitted from this batch.
         send('ad', body=dict(edges=[dict(records[0], id=ident+2)]))
         assert lab.route('b', 'a') == ['a']
+        mesh_b = lib.endpoint(lib.intip(2), 0)
+        full_path = [(mesh_a, a), (a, b), (b, mesh_b)]
         for ip in (b'bad', b'\x65' + b'\0' * 19, b'\x44' + b'\0' * 19,
                    b'\x4f' + b'\0' * 19, b'\x45' + b'\0' * 19):
-            inner(data([(a,b)], payload=ip))
-        # Make the other address locally deliverable, so the kernel cannot mask
-        # a missing mesh destination check by dropping the packet itself.
+            inner(data(full_path, cursor=1, payload=ip))
+        # Route destination, not the payload address, selects the local TUN.
         other = '10.77.0.99'
         lab.run('b', ['ip', 'addr', 'add', other + '/32', 'dev', 'lo'])
         log = workload.udp_server(lab, 'b', host='0.0.0.0')
@@ -81,10 +83,12 @@ def test():
             return bytes(head) + udp
         wrong = b'wrong-inner-destination'
         good = b'correct-inner-destination'
-        inner(data([(a, b)], payload=ipv4_udp(other, wrong)))
-        inner(data([(a, b)], payload=ipv4_udp(lib.intip(2), good)))
+        inner(data([(mesh_a, a), (a, b), (b, lib.endpoint(lib.intip(3), 0))], cursor=1, payload=ipv4_udp(other, wrong)))
+        inner(data(full_path, cursor=1, payload=ipv4_udp(lib.intip(2), good)))
         lab.wait(lambda: good.hex() in log.read_text().splitlines(), 'valid authenticated UDP reaches the server')
-        assert wrong.hex() not in log.read_text().splitlines(), 'mesh delivered a packet for another inner IP'
+        assert wrong.hex() not in log.read_text().splitlines(), 'mesh delivered a packet for another route destination'
+        inner(data(full_path, cursor=1, payload=ipv4_udp(other, b'opaque-destination')))
+        lab.wait(lambda: b'opaque-destination'.hex() in log.read_text().splitlines(), 'payload destination is independent of route destination')
         lab.wait_ping('b', 'c')
         lab.wait_ping('c', 'b')
         probe.stdin.close()

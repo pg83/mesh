@@ -18,7 +18,6 @@ def test():
         for rule in cuts:
             lab.clear(rule)
         lab.intercept('a', 'b', 'drop', count=-1, target_port=7000)
-        lab.intercept('b', 'a', 'drop', count=-1, source_port=7000)
         lab.wait(lambda: lab.selected_endpoint('a', 'b') in ('198.51.100.2:17001', '198.51.100.2:17002'),
                  'public route after LAN failure')
         ssh.progress()

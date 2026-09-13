@@ -35,10 +35,9 @@ class Lab(lib.Lab):
         super().start_node(name)
 
     def cut_port(self, port):
-        # Faults match delivered packets: source is public after SNAT;
-        # destination is local after DNAT. Cut both directions of this mapping.
-        return [self.intercept('a', 'b', 'drop', count=-1, target_port=port),
-                self.intercept('b', 'a', 'drop', count=-1, source_port=port + 10000)]
+        # Faults match the local destination after DNAT. The independent
+        # outgoing channel does not use this listener port.
+        return [self.intercept('a', 'b', 'drop', count=-1, target_port=port)]
 
     def route_packet(self, source, seg, packet):
         if not self.lan and packet[0] >> 4 == 4 and packet[9] == 17:

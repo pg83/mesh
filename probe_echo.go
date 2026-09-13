@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func echoProbe(path, _ string, index uint16) {
+func echoProbe(path, destination string, index uint16) {
 	cfg := loadConfig(path)
 	reg := newRegistry(cfg.Registry, cfg.RegistryVersion)
 	me, peer := reg.byIndex[cfg.Index], reg.byIndex[index]
@@ -17,6 +17,10 @@ func echoProbe(path, _ string, index uint16) {
 	session := newSession(me, peer, key.private)
 	conn := throw2(net.ListenUDP(cfg.Endpoint[0].description().socketKey().network("udp"), cfg.Endpoint[0].binding()))
 	mine := cfg.Endpoint[0].description().vertex()
+	source := sourceVertex(cfg.Index, conn.LocalAddr().(*net.UDPAddr).IP)
+	target := parseUDPAddr(destination)
+	targetPort := target.Port
+	destinations := map[uint64]*net.UDPAddr{udpVertex(target.IP, target.Port).hash(): target}
 	clients := map[SocketAddress]Vertex{}
 	buf := make([]byte, maxPacket)
 	next := time.Time{}
@@ -29,16 +33,24 @@ func echoProbe(path, _ string, index uint16) {
 
 	for {
 		if time.Now().After(next) {
-			for target, other := range clients {
-				edges := []Edge{{From: me.vertex().hash(), To: mine.hash()}, {From: mine.hash(), To: me.vertex().hash()}, {From: other.hash(), To: mine.hash()}}
-				updates := EdgeRecords{}
+			edges := []Edge{{From: me.vertex().hash(), To: source.hash()}, {From: mine.hash(), To: me.vertex().hash()}}
+			vertices := VertexRecords{me.vertex(), mine, source}
 
-				for _, edge := range edges {
-					updates = append(updates, Update{Edge: edge, State: State{ID: uint64(time.Now().UnixNano()), Alive: true}})
-				}
+			for _, other := range clients {
+				vertices = append(vertices, other)
+				edges = append(edges, Edge{From: other.hash(), To: mine.hash()})
+			}
 
-				send(target.addr(), encodeVertices(VertexRecords{me.vertex(), mine, other}))
-				send(target.addr(), encodeEdges(updates))
+			updates := EdgeRecords{}
+
+			for _, edge := range edges {
+				updates = append(updates, Update{Edge: edge, State: State{ID: uint64(time.Now().UnixNano()), Alive: true}})
+			}
+
+			for _, target := range destinations {
+				send(target, bindingInner(Binding{From: source, To: udpVertex(target.IP, target.Port)}))
+				send(target, encodeVertices(vertices))
+				send(target, encodeEdges(updates))
 			}
 
 			next = time.Now().Add(200 * time.Millisecond)
@@ -63,13 +75,16 @@ func echoProbe(path, _ string, index uint16) {
 
 			if json.Unmarshal(inner[1:], &binding) == nil && !binding.Reply && binding.To.hash() == mine.hash() && binding.From.Node == peer.index {
 				clients[socketAddress(remote.IP, remote.Port)] = binding.From
-				send(remote, bindingInner(Binding{From: mine, To: binding.From, Reply: true}))
+
+				destination := &net.UDPAddr{IP: binding.From.ip(), Port: targetPort}
+
+				destinations[udpVertex(destination.IP, destination.Port).hash()] = destination
 			}
 
 			continue
 		}
 
-		other, known := clients[socketAddress(remote.IP, remote.Port)]
+		_, known := clients[socketAddress(remote.IP, remote.Port)]
 
 		if inner[0] != innerData || !known {
 			continue
@@ -77,24 +92,27 @@ func echoProbe(path, _ string, index uint16) {
 
 		data, ok := decodeData(inner)
 
-		if !ok || !validIPv4(data.ip) || data.ip[9] != 1 {
+		if !ok || !validIPv4(data.payload) || data.payload[9] != 1 {
 			continue
 		}
 
-		packet := append([]byte(nil), data.ip...)
+		packet := append([]byte(nil), data.payload...)
 		head := int(packet[0]&15) * 4
 
 		if len(packet) < head+8 || packet[head] != 8 {
 			continue
 		}
 
-		copy(packet[12:16], data.ip[16:20])
-		copy(packet[16:20], data.ip[12:16])
+		copy(packet[12:16], data.payload[16:20])
+		copy(packet[16:20], data.payload[12:16])
 		packet[head] = 0
 		packet[10], packet[11], packet[head+2], packet[head+3] = 0, 0, 0, 0
 		binary.BigEndian.PutUint16(packet[10:12], internetChecksum(packet[:head]))
 		binary.BigEndian.PutUint16(packet[head+2:head+4], internetChecksum(packet[head:]))
-		send(remote, encodeData(&Data{path: []Edge{{From: mine.hash(), To: other.hash()}}, ip: packet}))
+
+		destination := &net.UDPAddr{IP: remote.IP, Port: targetPort}
+
+		send(destination, encodeData(&Data{path: []Edge{{From: me.vertex().hash(), To: source.hash()}, {From: source.hash(), To: udpVertex(destination.IP, destination.Port).hash()}, {From: udpVertex(destination.IP, destination.Port).hash(), To: peer.vertex().hash()}}, cursor: 1, payload: packet}))
 	}
 }
 

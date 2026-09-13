@@ -16,6 +16,7 @@ const (
 	headerTransport = 1 + 2 + 8 + nonceSize
 	maxPacket       = 65535
 	maxHops         = 16
+	maxRouteEdges   = 3 * maxHops
 )
 
 func validPacketType(kind byte) bool {
@@ -23,13 +24,13 @@ func validPacketType(kind byte) bool {
 }
 
 type Data struct {
-	path   []Edge
-	cursor int
-	ip     []byte
+	path    []Edge
+	cursor  int
+	payload []byte
 }
 
 func encodeData(d *Data) []byte {
-	out := make([]byte, 0, 3+16*len(d.path)+len(d.ip))
+	out := make([]byte, 0, 3+16*len(d.path)+len(d.payload))
 
 	out = append(out, innerData, byte(len(d.path)), byte(d.cursor))
 
@@ -38,7 +39,7 @@ func encodeData(d *Data) []byte {
 		out = binary.LittleEndian.AppendUint64(out, edge.To)
 	}
 
-	return append(out, d.ip...)
+	return append(out, d.payload...)
 }
 
 func decodeData(inner []byte) (*Data, bool) {
@@ -49,16 +50,20 @@ func decodeData(inner []byte) (*Data, bool) {
 	hops := int(inner[1])
 	head := 3 + 16*hops
 
-	if hops == 0 || hops > maxHops || len(inner) < head || int(inner[2]) >= hops {
+	if hops == 0 || hops > maxRouteEdges || len(inner) < head || int(inner[2]) >= hops {
 		return nil, false
 	}
 
-	d := &Data{path: make([]Edge, hops), cursor: int(inner[2]), ip: inner[head:]}
+	d := &Data{path: make([]Edge, hops), cursor: int(inner[2]), payload: inner[head:]}
 
 	for i := range d.path {
 		start := 3 + 16*i
 
 		d.path[i] = Edge{From: binary.LittleEndian.Uint64(inner[start:]), To: binary.LittleEndian.Uint64(inner[start+8:])}
+
+		if d.path[i].From == 0 || d.path[i].To == 0 || d.path[i].From == d.path[i].To || (i > 0 && d.path[i-1].To != d.path[i].From) {
+			return nil, false
+		}
 	}
 
 	return d, true
@@ -66,14 +71,4 @@ func decodeData(inner []byte) (*Data, bool) {
 
 func advanceCursor(inner []byte, cursor int) {
 	inner[2] = byte(cursor)
-}
-
-func validIPv4(packet []byte) bool {
-	if len(packet) < 20 || packet[0]>>4 != 4 {
-		return false
-	}
-
-	head := int(packet[0]&15) * 4
-
-	return head >= 20 && head <= len(packet) && int(binary.BigEndian.Uint16(packet[2:4])) == len(packet)
 }

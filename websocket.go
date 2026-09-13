@@ -132,13 +132,12 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 
 		throw(socket.Write(ctx, websocket.MessageBinary, response))
 
-		c := newConnection(&WSStream{socket}, binding.To, binding.From, session.peer, binding.From.hash(), binary.LittleEndian.Uint64(packet[3:]))
+		c := newWSConnection(socket, session, binding.To, binding.From, binding.From.hash(), binary.LittleEndian.Uint64(packet[3:]))
 
-		c.session = session
+		post(n.events.in, any(c.send))
+		post(n.events.in, any(c.receive))
 
-		n.events.in <- c
-
-		<-c.ctx.Done()
+		<-c.done
 	}).catch(func(e *Exception) { n.log.Debug("websocket accept failed", "err", e) })
 }
 
@@ -152,7 +151,7 @@ func readWS(ctx context.Context, conn *websocket.Conn) []byte {
 	return packet
 }
 
-func (n *Node) dialWebSocket(ctx context.Context, local *LocalAddress, target Endpoint) PacketStream {
+func (n *Node) dialWebSocket(ctx context.Context, local *LocalAddress, target Endpoint) *websocket.Conn {
 	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: local.address.ip()}, Control: tcpControl(local.iface)}
 	transport := &http.Transport{DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
 
@@ -172,5 +171,5 @@ func (n *Node) dialWebSocket(ctx context.Context, local *LocalAddress, target En
 
 	socket.SetReadLimit(maxPacket)
 
-	return &WSStream{socket}
+	return socket
 }

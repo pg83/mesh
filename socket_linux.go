@@ -16,18 +16,18 @@ func socketReuse(fd, iface int, v6 bool) error {
 	return unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1)
 }
 
-func (u *UDPStream) writePacket(packet []byte) {
+func (u *UDPWriter) writePacket(packet []byte) {
 	if u.local.address.ipv6() {
 		control := &ipv6.ControlMessage{Src: u.local.address.ip(), IfIndex: u.local.iface}
 
-		throw3(u.conn.WriteMsgUDP(packet, control.Marshal(), nil))
+		throw3(u.conn.WriteMsgUDP(packet, control.Marshal(), u.remote))
 
 		return
 	}
 
 	control := &ipv4.ControlMessage{Src: u.local.address.ip(), IfIndex: u.local.iface}
 
-	throw3(u.conn.WriteMsgUDP(packet, control.Marshal(), nil))
+	throw3(u.conn.WriteMsgUDP(packet, control.Marshal(), u.remote))
 }
 
 func socketInterface(fd, iface int, v6 bool) error {

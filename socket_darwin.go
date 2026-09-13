@@ -35,8 +35,8 @@ func socketReuse(fd, iface int, v6 bool) error {
 	}).asError()
 }
 
-func (u *UDPStream) writePacket(packet []byte) {
-	throw2(u.conn.Write(packet))
+func (u *UDPWriter) writePacket(packet []byte) {
+	throw2(u.conn.WriteToUDP(packet, u.remote))
 }
 
 func socketInterface(fd, iface int, v6 bool) error {

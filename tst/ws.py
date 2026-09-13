@@ -21,8 +21,15 @@ class Lab(lib.Lab):
             entry['endpoint'] = endpoints if node.name in self.statics else []
         return registry
 
-    def connections(self, name):
-        return self.status(name)['connections']
+    def channels(self, name):
+        state = self.status(name)
+        assert 'connections' not in state
+        return state['channels']
+
+    def shared_channels(self):
+        a, b = self.channels('a'), self.channels('b')
+        reverse_role = [dict(c, outgoing=not c['outgoing']) for c in b]
+        return a == reverse_role
 
     def tcp_connections(self, name):
         rows = self.run(name, ['cat', '/proc/net/tcp']).stdout.splitlines()[1:]
@@ -30,8 +37,8 @@ class Lab(lib.Lab):
                    for pair in row.split()[1:3]) for row in rows)
 
     def connection_count(self, count):
-        a, b = self.connections('a'), self.connections('b')
-        return (len(a) == len(b) == count and a == b
+        a, b = self.channels('a'), self.channels('b')
+        return (len(a) == len(b) == 2*count and self.shared_channels()
                 and self.tcp_connections('a') == self.tcp_connections('b') == count)
 
     def one_connection(self):

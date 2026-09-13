@@ -17,7 +17,7 @@ def test():
                 lab.add_address(name, 1, f'10.1.0.{offset + node.index}')
         for name in names:
             lab.wait_links(name, [other for other in names if other != name])
-            lab.wait(lambda name=name: len(lab.status(name)['links']) == 64,
+            lab.wait(lambda name=name: len(lab.status(name)['links']) == 32,
                      f'{name}: all endpoint pairs discovered')
             workload.udp_server(lab, name)
         before = {name: drops(lab, name) for name in names}
@@ -37,7 +37,7 @@ def test():
         lab.start_node('c')
         for name in names:
             lab.wait_links(name, [other for other in names if other != name])
-            lab.wait(lambda name=name: len(lab.status(name)['links']) == 64,
+            lab.wait(lambda name=name: len(lab.status(name)['links']) == 32,
                      f'{name}: endpoint actors recovered after restart')
         lab.wait_ping('c', 'a')
         lab.wait_ping('b', 'c')
