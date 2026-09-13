@@ -1,4 +1,5 @@
 """WSS verifies certificates; once trusted, a single TLS connection works both ways."""
+import os
 import time
 import lib
 import ws
@@ -17,7 +18,17 @@ def test():
         registry = lab.registry()
         registry[1]['endpoint'][0]['tls_ca'] = str(invalid_ca)
         lab.configs['a']['registry'] = registry
-        lab.start_node('a')
+        # The server is trusted by the system pool here. Ignoring an invalid
+        # explicit CA would therefore establish a connection and fail the test.
+        previous = os.environ.get('SSL_CERT_FILE')
+        os.environ['SSL_CERT_FILE'] = str(lab.cert)
+        try:
+            lab.start_node('a')
+        finally:
+            if previous is None:
+                os.environ.pop('SSL_CERT_FILE')
+            else:
+                os.environ['SSL_CERT_FILE'] = previous
         time.sleep(3)
         assert not lab.connections('a') and not lab.connections('b'), 'invalid CA accepted'
         lab.stop_node('a')
