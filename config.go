@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"net/netip"
 	"os"
 )
 
@@ -26,6 +27,11 @@ type PeerConfig struct {
 	Endpoint []EndpointConfig `json:"endpoint"`
 }
 
+type DialPair struct {
+	From netip.Addr `json:"from"`
+	To   netip.Addr `json:"to"`
+}
+
 type Config struct {
 	RegistryVersion uint64           `json:"registry_version,omitempty"`
 	Index           uint16           `json:"index"`
@@ -36,6 +42,7 @@ type Config struct {
 	Mtu             int              `json:"mtu"`
 	Control         string           `json:"control,omitempty"`
 	Registry        []PeerConfig     `json:"registry"`
+	NoDial          []DialPair       `json:"no_dial,omitempty"`
 }
 
 func loadConfig(path string) *Config {
@@ -43,6 +50,14 @@ func loadConfig(path string) *Config {
 	cfg := &Config{}
 
 	throw(json.Unmarshal(data, cfg))
+
+	for i, pair := range cfg.NoDial {
+		if !pair.From.IsValid() || !pair.To.IsValid() {
+			throwFmt("no_dial requires from and to IP addresses")
+		}
+
+		cfg.NoDial[i] = DialPair{From: pair.From.Unmap(), To: pair.To.Unmap()}
+	}
 
 	if cfg.Mtu == 0 {
 		cfg.Mtu = 1380

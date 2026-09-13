@@ -42,6 +42,7 @@ type Node struct {
 	sockets    map[SocketKey]*UDPSocket
 	listeners  map[string]*WSListener
 	tlsCA      map[uint64]string
+	noDial     map[DialPair]bool
 	endpoints  []ListenerBinding
 	tun        *Tun
 	events     *Mailbox[any]
@@ -79,6 +80,11 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		routes:   map[uint64][]Edge{},
 		packetID: uint64(time.Now().UnixNano()), addresses: map[uint64]Vertex{},
 		connection: map[Edge]ConnectionStatus{}, dialing: map[Edge]bool{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
+		noDial: map[DialPair]bool{},
+	}
+
+	for _, pair := range cfg.NoDial {
+		n.noDial[pair] = true
 	}
 
 	if string(n.key.public) != string(me.pub) {

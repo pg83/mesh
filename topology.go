@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"maps"
+	"net/netip"
 	"time"
 )
 
@@ -38,12 +39,18 @@ func (n *Node) publishSnapshot() {
 		}
 
 		for _, dst := range n.candidates(peer) {
+			to, _ := netip.ParseAddr(n.addresses[dst].Addr)
+
 			for src := range n.local {
 				if n.addresses[src].Proto != "source" {
 					continue
 				}
 
 				if ip := n.addresses[dst].ip(); ip != nil && n.local[src].address.ipv6() != (ip.To4() == nil) {
+					continue
+				}
+
+				if n.noDial[DialPair{From: n.local[src].address.Addr, To: to.Unmap()}] {
 					continue
 				}
 

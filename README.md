@@ -90,6 +90,15 @@ use only the advertised `addr` and `port` from that registry entry.
 There is no global `port`, separate `static` list, or `forwards` section.
 Old configurations must be converted to this format.
 
+`no_dial` is an optional local list of directed IP pairs, for example
+`[{"from":"10.0.0.64","to":"10.0.0.68"}]`. A pair disables initiating
+connections from that local IP to endpoints with that literal destination IP,
+regardless of port or transport. IPv4 and IPv6 addresses are matched exactly;
+there are no subnets or DNS matching. Incoming connections and their return
+traffic are allowed. To stop both nodes initiating, configure each direction
+on its source node. These rules are not exchanged in the registry or included
+in exported configurations.
+
 | Field | Meaning |
 |---|---|
 | `proto` | Transport: `udp`, `ws`, or `wss` |
