@@ -36,10 +36,18 @@ func main() {
 			keygen()
 		case "status":
 			fs := flag.NewFlagSet("status", flag.ExitOnError)
-			sock := fs.String("s", "", "status socket")
+			control := fs.String("control", "127.0.0.1:8058", "localhost control address")
 
 			throw(fs.Parse(os.Args[2:]))
-			showStatus(*sock)
+			showStatus(*control)
+		case "web":
+			fs := flag.NewFlagSet("web", flag.ExitOnError)
+			control := fs.String("control", "127.0.0.1:8058", "localhost control address")
+			listen := fs.String("listen", "127.0.0.1:8059", "web listen address")
+
+			throw(fs.Parse(os.Args[2:]))
+			go stopOnSignal(log)
+			runWeb(*listen, *control)
 		default:
 			printUsage()
 			os.Exit(1)
@@ -56,6 +64,7 @@ func printUsage() {
 Commands:
   run -c config.json [-key-file path]    run a node
   keygen                print a fresh key pair as JSON
-  status -s socket      dump node status as JSON
+  status [-control 127.0.0.1:8058]       dump node status as JSON
+  web [-control 127.0.0.1:8058] [-listen 127.0.0.1:8059]
 `)
 }

@@ -7,6 +7,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const defaultTun = "mesh0"
+
 type Tun struct {
 	fd int
 }

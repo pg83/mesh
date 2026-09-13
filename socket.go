@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"golang.org/x/sys/unix"
 	"net"
 	"net/url"
 	"strconv"
@@ -70,7 +69,7 @@ func (c EndpointConfig) description() Endpoint {
 func reuseUDP(network, address string, raw syscall.RawConn) error {
 	var result error
 
-	err := raw.Control(func(fd uintptr) { result = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEADDR, 1) })
+	err := raw.Control(func(fd uintptr) { result = socketReuse(int(fd)) })
 
 	if err != nil {
 		result = err
@@ -80,7 +79,7 @@ func reuseUDP(network, address string, raw syscall.RawConn) error {
 }
 
 func newUDPSocket(port uint16) *UDPSocket {
-	guard := throw2(net.Listen("unix", "@mesh-udp-"+strconv.Itoa(int(port))))
+	guard := udpGuard(port)
 	lc := net.ListenConfig{Control: reuseUDP}
 	udp := throw2(lc.ListenPacket(context.Background(), "udp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(int(port))))).(*net.UDPConn)
 

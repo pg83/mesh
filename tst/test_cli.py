@@ -1,4 +1,4 @@
-"""Configuration failures, real status sockets, and malformed public UDP input."""
+"""Configuration failures, localhost HTTP control, and malformed public UDP input."""
 
 import copy
 import json
@@ -19,7 +19,11 @@ def test():
     cli(expected='Usage:')
     cli('unknown', expected='Usage:')
     cli('run', '-c', '/no/such/mesh-config')
-    cli('status', '-s', '@absent')
+    cli('status', '-control', '127.0.0.1:65534')
+    cli('status', '-control', '192.0.2.1:8058', expected='loopback')
+    cli('status', '-control', 'bad', expected='missing port')
+    cli('status', '-control', 'localhost:0', expected='bad control port')
+    cli('status', '-control', 'localhost:no', expected='invalid syntax')
     with lib.Lab(['a', 'b'], {1: ['a', 'b']}) as lab:
         lab.wait_ping('a', 'b')
         config = json.loads((lab.dir / 'a.json').read_text())
@@ -28,7 +32,7 @@ def test():
             cfg['endpoint'] = [dict(proto='udp', addr='0.0.0.0', port=7900)]
             cfg['registry'][0]['endpoint'] = []
             cfg['tun'] = 'invalid-test'
-            cfg['status'] = ''
+            cfg['control'] = ''
             change(cfg)
             path = lab.dir / 'bad.json'
             path.write_text(json.dumps(cfg))
@@ -69,26 +73,18 @@ def test():
         ]), 'ambiguous public endpoint')
         bad(lambda c: c.update(subnet='bad'), 'CIDR')
         bad(lambda c: c['endpoint'][0].update(port=7000), 'address already in use')
-        bad(lambda c: c.update(status='/' + 'x' * 110), 'status socket path')
+        bad(lambda c: c.update(control='0.0.0.0:8058'), 'loopback')
         path = lab.dir / 'bad.json'
         path.write_text('{')
         result = lab.run('a', [lib.MESH, 'run', '-c', path], check=False)
         assert result.returncode != 0 and 'JSON' in result.stderr
 
-        # Exercise the filesystem socket as well as the usual abstract one.
         lab.stop_node('a')
         lab.run('a', ['ip', 'link', 'del', 'mesh0'])
-        sock = lab.dir / 'status.sock'
-        # Run from a short relative path; checkout/build TMPDIR can be arbitrarily long.
-        lab.configs['a'] = {'status': 'status.sock', 'tun': 'mesh-test', 'mtu': 1280}
-        saved = os.getcwd()
-        try:
-            os.chdir(lab.dir)
-            lab.start_node('a')
-        finally:
-            os.chdir(saved)
-        lab.wait(lambda: sock.exists(), 'filesystem status socket')
-        result = lab.run('a', [lib.MESH, 'status', '-s', 'status.sock'], cwd=lab.dir)
+        lab.configs['a'] = {'control': 'localhost:8058', 'tun': 'mesh-test', 'mtu': 1280}
+        lab.start_node('a')
+        lab.wait_links('a', ['b'])
+        result = lab.run('a', [lib.MESH, 'status', '-control', lib.CONTROL])
         assert json.loads(result.stdout)['index'] == 1
         lab.nodes['a'].proc.send_signal(signal.SIGINT)
         assert lab.nodes['a'].proc.wait(timeout=10) == 0

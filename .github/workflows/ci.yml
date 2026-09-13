@@ -36,6 +36,13 @@ jobs:
           echo /usr/sbin >> "$GITHUB_PATH"
           echo "MESH_TEST_ARTIFACTS=$RUNNER_TEMP/mesh-artifacts" >> "$GITHUB_ENV"
 
+      - name: Install browser for web e2e
+        run: |
+          python3 -m venv "$RUNNER_TEMP/browser"
+          "$RUNNER_TEMP/browser/bin/pip" install playwright==1.58.0
+          "$RUNNER_TEMP/browser/bin/playwright" install --with-deps chromium
+          echo "MESH_TEST_BROWSER_PYTHON=$RUNNER_TEMP/browser/bin/python" >> "$GITHUB_ENV"
+
       - name: Prepare namespaces and tun
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -54,8 +61,8 @@ jobs:
       - name: Build and test
         run: ./build -k -j 4 test
 
-      - name: Save failure diagnostics
-        if: failure()
+      - name: Save web screenshot and failure diagnostics
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mesh-test-failure
@@ -144,4 +151,32 @@ jobs:
         with:
           name: mesh-coverage-failure
           path: ${{ runner.temp }}/mesh-artifacts
+          retention-days: 7
+
+  darwin:
+    name: Darwin utun (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build native mesh and echo peer
+        run: |
+          go build -trimpath -o .build/bin/mesh .
+          go build -trimpath -tags=meshprobe -o .build/bin/mesh-probe .
+          go vet ./...
+      - name: Test native utun and encrypted packet round trips
+        run: sudo "$(command -v python3)" tst/darwin.py
+      - name: Save native binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mesh-${{ matrix.os }}
+          path: .build/bin/mesh
           retention-days: 7

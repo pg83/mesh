@@ -1,16 +1,9 @@
 package main
 
 import (
-	"encoding/json"
-	"io"
-	"net"
-	"os"
 	"slices"
-	"strings"
 	"time"
 )
-
-const sockPathMax = 108
 
 type LinkStatus struct {
 	Edge
@@ -81,42 +74,4 @@ func (n *Node) status() *Status {
 	}
 
 	return st
-}
-
-func (n *Node) statusLoop() {
-	path := n.cfg.Status
-
-	if path == "" {
-		return
-	}
-
-	if !strings.HasPrefix(path, "@") {
-		if len(path) >= sockPathMax {
-			throwFmt("status socket path is %d bytes, the limit is %d", len(path), sockPathMax-1)
-		}
-
-		os.Remove(path)
-	}
-
-	ln := throw2(net.Listen("unix", path))
-
-	for {
-		conn := throw2(ln.Accept())
-		reply := make(chan *Status, 1)
-
-		n.events.in <- reply
-
-		out := throw2(json.Marshal(<-reply))
-
-		conn.Write(append(out, '\n'))
-		conn.Close()
-	}
-}
-
-func showStatus(path string) {
-	conn := throw2(net.Dial("unix", path))
-
-	defer conn.Close()
-
-	throw2(io.Copy(os.Stdout, conn))
 }

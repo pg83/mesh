@@ -42,6 +42,7 @@ GO_SOURCES = [
 ]
 GO_INPUTS = [
     *GO_SOURCES,
+    *build.glob("$(S)/web/*"),
     "$(S)/go.mod",
     "$(S)/go.sum",
 ]
@@ -104,6 +105,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
     test_stamp = f"$(B)/tests/{test_name}.stamp"
     env = {
         "MESH_TEST_ARTIFACTS": os.environ.get("MESH_TEST_ARTIFACTS", ""),
+        "MESH_TEST_BROWSER_PYTHON": os.environ.get("MESH_TEST_BROWSER_PYTHON", ""),
         "MESH_TEST_BINARY": mesh.outputs[0],
         "MESH_TEST_PROBE": probe.outputs[0],
         "MESH_TEST_QUIC": quic.outputs[0],
@@ -124,9 +126,9 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
 
     e2e_tests.append(command(
         name=f"e2e_{test_name}",
-        inputs=[test_path, "$(S)/tst/lib.py", "$(S)/tst/workload.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])],
+        inputs=[test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), "$(S)/tst/lib.py", "$(S)/tst/workload.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])],
         outputs=outputs,
-        deps=[mesh, probe] if test_name in ("protocol", "gossip_binary", "gossip_stale", "graph_exchange", "route_attachment", "ws_proxy", "ws_protocol") else [mesh, quic] if test_name.startswith("quic") else [mesh],
+        deps=[mesh, probe] if test_name in ("echo", "protocol", "gossip_binary", "gossip_stale", "graph_exchange", "route_attachment", "ws_proxy", "ws_protocol") else [mesh, quic] if test_name.startswith("quic") else [mesh],
         cmd=[
             *prelude,
             ["python3", test_path],

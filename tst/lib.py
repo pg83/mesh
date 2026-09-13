@@ -13,6 +13,7 @@ import fcntl
 import heapq
 import hashlib
 import json
+import http.client
 import os
 import shutil
 import signal
@@ -30,7 +31,7 @@ from pathlib import Path
 MESH = Path(os.environ["MESH_TEST_BINARY"]).resolve()
 PORT = 7000
 SUBNET = "10.77.0.0/24"
-STATUS = "@mesh"  # abstract socket: per netns, and no path length limit
+CONTROL = "127.0.0.1:8058"
 
 LIFETIME = "600"  # seconds; bounds what a killed lab can leak
 
@@ -422,6 +423,7 @@ class Lab:
             if node.name in self.statics:
                 static = [dict(proto="udp", addr=node.addresses[seg], port=PORT) for seg in node.segments]
             reg.append({
+                "name": node.name,
                 "index": node.index,
                 "pub": node.keys["pub"],
                 "intip": intip(node.index),
@@ -435,7 +437,7 @@ class Lab:
             "key": node.keys["key"],
             "endpoint": [dict(proto="udp", addr="0.0.0.0", port=PORT)],
             "subnet": SUBNET,
-            "status": STATUS,
+            "control": CONTROL,
             "registry": self.registry(),
         }
         cfg.update(self.configs.get(node.name, {}))
@@ -552,26 +554,32 @@ class Lab:
 
     # --- observations ---
 
-    def status(self, name):
-        """Asks the node itself, from inside its namespace."""
+    def http(self, name, path, port=8058):
         self.check()
         node = self.nodes[name]
+        with open(self.netns(node.pid)) as target, open('/proc/thread-self/ns/net') as current:
+            try:
+                os.setns(target.fileno(), os.CLONE_NEWNET)
+                conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            finally:
+                os.setns(current.fileno(), os.CLONE_NEWNET)
+        with conn:
+            conn.settimeout(10)
+            conn.connect(('127.0.0.1', port))
+            conn.sendall(f'GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n'.encode())
+            response = http.client.HTTPResponse(conn)
+            response.begin()
+            return response.status, dict(response.getheaders()), response.read()
+
+    def status(self, name):
+        """Asks the node itself, from inside its namespace."""
         try:
-            with open(self.netns(node.pid)) as target, open('/proc/thread-self/ns/net') as current:
-                try:
-                    os.setns(target.fileno(), os.CLONE_NEWNET)
-                    conn = socket.socket(socket.AF_UNIX)
-                finally:
-                    os.setns(current.fileno(), os.CLONE_NEWNET)
-            with conn:
-                conn.settimeout(10)
-                conn.connect('\0' + STATUS[1:])
-                chunks = []
-                while data := conn.recv(65536):
-                    chunks.append(data)
+            code, _, data = self.http(name, '/status')
+            if code != 200:
+                raise OSError(f'control HTTP {code}')
         except OSError as error:
             raise OSError(f'{name}: status failed: {error}') from error
-        status = json.loads(b''.join(chunks))
+        status = json.loads(data)
         descriptors = status['endpoints']
         def decode(edge):
             return dict(edge, **{k: descriptors[str(edge[k])] for k in ('from', 'to')})

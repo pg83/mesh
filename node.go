@@ -154,16 +154,16 @@ func (n *Node) run() {
 			n.tun.write(p)
 		}
 	})
-	go n.loop("status", n.statusLoop)
-	go n.loop("signal", n.signalLoop)
+	go n.loop("control", n.controlLoop)
+	go n.loop("signal", func() { stopOnSignal(n.log) })
 	n.loop("graph", n.graphLoop)
 }
 
-func (n *Node) signalLoop() {
+func stopOnSignal(log *slog.Logger) {
 	signals := make(chan os.Signal, 1)
 
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-	n.log.Info("stopping", "signal", <-signals)
+	log.Info("stopping", "signal", <-signals)
 	os.Exit(0)
 }
 

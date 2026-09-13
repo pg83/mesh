@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mesh</title><link rel="stylesheet" href="style.css">
+<script defer src="cytoscape.js"></script><script defer src="app.js"></script>
+</head>
+<body data-design="graph">
+<header>
+<a class="logo" href="./"><span class="logo-icon">m<span>↗</span></span> mesh</a>
+<nav role="tablist" aria-label="Режим просмотра">
+<button id="hosts-mode" data-page="hosts" role="tab" aria-controls="topology-page" aria-selected="false">Хосты</button>
+<button id="endpoints-mode" class="active" data-page="endpoints" role="tab" aria-controls="topology-page" aria-selected="true">Endpoint</button>
+<button id="matrix-tab" data-page="matrix" role="tab" aria-controls="matrix-page" aria-selected="false">Matrix</button>
+<button id="configs-tab" data-page="configs" role="tab" aria-controls="configs-page" aria-selected="false">Конфиги</button>
+</nav>
+<span id="connection" class="snapshot" role="status">Подключение…</span>
+</header>
+<div class="shell"><main>
+<section id="topology-page" role="tabpanel"><div class="topology-layout">
+<section class="graph-panel">
+<div class="panel-actions"><button id="reset">Раскладка</button><button id="fit">Вписать ↗</button></div>
+<div id="graph"></div>
+</section>
+<aside class="inspector">
+<div class="kicker">SELECTED NODE</div><h2 id="selected-name"></h2>
+<div id="selected-ip" class="mono"></div>
+<p id="selected-note"></p>
+<div class="details-heading">ENDPOINTS <span id="endpoint-count"></span></div><div id="endpoints"></div>
+<div class="route-selector"><label for="route-dest">Маршрут</label><select id="route-dest"><option value="">Выбрать назначение</option></select><div id="route-summary">Выбери хост — путь подсветится на графе.</div></div>
+</aside>
+</div></section>
+<section id="matrix-page" role="tabpanel" aria-labelledby="matrix-tab" hidden><div id="matrix"></div></section>
+<section id="configs-page" role="tabpanel" hidden>
+<div class="config-banner"><div><span class="kicker">BRING YOUR OWN KEY</span><h2>Конфиг скачивается. Ключ остаётся у тебя.</h2><p>Полный registry, адрес ноды и точки входа лабы уже внутри.</p></div><pre>sudo mesh run -c mesh-65.json \
+  -key-file ~/.ssh/mini.key</pre></div>
+<div id="config-cards"></div>
+</section>
+</main></div>
+</body>
+</html>

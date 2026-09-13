@@ -21,7 +21,8 @@ and retransmits come later.
 mesh keygen                 # prints {"pub": ..., "key": ...}
 mesh run -c config.json     # runs a node
 mesh run -c config.json -key-file /home/pg/.ssh/home.key
-mesh status -s status.sock  # dumps links as JSON
+mesh status -control 127.0.0.1:8058
+mesh web -control 127.0.0.1:8058 -listen 127.0.0.1:8059
 ```
 
 Config is JSON:
@@ -43,7 +44,7 @@ fields are ignored.
   "key": "<base64 private key>",
   "endpoint": [{"proto": "udp", "addr": "0.0.0.0", "port": 7000}],
   "subnet": "10.77.0.0/24",
-  "status": "/run/mesh/status.sock",
+  "control": "127.0.0.1:8058",
   "registry": [
     {"index": 1, "pub": "<x25519>", "intip": "10.77.0.1", "endpoint": [{"proto": "udp", "addr": "203.0.113.10", "port": 17001, "bind_addr": "192.168.1.20", "bind_port": 7001}]},
     {"index": 2, "pub": "<x25519>", "intip": "10.77.0.2", "endpoint": []}
@@ -51,13 +52,13 @@ fields are ignored.
 }
 ```
 
-The registry is the same on every node: index, both public keys, internal
+The registry is the same on every node: index, public key, internal
 address, and the static endpoints a node has, if any. Node indexes must be
 in the range 1–65535; zero is reserved and rejected in the registry.
 A node without static
 endpoints is never dialed by a node that has not heard of it; it dials, and
 its own advertised addresses let others dial it back later. `tun` (default
-`mesh0`) and `mtu` (default 1380) are optional.
+`mesh0` on Linux, `utun` on macOS) and `mtu` (default 1380) are optional.
 
 Both the host and registry use the same flat `endpoint` objects. The node
 opens the union of its host list and its own registry list. Other nodes
@@ -355,3 +356,52 @@ The additional twenty protocol and application scenarios are listed in
 On failure the suite prints application/mesh logs and channel counters. Set
 `MESH_TEST_ARTIFACTS` to preserve these along with status snapshots outside
 the build temporary directory; CI uploads them as failure artifacts.
+
+## Local control and web
+
+`control` optionally enables a read-only HTTP server. It accepts only literal
+loopback IPs (including `::1`) or `localhost`; omitting it disables control.
+The Unix status socket and `status -s` have been removed.
+
+- `GET /status`: raw node status, including 64-bit endpoint IDs.
+- `GET /topology`: public registry, all live directed graph edges and selected
+  routes. Endpoint IDs are decimal strings so browsers preserve every bit.
+- `GET /config?node=mini`: a complete configuration for an ephemeral registry
+  entry. Select by its optional `name` or numeric `index`. Static entries
+  cannot be exported as ephemeral nodes. The result includes no private key,
+  TLS file paths or host binding overrides, and selects the native default TUN.
+
+`mesh web` is a separate, unprivileged process. It reads the localhost control
+API and serves the embedded Cytoscape.js 3.34.3 interface without a CDN:
+Hosts, Endpoint, Matrix and Config tabs. Matrix entries count transport hops
+between nodes in the directed graph; local attachment edges cost zero.
+Clicking a matrix cell highlights its path. Data refreshes every three seconds;
+unchanged topology preserves the viewport and dragged vertex positions.
+`/config` opens the configuration tab, and `/api/config?node=mini` downloads JSON.
+The web listener can bind a LAN or mesh address; control stays on loopback.
+
+For example:
+
+```sh
+curl -f 'http://lab1.mesh:8059/api/config?node=mini' -o mini.json
+sudo mesh run -c mini.json -key-file ~/.ssh/mini.key
+```
+
+Registry entries may include a `name` used for display and configuration
+selection. Names do not participate in the transport protocol or authentication.
+Only public registry data is exported; `mesh web` never reads the private key.
+
+## macOS
+
+Darwin builds use the kernel's native `utun`, on both arm64 and amd64, without
+an extension or third-party driver. Run `mesh run` as root. Omit `tun` for an
+automatically assigned interface, or set it to `utunN`. Linux's `mesh0` name
+is not valid on Darwin. `/sbin/ifconfig` assigns the node address and MTU, and
+`/sbin/route` adds the mesh subnet through that interface. Closing the process
+removes the utun interface and its route. UDP, WS/WSS, key files and the local
+HTTP API use the same configuration and protocol as Linux.
+
+The Darwin UDP listener reserves the corresponding localhost TCP port to
+prevent two mesh processes from sharing it accidentally. Linux keeps its
+namespace-local UDP port guard. Native macOS CI checks creation, encrypted
+ICMP round trips at two packet sizes, and restart on both architectures.

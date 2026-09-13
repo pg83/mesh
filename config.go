@@ -19,6 +19,7 @@ type EndpointConfig struct {
 }
 
 type PeerConfig struct {
+	Name     string           `json:"name,omitempty"`
 	Index    uint16           `json:"index"`
 	Pub      string           `json:"pub"`
 	Intip    string           `json:"intip"`
@@ -27,12 +28,12 @@ type PeerConfig struct {
 
 type Config struct {
 	Index    uint16           `json:"index"`
-	Key      string           `json:"key"`
+	Key      string           `json:"key,omitempty"`
 	Endpoint []EndpointConfig `json:"endpoint"`
 	Subnet   string           `json:"subnet"`
-	Tun      string           `json:"tun"`
+	Tun      string           `json:"tun,omitempty"`
 	Mtu      int              `json:"mtu"`
-	Status   string           `json:"status"`
+	Control  string           `json:"control,omitempty"`
 	Registry []PeerConfig     `json:"registry"`
 }
 
@@ -47,7 +48,7 @@ func loadConfig(path string) *Config {
 	}
 
 	if cfg.Tun == "" {
-		cfg.Tun = "mesh0"
+		cfg.Tun = defaultTun
 	}
 
 	return cfg

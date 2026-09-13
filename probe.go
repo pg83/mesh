@@ -27,6 +27,12 @@ type ProbeCommand struct {
 }
 
 func main() {
+	if os.Args[1] == "echo" {
+		echoProbe(os.Args[2], os.Args[3], uint16(throw2(json.Number(os.Args[4]).Int64())))
+
+		return
+	}
+
 	if os.Args[1] == "proxy" {
 		target := throw2(url.Parse(os.Args[3]))
 
