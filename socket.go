@@ -66,21 +66,23 @@ func (c EndpointConfig) description() Endpoint {
 	return (Endpoint{Proto: c.Proto, Addr: c.Addr, Port: uint16(c.Port), Path: c.Path}).canonical()
 }
 
-func reuseUDP(network, address string, raw syscall.RawConn) error {
-	var result error
+func udpControl(iface int) func(string, string, syscall.RawConn) error {
+	return func(network, address string, raw syscall.RawConn) error {
+		var result error
 
-	err := raw.Control(func(fd uintptr) { result = socketReuse(int(fd)) })
+		err := raw.Control(func(fd uintptr) { result = socketReuse(int(fd), iface) })
 
-	if err != nil {
-		result = err
+		if err != nil {
+			result = err
+		}
+
+		return result
 	}
-
-	return result
 }
 
 func newUDPSocket(port uint16) *UDPSocket {
 	guard := udpGuard(port)
-	lc := net.ListenConfig{Control: reuseUDP}
+	lc := net.ListenConfig{Control: udpControl(0)}
 	udp := throw2(lc.ListenPacket(context.Background(), "udp4", net.JoinHostPort("0.0.0.0", strconv.Itoa(int(port))))).(*net.UDPConn)
 
 	throw(udp.SetReadBuffer(1 << 20))
@@ -93,7 +95,7 @@ func newUDPSocket(port uint16) *UDPSocket {
 }
 
 func connectUDP(local *LocalEndpoint, remote Endpoint) *net.UDPConn {
-	dialer := net.Dialer{LocalAddr: local.address.addr(), Control: reuseUDP}
+	dialer := net.Dialer{LocalAddr: local.address.addr(), Control: udpControl(local.iface)}
 	conn := throw2(dialer.Dial("udp4", remote.string())).(*net.UDPConn)
 
 	throw(conn.SetReadBuffer(1 << 20))

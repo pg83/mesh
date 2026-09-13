@@ -29,9 +29,22 @@ with tempfile.TemporaryDirectory(prefix='mesh-darwin-') as directory:
     (root/'node.json').write_text(json.dumps(dict(index=1, subnet='10.77.0.0/24', mtu=1380,
         control='127.0.0.1:18058', registry=registry, endpoint=[dict(proto='udp', addr=host, port=17001)])))
     (root/'key').write_text(a['key'])
+    capture_log = open(root/'udp-checksums.log', 'w+')
+    capture_err = open(root/'tcpdump.log', 'w+')
+    capture = subprocess.Popen(['/usr/sbin/tcpdump', '-i', 'lo0', '-nn', '-l', '-vv',
+        'udp and src port 17001 and dst port 17002'], stdout=capture_log, stderr=capture_err)
     peer_log = open(root/'peer.log', 'w+')
     peer_process = subprocess.Popen([probe, 'echo', root/'peer.json', f'{host}:17001', '1'], stdout=peer_log, stderr=peer_log)
     try:
+        deadline = time.monotonic()+10
+        while time.monotonic()<deadline:
+            capture_err.seek(0)
+            if 'listening on' in capture_err.read():
+                break
+            assert capture.poll() is None, 'tcpdump exited'
+            time.sleep(.1)
+        else:
+            raise AssertionError('tcpdump did not start')
         # A second run verifies that utun and its route disappear on exit.
         for attempt in range(2):
             node_log = open(root/f'node-{attempt}.log', 'w+')
@@ -69,3 +82,12 @@ with tempfile.TemporaryDirectory(prefix='mesh-darwin-') as directory:
         peer_log.seek(0)
         print(peer_log.read())
         peer_log.close()
+        capture.terminate()
+        capture.wait(timeout=5)
+        capture_log.seek(0)
+        packets = capture_log.read()
+        capture_log.close()
+        capture_err.close()
+    assert '[bad udp cksum' not in packets, 'bad UDP checksum on Darwin:\n'+packets
+    assert '[udp sum ok]' in packets, 'no verified UDP packets captured:\n'+packets
+    print('Darwin outgoing UDP checksums verified on the captured packets')

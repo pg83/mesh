@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/binary"
 	"errors"
-	"golang.org/x/net/ipv4"
 	"net"
 	"time"
 )
@@ -202,9 +201,7 @@ func (a *EdgeActor) send(inner []byte) {
 	} else if a.udp != nil {
 		a.udp.conn.SetWriteDeadline(time.Now().Add(100 * time.Millisecond))
 
-		control := &ipv4.ControlMessage{Src: a.udp.local.address.ip(), IfIndex: a.udp.local.iface}
-
-		a.udp.conn.WriteMsgUDP(packet, control.Marshal(), nil)
+		a.udp.write(packet)
 	}
 }
 
