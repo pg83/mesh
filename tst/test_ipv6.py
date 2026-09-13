@@ -23,6 +23,9 @@ def test():
 
         proc = lab.nodes['laptop'].proc
         # These deadlines are shorter than the 30s fallback scan: OS events must work.
+        # Linux otherwise removes IPv6 addresses on link-down. Here we test
+        # the link event itself; address removal/addition is tested separately.
+        lab.run('laptop', ['sysctl', '-qw', 'net.ipv6.conf.s1.keep_addr_on_down=1'])
         lab.run('laptop', ['ip', 'link', 'set', 's1', 'down'])
         lab.wait(lambda: not attached(), 'interface down notification', timeout=3)
         lab.run('laptop', ['ip', 'link', 'set', 's1', 'up'])

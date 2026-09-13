@@ -114,7 +114,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		public := config.description()
 		bind := config.binding()
 
-		if public.Addr == "" || bind.IP == nil {
+		if public.Addr == "" || bind.IP == nil || bind.IP.IsLoopback() || bind.IP.IsLinkLocalUnicast() {
 			continue
 		}
 
