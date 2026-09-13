@@ -51,6 +51,10 @@ func (s *Session) seal(inner []byte, id uint64) []byte {
 		out[0] = packetGossip
 	}
 
+	if len(inner) > 0 && inner[0] == innerRegistry {
+		out[0] = packetRegistry
+	}
+
 	binary.LittleEndian.PutUint16(out[1:], s.local)
 	binary.LittleEndian.PutUint64(out[3:], id)
 	throw2(rand.Read(out[11:headerTransport]))

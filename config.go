@@ -27,14 +27,15 @@ type PeerConfig struct {
 }
 
 type Config struct {
-	Index    uint16           `json:"index"`
-	Key      string           `json:"key,omitempty"`
-	Endpoint []EndpointConfig `json:"endpoint"`
-	Subnet   string           `json:"subnet"`
-	Tun      string           `json:"tun,omitempty"`
-	Mtu      int              `json:"mtu"`
-	Control  string           `json:"control,omitempty"`
-	Registry []PeerConfig     `json:"registry"`
+	RegistryVersion uint64           `json:"registry_version,omitempty"`
+	Index           uint16           `json:"index"`
+	Key             string           `json:"key,omitempty"`
+	Endpoint        []EndpointConfig `json:"endpoint"`
+	Subnet          string           `json:"subnet"`
+	Tun             string           `json:"tun,omitempty"`
+	Mtu             int              `json:"mtu"`
+	Control         string           `json:"control,omitempty"`
+	Registry        []PeerConfig     `json:"registry"`
 }
 
 func loadConfig(path string) *Config {

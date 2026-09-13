@@ -17,6 +17,7 @@ type WSStatus struct {
 }
 
 type Status struct {
+	Registry    []RegistryRecord    `json:"registry"`
 	Connections []WSStatus          `json:"connections"`
 	Dialing     int                 `json:"dialing"`
 	Endpoints   map[uint64]Endpoint `json:"endpoints"`
@@ -31,6 +32,7 @@ func (n *Node) status() *Status {
 	now := time.Now()
 	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Update{}, Vertices: []uint64{}, Routes: map[string][]Edge{}}
 
+	st.Registry = n.reg.records()
 	st.Endpoints = map[uint64]Endpoint{}
 
 	for id, ep := range n.addresses {

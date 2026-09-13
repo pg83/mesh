@@ -5,8 +5,8 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/pg83/mesh)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Private overlay network for a closed set of nodes. Every node knows every
-public key; UDP and WS/WSS links use keys derived from those static keys and carry
+Private overlay network for a closed set of nodes. Nodes exchange their
+public-key registries; UDP and WS/WSS links use keys derived from those keys and carry
 authenticated encrypted packets; a gossip map on each node describes who can reach whom; the
 source picks the whole path and relays only follow it; IP rides on top over a
 TUN device.
@@ -55,13 +55,33 @@ fields are ignored.
 }
 ```
 
-The registry is the same on every node: index, public key, internal
-address, and the static endpoints a node has, if any. Node indexes must be
+The initial registry contains the local node and its known peers: index,
+public key, internal address, and static endpoints, if any. Only the bootstrap
+hosts need the complete registry; other nodes can start with their own entry
+and those hosts. TUN and discovery start immediately from this local configuration.
+Node indexes must be
 in the range 1–65535; zero is reserved and rejected in the registry.
 A node without static
 endpoints is never dialed by a node that has not heard of it; it dials, and
 its own advertised addresses let others dial it back later. `tun` (default
 `mesh0` on Linux, `utun` on macOS) and `mtu` (default 1380) are optional.
+
+`registry_version` sets the version of every record loaded from the config;
+it defaults to `1`. Set a higher version in the authoritative configuration
+when changing its registry. Versions are not derived from startup or send time.
+Every five seconds each outgoing edge sends a separate registry message with
+a random selection of known records fitting in one encrypted packet of at most
+1200 bytes. Learned records retain their versions and are retransmitted too.
+An unknown index is added; an existing record changes only for a strictly higher
+version. There are no deletions, expiry, whole-registry replacement or fragments.
+Records too large for one packet are rejected at startup.
+
+Registry messages use the existing authenticated peer sessions, with their own
+outer packet type `5` and inner type `4`. They can traverse the mesh by repeated
+exchange between neighbors. Trusted peers can introduce other peers; there is
+no separate origin signature. Registry changes publish immutable actor snapshots,
+and a public-key change replaces the affected sessions. The running node's own
+key and mesh IP stay fixed by its local configuration.
 
 Both the host and registry use the same flat `endpoint` objects. The node
 opens the union of its host list and its own registry list. Other nodes
@@ -377,10 +397,12 @@ The Unix status socket and `status -s` have been removed.
 - `GET /status`: raw node status, including 64-bit endpoint IDs.
 - `GET /topology`: public registry, all live directed graph edges and selected
   routes. Endpoint IDs are decimal strings so browsers preserve every bit.
-- `GET /config?node=mini`: a complete configuration for an ephemeral registry
+- `GET /config?node=mini`: a bootstrap configuration for an ephemeral registry
   entry. Select by its optional `name` or numeric `index`. Static entries
   cannot be exported as ephemeral nodes. The result includes no private key,
   TLS file paths or host binding overrides, and selects the native default TUN.
+  It contains the chosen node and peers with static endpoints, at the default
+  registry version `1`; the rest is learned from the mesh.
 
 `mesh web` is a separate, unprivileged process. It reads the localhost control
 API and serves the embedded Cytoscape.js 3.34.3 interface without a CDN:

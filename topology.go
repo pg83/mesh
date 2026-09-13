@@ -61,7 +61,7 @@ func (n *Node) publishSnapshot() {
 		actors[edge] = actor.inbox.in
 	}
 
-	view := &Snapshot{graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local), owners: maps.Clone(n.owners),
+	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local), owners: maps.Clone(n.owners),
 		routes: n.routes, actors: actors, enabled: enabled}
 
 	view.gossip = n.advertisements()
@@ -75,6 +75,10 @@ func (n *Node) publishSnapshot() {
 }
 
 func (n *Node) observe(r EdgeReport) {
+	if r.session != n.session(r.peer) {
+		return
+	}
+
 	if !r.seen.IsZero() && time.Since(r.seen) < sessionTimeout && r.seen.After(n.observed[r.edge]) {
 		_, exists := n.observed[r.edge]
 
@@ -123,10 +127,19 @@ func (n *Node) graphLoop() {
 			case *Ad:
 				n.handleAd(v)
 				dirty = true
+			case RegistryRecords:
+				if n.handleRegistry(v) {
+					n.publishSnapshot()
+					dirty = false
+				}
 			case EdgeReport:
 				n.observe(v)
 				dirty = true
 			case Discovery:
+				if v.session != n.session(v.peer) {
+					continue
+				}
+
 				local, ok := n.incoming[v.wire]
 
 				if !ok {
@@ -139,7 +152,7 @@ func (n *Node) graphLoop() {
 
 				n.edgePair(Edge{From: local, To: remote}, v.peer)
 
-				n.observe(EdgeReport{edge: edge, peer: v.peer, seen: v.received.at})
+				n.observe(EdgeReport{session: v.session, edge: edge, peer: v.peer, seen: v.received.at})
 
 				if created {
 					n.publishSnapshot()
@@ -149,7 +162,7 @@ func (n *Node) graphLoop() {
 
 				post(n.actors[edge].inbox.in, any(v.received))
 			case *WSConnection:
-				if n.local[v.edge.From] == nil {
+				if n.local[v.edge.From] == nil || n.session(v.peer) != v.session {
 					v.stop()
 					v.conn.CloseNow()
 

@@ -5,14 +5,20 @@ import "encoding/binary"
 const (
 	packetTransport = 3
 	packetGossip    = 4
+	packetRegistry  = 5
 	innerData       = 1
 	innerAd         = 2
 	innerBinding    = 3
+	innerRegistry   = 4
 	nonceSize       = 24
 	headerTransport = 1 + 2 + 8 + nonceSize
 	maxPacket       = 65535
 	maxHops         = 16
 )
+
+func validPacketType(kind byte) bool {
+	return kind == packetTransport || kind == packetGossip || kind == packetRegistry
+}
 
 type Data struct {
 	path   []Edge

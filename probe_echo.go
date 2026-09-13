@@ -10,7 +10,7 @@ import (
 
 func echoProbe(path, remote string, index uint16) {
 	cfg := loadConfig(path)
-	reg := newRegistry(cfg.Registry)
+	reg := newRegistry(cfg.Registry, cfg.RegistryVersion)
 	me, peer := reg.byIndex[cfg.Index], reg.byIndex[index]
 	key := deriveKey(decodeKey(cfg.Key))
 	session := newSession(me, peer, key.private)

@@ -62,7 +62,7 @@ type Node struct {
 }
 
 func newNode(cfg *Config, log *slog.Logger) *Node {
-	reg := newRegistry(cfg.Registry)
+	reg := newRegistry(cfg.Registry, cfg.RegistryVersion)
 	me := reg.byIndex[cfg.Index]
 
 	if me == nil {
@@ -86,6 +86,10 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	}
 
 	for index, peer := range reg.byIndex {
+		if index != cfg.Index {
+			peer.session = newSession(me, peer, dh.private)
+		}
+
 		n.remember(peer.endpoint())
 
 		for _, config := range peer.endpoints {
@@ -187,5 +191,5 @@ func (n *Node) nextPacketID() uint64 {
 }
 
 func (n *Node) session(peer uint16) *Session {
-	return newSession(n.reg.byIndex[n.cfg.Index], n.reg.byIndex[peer], n.key.private)
+	return n.reg.byIndex[peer].session
 }

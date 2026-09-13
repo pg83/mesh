@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -8,6 +9,7 @@ import (
 )
 
 type Snapshot struct {
+	registry  *Registry
 	graph     map[Edge]State
 	addresses map[uint64]Endpoint
 	local     map[uint64]*LocalEndpoint
@@ -29,6 +31,7 @@ type Outbound struct{ inner []byte }
 type TunPacket struct{ ip []byte }
 
 type EdgeReport struct {
+	session    *Session
 	edge       Edge
 	peer       uint16
 	seen       time.Time
@@ -37,6 +40,7 @@ type EdgeReport struct {
 }
 
 type Discovery struct {
+	session  *Session
 	wire     Endpoint
 	remote   Endpoint
 	peer     uint16
@@ -50,18 +54,19 @@ type UDPLink struct {
 }
 
 type EdgeActor struct {
-	node     *Node
-	edge     Edge
-	peer     uint16
-	outgoing bool
-	inbox    *Mailbox[any]
-	view     *Snapshot
-	session  *Session
-	packetID uint64
-	seen     time.Time
-	udp      *UDPLink
-	ws       *WSConnection
-	dial     <-chan DialResult
+	node         *Node
+	edge         Edge
+	peer         uint16
+	outgoing     bool
+	inbox        *Mailbox[any]
+	view         *Snapshot
+	session      *Session
+	packetID     uint64
+	seen         time.Time
+	nextRegistry time.Time
+	udp          *UDPLink
+	ws           *WSConnection
+	dial         <-chan DialResult
 }
 
 func (a *EdgeActor) run() {
@@ -81,12 +86,20 @@ func (a *EdgeActor) run() {
 			switch v := msg.(type) {
 			case *Snapshot:
 				first := a.view == nil
+				session := v.registry.byIndex[a.peer].session
+
+				if session != a.session {
+					a.closeTransport()
+					a.session = session
+					a.seen = time.Time{}
+				}
 
 				a.view = v
 				a.updateTransport()
 
 				if first && a.udp != nil {
 					a.gossip()
+					a.exchangeRegistry(time.Now())
 				}
 			case Received:
 				a.receive(v)
@@ -110,7 +123,21 @@ func (a *EdgeActor) run() {
 			a.report()
 
 			a.gossip()
+			a.exchangeRegistry(time.Now())
 		}
+	}
+}
+
+func (a *EdgeActor) closeTransport() {
+	if a.udp != nil {
+		close(a.udp.done)
+		a.udp.conn.Close()
+		a.udp = nil
+	}
+
+	if a.ws != nil {
+		a.ws.stop()
+		a.ws = nil
 	}
 }
 
@@ -125,7 +152,7 @@ func (a *EdgeActor) gossip() {
 }
 
 func (a *EdgeActor) report() {
-	report := EdgeReport{edge: a.edge, peer: a.peer, seen: a.seen, dialing: a.dial != nil}
+	report := EdgeReport{session: a.session, edge: a.edge, peer: a.peer, seen: a.seen, dialing: a.dial != nil}
 
 	if a.ws != nil {
 		report.connection = &WSStatus{Edge: connectionKey(a.edge), Origin: a.ws.origin, ID: a.ws.id}
@@ -226,7 +253,7 @@ func (a *EdgeActor) receive(r Received) {
 		}
 	}
 
-	if binary.LittleEndian.Uint16(r.packet[1:]) != a.peer || (r.packet[0] != packetTransport && r.packet[0] != packetGossip) {
+	if binary.LittleEndian.Uint16(r.packet[1:]) != a.peer || !validPacketType(r.packet[0]) {
 		return
 	}
 
@@ -255,6 +282,10 @@ func (a *EdgeActor) receive(r Received) {
 		a.advertisement(inner)
 	case innerData:
 		a.forward(inner)
+	case innerRegistry:
+		if records, ok := decodeRegistry(inner); ok {
+			post(a.node.events.in, any(records))
+		}
 	}
 }
 
@@ -290,7 +321,7 @@ func (a *EdgeActor) forward(inner []byte) {
 	}
 
 	if d.cursor == len(d.path)-1 {
-		if validIPv4(d.ip) && endpoint(net.IP(d.ip[16:20]), 0).hash() == a.node.reg.byIndex[a.node.cfg.Index].endpoint().hash() {
+		if validIPv4(d.ip) && endpoint(net.IP(d.ip[16:20]), 0).hash() == a.view.registry.byIndex[a.node.cfg.Index].endpoint().hash() {
 			post(a.node.tunWrites.in, d.ip)
 		}
 
@@ -304,29 +335,25 @@ func (a *EdgeActor) forward(inner []byte) {
 
 func (n *Node) discoverUDP(socket *UDPSocket) {
 	buf := make([]byte, maxPacket)
-	sessions := map[uint16]*Session{}
 
 	for {
 		size, dst, addr, err := socket.read(buf)
 
 		throw(err)
 
-		if size < headerTransport || dst == nil || (buf[0] != packetTransport && buf[0] != packetGossip) {
+		if size < headerTransport || dst == nil || !validPacketType(buf[0]) {
 			continue
 		}
 
 		peer := binary.LittleEndian.Uint16(buf[1:])
+		view := n.currentSnapshot(context.Background())
+		entry := view.registry.byIndex[peer]
 
-		if peer == n.cfg.Index || n.reg.byIndex[peer] == nil {
+		if peer == n.cfg.Index || entry == nil {
 			continue
 		}
 
-		s := sessions[peer]
-
-		if s == nil {
-			s = n.session(peer)
-			sessions[peer] = s
-		}
+		s := entry.session
 
 		if _, ok := s.open(buf[:size]); !ok {
 			continue
@@ -334,7 +361,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 
 		remote := addr.(*net.UDPAddr)
 
-		post(n.events.in, any(Discovery{wire: endpoint(dst, int(socket.port)), remote: endpoint(remote.IP, remote.Port), peer: peer,
+		post(n.events.in, any(Discovery{session: s, wire: endpoint(dst, int(socket.port)), remote: endpoint(remote.IP, remote.Port), peer: peer,
 			received: Received{packet: append([]byte(nil), buf[:size]...), at: time.Now()}}))
 	}
 }

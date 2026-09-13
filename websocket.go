@@ -27,16 +27,17 @@ type WSBinding struct {
 	To   Endpoint `json:"to"`
 }
 type WSConnection struct {
-	conn   *websocket.Conn
-	edge   Edge
-	source Endpoint
-	target Endpoint
-	peer   uint16
-	origin uint64
-	id     uint64
-	queue  *Mailbox[[]byte]
-	ctx    context.Context
-	cancel context.CancelFunc
+	session *Session
+	conn    *websocket.Conn
+	edge    Edge
+	source  Endpoint
+	target  Endpoint
+	peer    uint16
+	origin  uint64
+	id      uint64
+	queue   *Mailbox[[]byte]
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 type DialResult struct{ conn *WSConnection }
@@ -139,6 +140,8 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 
 		c := newWSConnection(socket, binding.To, binding.From, session.peer, binding.From.hash(), binary.LittleEndian.Uint64(packet[3:]))
 
+		c.session = session
+
 		n.events.in <- c
 
 		<-c.ctx.Done()
@@ -164,11 +167,11 @@ func (n *Node) readBinding(packet []byte, view *Snapshot) (*Session, WSBinding, 
 
 	peer := binary.LittleEndian.Uint16(packet[1:])
 
-	if peer == n.cfg.Index || n.reg.byIndex[peer] == nil {
+	if peer == n.cfg.Index || view.registry.byIndex[peer] == nil {
 		return nil, binding, false
 	}
 
-	session := n.session(peer)
+	session := view.registry.byIndex[peer].session
 	inner, ok := session.open(packet)
 
 	if !ok || len(inner) == 0 || inner[0] != innerBinding || json.Unmarshal(inner[1:], &binding) != nil {
@@ -283,13 +286,14 @@ func (n *Node) dialWS(result chan<- DialResult, view *Snapshot, local net.IP, so
 		}
 
 		established = newWSConnection(socket, source, target, peer, source.hash(), binary.LittleEndian.Uint64(first[3:]))
+		established.session = session
 	}).catch(func(e *Exception) { n.log.Debug("websocket dial failed", "endpoint", target.string(), "err", e) })
 }
 
 func (a *EdgeActor) attachWS(c *WSConnection) {
 	old := a.ws
 
-	if a.view == nil || a.view.local[a.edge.From] == nil || (old != nil && (old.origin < c.origin || (old.origin == c.origin && old.id >= c.id))) {
+	if a.view == nil || c.session != a.session || a.view.local[a.edge.From] == nil || (old != nil && (old.origin < c.origin || (old.origin == c.origin && old.id >= c.id))) {
 		c.stop()
 		c.conn.CloseNow()
 

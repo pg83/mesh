@@ -42,7 +42,7 @@ func main() {
 	}
 
 	cfg := loadConfig(os.Args[1])
-	reg := newRegistry(cfg.Registry)
+	reg := newRegistry(cfg.Registry, cfg.RegistryVersion)
 	peer := reg.byIndex[uint16(throw2(json.Number(os.Args[3]).Int64()))]
 	dh := deriveKey(decodeKey(cfg.Key))
 	session := newSession(reg.byIndex[cfg.Index], peer, dh.private)

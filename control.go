@@ -66,24 +66,18 @@ func (n *Node) readStatus(ctx context.Context) *Status {
 	return nil
 }
 
-func (n *Node) publicRegistry() []PeerConfig {
+func (n *Node) publicRegistry(ctx context.Context) []PeerConfig {
 	peers := []PeerConfig{}
 
-	for _, peer := range n.cfg.Registry {
-		public := PeerConfig{Name: peer.Name, Index: peer.Index, Pub: peer.Pub, Intip: peer.Intip, Endpoint: []EndpointConfig{}}
-
-		for _, ep := range peer.Endpoint {
-			public.Endpoint = append(public.Endpoint, EndpointConfig{Proto: ep.Proto, Addr: ep.Addr, Port: ep.Port, Path: ep.Path})
-		}
-
-		peers = append(peers, public)
+	for _, record := range n.currentSnapshot(ctx).registry.records() {
+		peers = append(peers, record.PeerConfig)
 	}
 
 	return peers
 }
 
 func (n *Node) exportConfig(w http.ResponseWriter, r *http.Request) {
-	peers := n.publicRegistry()
+	peers := n.publicRegistry(r.Context())
 	name := r.URL.Query().Get("node")
 
 	for _, peer := range peers {
@@ -109,9 +103,17 @@ func (n *Node) exportConfig(w http.ResponseWriter, r *http.Request) {
 			port = 8057
 		}
 
+		bootstrap := []PeerConfig{}
+
+		for _, candidate := range peers {
+			if candidate.Index == peer.Index || len(candidate.Endpoint) != 0 {
+				bootstrap = append(bootstrap, candidate)
+			}
+		}
+
 		cfg := Config{
 			Index: peer.Index, Subnet: n.cfg.Subnet, Mtu: n.cfg.Mtu,
-			Control: "127.0.0.1:8058", Registry: peers,
+			Control: "127.0.0.1:8058", Registry: bootstrap,
 			Endpoint: []EndpointConfig{{Proto: "udp", Addr: "0.0.0.0", Port: int(port)}, {Proto: "udp", Addr: "::", Port: int(port)}},
 		}
 
@@ -137,7 +139,7 @@ func (n *Node) controlLoop() {
 	}))
 
 	mux.HandleFunc("GET /topology", httpBoundary(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, topology(n.readStatus(r.Context()), n.publicRegistry()))
+		writeJSON(w, topology(n.readStatus(r.Context()), n.publicRegistry(r.Context())))
 	}))
 
 	mux.HandleFunc("GET /config", httpBoundary(n.exportConfig))
