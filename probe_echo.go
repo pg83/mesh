@@ -31,13 +31,14 @@ func echoProbe(path, _ string, index uint16) {
 		if time.Now().After(next) {
 			for target, other := range clients {
 				edges := []Edge{{From: me.vertex().hash(), To: mine.hash()}, {From: mine.hash(), To: me.vertex().hash()}, {From: other.hash(), To: mine.hash()}}
-				ad := &Ad{Vertices: []Vertex{me.vertex(), mine, other}}
+				updates := EdgeRecords{}
 
 				for _, edge := range edges {
-					ad.Edges = append(ad.Edges, Update{Edge: edge, State: State{ID: uint64(time.Now().UnixNano()), Alive: true}})
+					updates = append(updates, Update{Edge: edge, State: State{ID: uint64(time.Now().UnixNano()), Alive: true}})
 				}
 
-				send(target.addr(), encodeAd(ad))
+				send(target.addr(), encodeVertices(VertexRecords{me.vertex(), mine, other}))
+				send(target.addr(), encodeEdges(updates))
 			}
 
 			next = time.Now().Add(200 * time.Millisecond)

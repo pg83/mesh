@@ -25,8 +25,11 @@ def test():
     with Mixed() as lab:
         lab.wait_route('a', 'b', ['r', 'b'])
         lab.wait_route('b', 'a', ['r', 'a'])
-        assert [hop['to']['proto'] for hop in lab.endpoint_route('a', 'b')] == ['udp', 'ws']
-        assert [hop['to']['proto'] for hop in lab.endpoint_route('b', 'a')] == ['ws', 'udp']
+        def transports(source, target):
+            return [hop['to' if hop['from']['proto'] == 'source' else 'from']['proto']
+                    for hop in lab.endpoint_route(source, target)]
+        assert transports('a', 'b') == ['udp', 'ws']
+        assert transports('b', 'a') == ['ws', 'udp']
         for name in ['a', 'b']:
             workload.udp_server(lab, name)
         for source, target in [('a', 'b'), ('b', 'a')]:

@@ -281,7 +281,10 @@ class Probe:
 
     def send(self, **command):
         if command.get('op') == 'ad':
-            command['body'] = lib.wire_ad(command['body'])
+            ad = lib.wire_ad(command['body'])
+            self.send(op='vertices', body=ad['vertices'])
+            self.send(op='edges', body=ad['edges'])
+            return
         self.proc.stdin.write(json.dumps(command).encode() + b'\n')
         assert self.read()['sent']
 

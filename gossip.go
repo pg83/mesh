@@ -8,10 +8,8 @@ import (
 
 const gossipBatchSize = 8
 
-type Ad struct {
-	Edges    []Update `json:"edges"`
-	Vertices []Vertex `json:"vertices"`
-}
+type EdgeRecords []Update
+type VertexRecords []Vertex
 
 func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalAddress {
 	local := map[uint64]*LocalAddress{}
@@ -100,7 +98,7 @@ func (n *Node) refresh(now time.Time) {
 
 func (n *Node) advertisements() [][]byte {
 	packets := [][]byte{}
-	updates := []Update{}
+	updates := EdgeRecords{}
 
 	for edge, state := range n.graph {
 		updates = append(updates, Update{Edge: edge, State: state})
@@ -108,40 +106,44 @@ func (n *Node) advertisements() [][]byte {
 
 	slices.SortFunc(updates, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
 
-	for start := 0; start < len(updates); {
-		for size := min(gossipBatchSize, len(updates)-start); ; size-- {
-			ad := Ad{Edges: updates[start : start+size]}
-			seen := map[uint64]bool{}
+	vertices := VertexRecords{}
+	seen := map[uint64]bool{}
+	size := 3
 
-			for _, u := range ad.Edges {
-				for _, id := range []uint64{u.From, u.To} {
-					if !seen[id] {
-						ad.Vertices = append(ad.Vertices, n.addresses[id])
-						seen[id] = true
-					}
-				}
+	for _, update := range updates {
+		for _, id := range []uint64{update.From, update.To} {
+			if seen[id] {
+				continue
 			}
 
-			packet := encodeAd(&ad)
+			vertex := n.addresses[id]
+			length := len(appendVertex(nil, vertex))
 
-			if len(packet) <= 1000 || size == 1 {
-				packets = append(packets, packet)
-				start += size
-
-				break
+			if size+length > 1000 && len(vertices) != 0 {
+				packets = append(packets, encodeVertices(vertices))
+				vertices = nil
+				size = 3
 			}
+
+			vertices = append(vertices, vertex)
+			seen[id] = true
+			size += length
 		}
+	}
+
+	if len(vertices) != 0 {
+		packets = append(packets, encodeVertices(vertices))
+	}
+
+	for start := 0; start < len(updates); start += gossipBatchSize {
+		packets = append(packets, encodeEdges(updates[start:min(start+gossipBatchSize, len(updates))]))
 	}
 
 	return packets
 }
 
-func (n *Node) handleAd(ad *Ad) {
-	for _, ep := range ad.Vertices {
-		n.remember(ep)
-	}
-
-	for _, update := range ad.Edges {
+func (n *Node) handleEdges(updates EdgeRecords) {
+	for _, update := range updates {
 		if update.ID == 0 || n.addresses[update.From].hash() == 0 || n.addresses[update.To].hash() == 0 || update.From == update.To {
 			continue
 		}

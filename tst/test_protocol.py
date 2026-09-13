@@ -23,7 +23,10 @@ def test():
         assert response()['ready']
         def send(op, **fields):
             if op == 'ad':
-                fields['body'] = lib.wire_ad(fields['body'])
+                ad = lib.wire_ad(fields['body'])
+                send('vertices', body=ad['vertices'])
+                send('edges', body=ad['edges'])
+                return
             probe.stdin.write(json.dumps(dict(op=op, **fields)).encode() + b'\n')
             probe.stdin.flush()
             assert response()['sent']

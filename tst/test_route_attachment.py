@@ -5,7 +5,9 @@ import workload
 
 
 def test():
-    with lib.Lab(['a', 'b', 'r'], {1: ['a', 'b', 'r']}, statics=['a']) as lab:
+    lab = lib.Lab(['a', 'b', 'r'], {1: ['a', 'b', 'r']}, statics=['a'])
+    lab.configs['b'] = dict(endpoint=[])
+    with lab:
         lab.wait_route('a', 'b', ['b'])
         lab.wait_route('b', 'a', ['a'])
         workload.udp_server(lab, 'b')

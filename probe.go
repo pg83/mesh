@@ -130,12 +130,24 @@ func main() {
 		case "short-tag":
 			out = session.seal(nil, packetID)
 			out = out[:len(out)-1]
-		case "ad":
-			ad := &Ad{}
+		case "edges":
+			var edges EdgeRecords
 
-			throw(json.Unmarshal(command.Body, ad))
+			throw(json.Unmarshal(command.Body, &edges))
 
-			out = session.seal(encodeAd(ad), packetID)
+			out = session.seal(encodeEdges(edges), packetID)
+		case "vertices":
+			var vertices VertexRecords
+
+			throw(json.Unmarshal(command.Body, &vertices))
+
+			out = session.seal(encodeVertices(vertices), packetID)
+		case "open":
+			inner, ok := session.open(throw2(hex.DecodeString(command.Hex)))
+
+			throw(encoder.Encode(map[string]any{"opened": ok, "hex": hex.EncodeToString(inner)}))
+
+			continue
 		default:
 			throwFmt("unknown probe command %q", command.Op)
 		}

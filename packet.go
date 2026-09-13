@@ -4,12 +4,14 @@ import "encoding/binary"
 
 const (
 	packetTransport = 3
-	packetGossip    = 4
+	packetEdges     = 4
 	packetRegistry  = 5
+	packetVertices  = 6
 	innerData       = 1
-	innerAd         = 2
+	innerEdges      = 2
 	innerBinding    = 3
 	innerRegistry   = 4
+	innerVertices   = 5
 	nonceSize       = 24
 	headerTransport = 1 + 2 + 8 + nonceSize
 	maxPacket       = 65535
@@ -17,7 +19,7 @@ const (
 )
 
 func validPacketType(kind byte) bool {
-	return kind == packetTransport || kind == packetGossip || kind == packetRegistry
+	return kind == packetTransport || kind == packetEdges || kind == packetRegistry || kind == packetVertices
 }
 
 type Data struct {

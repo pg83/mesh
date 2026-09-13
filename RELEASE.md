@@ -1,7 +1,5 @@
-Endpoints now describe incoming listeners only. UDP, WS and WSS connections can be initiated from every eligible local interface even when the node has no listeners. Outgoing UDP uses ephemeral ports; accepted connections carry return traffic and registry updates.
+Mesh now sends graph vertices and edges as separate authenticated packet types once per second. Vertex descriptions appear only once per publication. Edges with unknown vertices are discarded and can be accepted on a later publication after the descriptions arrive.
 
-The graph separates ingress endpoints from source vertices. UDP bindings preserve one-way links without waiting for a response. Explicit binds track interface appearance/removal, including loopback origins behind a WebSocket reverse proxy. Darwin no longer reserves a TCP port for each UDP listener.
+For the captured lab graph, this reduces one publication from 32,477 to 21,976 bytes of UDP payload. Connection selection, publication frequency and edge versions are unchanged.
 
-Downloaded ephemeral configs contain no listeners or private key. The status description map is now `addresses`; the web graph distinguishes source vertices from host vertices.
-
-This release uses `mesh/10` and requires peers to be updated together. Releases through 10 use an incompatible transport.
+This release uses mesh/11. Update peers together; releases through 12 use an incompatible wire format.

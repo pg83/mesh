@@ -140,8 +140,14 @@ func (n *Node) graphLoop() {
 				n.refresh(time.Now())
 				n.publishSnapshot()
 				dirty = false
-			case *Ad:
-				n.handleAd(v)
+			case EdgeRecords:
+				n.handleEdges(v)
+				dirty = true
+			case VertexRecords:
+				for _, vertex := range v {
+					n.remember(vertex)
+				}
+
 				dirty = true
 			case RegistryRecords:
 				if n.handleRegistry(v) {

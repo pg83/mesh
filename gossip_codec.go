@@ -122,18 +122,17 @@ func decodeVertex(data []byte) (Vertex, []byte, bool) {
 	return ep, data, true
 }
 
-func encodeAd(ad *Ad) []byte {
-	if len(ad.Edges) > 65535 || len(ad.Vertices) > 65535 {
-		throwFmt("too many gossip records")
+func encodeEdges(edges EdgeRecords) []byte {
+	if len(edges) > 65535 {
+		throwFmt("too many edge records")
 	}
 
-	out := make([]byte, 1, 5+gossipEdgeSize*len(ad.Edges)+7*len(ad.Vertices))
+	out := make([]byte, 1, 3+gossipEdgeSize*len(edges))
 
-	out[0] = innerAd
-	out = binary.LittleEndian.AppendUint16(out, uint16(len(ad.Edges)))
-	out = binary.LittleEndian.AppendUint16(out, uint16(len(ad.Vertices)))
+	out[0] = innerEdges
+	out = binary.LittleEndian.AppendUint16(out, uint16(len(edges)))
 
-	for _, update := range ad.Edges {
+	for _, update := range edges {
 		out = binary.LittleEndian.AppendUint64(out, update.From)
 		out = binary.LittleEndian.AppendUint64(out, update.To)
 		out = binary.LittleEndian.AppendUint64(out, update.ID)
@@ -147,50 +146,76 @@ func encodeAd(ad *Ad) []byte {
 		out = append(out, alive)
 	}
 
-	for _, ep := range ad.Vertices {
-		out = appendVertex(out, ep)
+	return out
+}
+
+func decodeEdges(inner []byte) (EdgeRecords, bool) {
+	if len(inner) < 3 {
+		return nil, false
+	}
+
+	count := int(binary.LittleEndian.Uint16(inner[1:3]))
+	data := inner[3:]
+
+	if count*gossipEdgeSize != len(data) {
+		return nil, false
+	}
+
+	edges := make(EdgeRecords, count)
+
+	for i := range edges {
+		if data[24] > 1 {
+			return nil, false
+		}
+
+		edges[i] = Update{Edge: Edge{From: binary.LittleEndian.Uint64(data), To: binary.LittleEndian.Uint64(data[8:])},
+			State: State{ID: binary.LittleEndian.Uint64(data[16:]), Alive: data[24] == 1}}
+		data = data[gossipEdgeSize:]
+	}
+
+	return edges, true
+}
+
+func encodeVertices(vertices VertexRecords) []byte {
+	if len(vertices) > 65535 {
+		throwFmt("too many vertex records")
+	}
+
+	out := binary.LittleEndian.AppendUint16([]byte{innerVertices}, uint16(len(vertices)))
+
+	for _, vertex := range vertices {
+		out = appendVertex(out, vertex)
 	}
 
 	return out
 }
 
-func decodeAd(inner []byte) (*Ad, bool) {
-	if len(inner) < 5 {
+func decodeVertices(inner []byte) (VertexRecords, bool) {
+	if len(inner) < 3 {
 		return nil, false
 	}
 
-	edges := int(binary.LittleEndian.Uint16(inner[1:3]))
-	endpoints := int(binary.LittleEndian.Uint16(inner[3:5]))
-	data := inner[5:]
+	count := int(binary.LittleEndian.Uint16(inner[1:3]))
+	data := inner[3:]
 
-	if edges*gossipEdgeSize+endpoints*7 > len(data) {
+	if count*7 > len(data) {
 		return nil, false
 	}
 
-	ad := &Ad{Edges: make([]Update, edges), Vertices: make([]Vertex, endpoints)}
+	vertices := make(VertexRecords, count)
 
-	for i := range ad.Edges {
-		if data[24] > 1 {
-			return nil, false
-		}
-
-		ad.Edges[i] = Update{Edge: Edge{From: binary.LittleEndian.Uint64(data), To: binary.LittleEndian.Uint64(data[8:])},
-			State: State{ID: binary.LittleEndian.Uint64(data[16:]), Alive: data[24] == 1}}
-		data = data[gossipEdgeSize:]
-	}
-
-	for i := range ad.Vertices {
+	for i := range vertices {
 		ep, rest, ok := decodeVertex(data)
 
 		if !ok {
 			return nil, false
 		}
 
-		ad.Vertices[i] = ep
+		vertices[i] = ep
 		data = rest
 	}
 
-	return ad, len(data) == 0
+	return vertices, len(data) == 0
 }
 
 func appendEndpoint(out []byte, ep Endpoint) []byte {

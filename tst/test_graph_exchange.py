@@ -20,17 +20,12 @@ def test():
         captured = lab.intercept('r', 'a', 'hold', kind=4)
         probe.send(op='ad', body=dict(edges=[xy]))
         lab.wait(lambda: len(captured['held']) == 1, 'unsigned gossip captured')
-        assert len(captured['held'][0][1]) == 20 + 8 + 35 + 16 + 5 + 25 + 2 * 7
+        assert len(captured['held'][0][1]) == 20 + 8 + 35 + 16 + 3 + 25
         lab.clear(captured)
         lab.replay(captured, transform=lambda packet: packet[:-1] + bytes([packet[-1] ^ 1]))
         probe.send(op='ad', body=dict(edges=[yz]))
         lab.wait(lambda: present('a', y, z), 'valid gossip after corrupted packet processed')
         assert not present('a', x, y), 'corrupted gossip bypassed transport authentication'
-        incomplete = lib.wire_ad(dict(edges=[xy]))
-        incomplete['endpoints'] = []
-        probe.proc.stdin.write(json.dumps(dict(op='ad', body=incomplete)).encode() + b'\n')
-        assert probe.read()['sent']
-        time.sleep(.1)
         probe.send(op='ad', body=dict(edges=[xy]))
         lab.wait(lambda: present('a', x, y), 'same version accepted once descriptors arrive')
         probe.send(op='ad', body=dict(edges=[yz]))

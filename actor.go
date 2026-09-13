@@ -210,8 +210,10 @@ func (a *EdgeActor) receive(r Received) {
 		if json.Unmarshal(inner[1:], &binding) == nil && !binding.Reply && binding.From.hash() == a.edge.From && binding.To.hash() == a.edge.To {
 			post(a.view.actors[Edge{From: a.edge.To, To: a.edge.From}], any(Outbound{inner: bindingInner(Binding{From: binding.To, To: binding.From, Reply: true})}))
 		}
-	case innerAd:
-		a.advertisement(inner)
+	case innerEdges:
+		a.edges(inner)
+	case innerVertices:
+		a.vertices(inner)
 	case innerData:
 		a.forward(inner)
 	case innerRegistry:
@@ -221,28 +223,38 @@ func (a *EdgeActor) receive(r Received) {
 	}
 }
 
-func (a *EdgeActor) advertisement(inner []byte) {
-	ad, ok := decodeAd(inner)
+func (a *EdgeActor) edges(inner []byte) {
+	updates, ok := decodeEdges(inner)
 
 	if !ok {
 		return
 	}
 
-	fresh := false
-
-	for _, u := range ad.Edges {
+	for _, u := range updates {
 		if u.ID > a.view.graph[u.Edge].ID {
-			fresh = true
+			post(a.node.events.in, any(updates))
 
-			break
+			return
 		}
 	}
+}
 
-	if !fresh {
+func (a *EdgeActor) vertices(inner []byte) {
+	vertices, ok := decodeVertices(inner)
+
+	if !ok {
 		return
 	}
 
-	post(a.node.events.in, any(ad))
+	for _, vertex := range vertices {
+		if id := vertex.hash(); id != 0 {
+			if _, known := a.view.addresses[id]; !known {
+				post(a.node.events.in, any(vertices))
+
+				return
+			}
+		}
+	}
 }
 
 func (a *EdgeActor) forward(inner []byte) {

@@ -7,11 +7,16 @@ import lib
 import workload
 
 
-def encode(endpoints, edges):
-    packet = bytearray(struct.pack('<BHH', 2, len(edges), len(endpoints)))
+def encode_edges(edges):
+    packet = bytearray(struct.pack('<BH', 2, len(edges)))
     for edge in edges:
         packet += struct.pack('<QQQB', lib.endpoint_hash(edge['from']),
                               lib.endpoint_hash(edge['to']), edge['id'], edge['alive'])
+    return bytes(packet)
+
+
+def encode_vertices(endpoints):
+    packet = bytearray(struct.pack('<BH', 5, len(endpoints)))
     offsets = []
     for ep in endpoints:
         offsets.append(len(packet))
@@ -36,7 +41,8 @@ def test():
                      lib.endpoint('2001:db8::1234', 9000)]
         ident = time.time_ns()
         edges = [lib.edge(a, b, ident) for a, b in zip(endpoints, endpoints[1:])]
-        packet, offsets = encode(endpoints, edges)
+        vertices, offsets = encode_vertices(endpoints)
+        edge_packet = encode_edges(edges)
 
         def send(data):
             probe.send(op='inner', hex=data.hex())
@@ -45,39 +51,45 @@ def test():
             return any(e['from'] == edge['from'] and e['to'] == edge['to'] and e['id'] == edge['id']
                        for e in lab.status('b')['graph'])
 
-        for end in range(len(packet)):
-            send(packet[:end])
-        send(packet + b'\0')
-        mutations = [(1, b'\xff\xff'), (3, b'\xff\xff'), (5 + 24, b'\x02'),
-                     (offsets[0], b'\x00'), (offsets[2], b'\xff'),
+        for packet in (vertices, edge_packet):
+            for end in range(len(packet)):
+                send(packet[:end])
+            send(packet + b'\0')
+            send(packet[:1] + b'\xff\xff' + packet[3:])
+        bad = bytearray(edge_packet)
+        bad[3 + 24] = 2
+        send(bad)
+        mutations = [(offsets[0], b'\x00'), (offsets[2], b'\xff'),
                      (offsets[2] + 3, b'\xff\xff'),
                      (offsets[2] + 5 + len(endpoints[2]['addr']), b'\xff\xff')]
         for offset, value in mutations:
-            bad = bytearray(packet)
+            bad = bytearray(vertices)
             bad[offset:offset + len(value)] = value
             send(bad)
         # A WS address consumes the remaining bytes, leaving no path length.
-        send(struct.pack('<BHHBHH', 2, 0, 1, 2, 80, 4) + b'host')
+        send(struct.pack('<BHBHH', 5, 1, 2, 80, 4) + b'host')
         # The first endpoint consumes the bytes reserved for a second one.
-        send(struct.pack('<BHHBHH', 2, 0, 2, 2, 80, 8) + b'hostname' + b'\0\0')
+        send(struct.pack('<BHBHH', 5, 2, 2, 80, 8) + b'hostname' + b'\0\0')
         # Source vertices have an owner and a full 16-byte address; reject
         # every truncation before accepting the following independent record.
         source = struct.pack('<BH', 5, 1) + socket.inet_pton(socket.AF_INET6, '::ffff:192.0.2.40')
         for end in range(len(source)):
-            send(struct.pack('<BHH', 2, 0, 1) + source[:end])
+            send(struct.pack('<BH', 5, 1) + source[:end])
 
         marker = lib.edge(lib.endpoint('192.0.2.20', 8000), lib.endpoint('192.0.2.21', 8000), ident)
         probe.send(op='ad', body=dict(edges=[marker]))
         lab.wait(lambda: present(marker), 'valid gossip after malformed frames processed')
         assert not any(present(edge) for edge in edges), 'malformed gossip partially changed the graph'
 
-        send(packet)
+        assert not any(str(lib.endpoint_hash(ep)) in lab.status('b')['addresses'] for ep in endpoints)
+        send(vertices)
+        send(edge_packet)
         lab.wait(lambda: all(present(edge) for edge in edges), 'independent binary writer accepted')
         newer = [dict(edge, id=ident + 1) for edge in edges]
         probe.send(op='ad', body=dict(edges=newer))
         lab.wait(lambda: all(present(edge) for edge in newer), 'Go writer preserves UDP, WS and WSS endpoints')
         withdrawn = [dict(edge, id=ident + 2, alive=False) for edge in edges]
-        send(encode(endpoints, withdrawn)[0])
+        send(encode_edges(withdrawn))
         lab.wait(lambda: not any(present(edge) for edge in newer), 'binary withdrawals applied')
         probe.finish()
 

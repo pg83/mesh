@@ -193,17 +193,19 @@ there is no separate advertisement signature or signing key.
 
 All multibyte integers in the mesh protocol use little-endian order.
 Encapsulated IP packets retain their standard network format. The key
-context is `mesh/10`; upgrade all peers together. Releases through 10 use earlier wire formats and cannot exchange traffic with this
+context is `mesh/11`; upgrade all peers together. Releases through 12 use earlier wire formats and cannot exchange traffic with this
 version. Update peers together.
 
 Each registered pair derives a shared secret with X25519 and directional
-keys with HKDF-SHA256. The context contains `mesh/10`, the sender's public key
+keys with HKDF-SHA256. The context contains `mesh/11`, the sender's public key
 and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
 |---|---|
 | data transport | `3`, sender index (2), packet ID (8), random nonce (24), XChaCha20-Poly1305 ciphertext and tag (16) |
-| gossip transport | `4`, the same remaining header and encryption |
+| edge transport | `4`, the same remaining header and encryption |
+| registry transport | `5`, the same remaining header and encryption |
+| vertex transport | `6`, the same remaining header and encryption |
 
 The header is authenticated as associated data. Every packet gets a fresh
 random nonce, including after a process restart.
@@ -214,10 +216,14 @@ hops are allowed. A relay checks the receiving pair against the route,
 advances the cursor, and sends from the exact next source endpoint to the
 exact next destination. Local delivery verifies the destination mesh IP.
 
-Inner gossip starts with `2`, edge count (2), and endpoint count (2), followed
-by the edges and then the endpoint descriptions. Each edge is 25 bytes:
+Edges and vertices are sent in separate packet types every second. Each vertex
+appears once per round on a connection. An edge whose source or destination is
+unknown is discarded; a later round can deliver it after the vertices arrive.
+
+Inner edges start with `2`, edge count (2), followed by the edges. Each edge is 25 bytes:
 source hash (8), destination hash (8), record ID (8), and alive (1, either 0
-or 1). Endpoint descriptions start with kind (1: UDP/IPv4=1, WS=2, WSS=3,
+or 1). Inner vertices start with `5`, vertex count (2), followed by the
+vertex descriptions. Endpoint descriptions start with kind (1: UDP/IPv4=1, WS=2, WSS=3,
 UDP/IPv6=4, source=5) and port (2). UDP then carries four IPv4 or sixteen IPv6 octets.
 WS/WSS carry the address and path
 as two strings, each prefixed by its byte length (2). Strings use UTF-8.
@@ -225,13 +231,13 @@ as two strings, each prefixed by its byte length (2). Strings use UTF-8.
 Counts and lengths are checked against the remaining packet before allocating
 or reading. Truncated packets, unknown protocol codes, invalid alive values,
 and trailing bytes are rejected as a whole. Descriptions appear once per
-message; each message includes the descriptions referenced by its edges.
+publication, independently of the edge packets.
 A source description is kind 5, node index (2), and a 16-byte IP address
 (IPv4 uses its mapped IPv6 representation). It is not an endpoint.
-Publications split at eight records or roughly 1000 inner bytes; a single
-large endpoint record can exceed that target. There is no dependency on an
-earlier gossip message arriving first. Other nodes can use these descriptions
-to open new direct connections.
+Edges split at eight records; vertex packets target at most 1000 inner bytes.
+A single large vertex record can exceed that target. Lost or reordered
+descriptions are repaired by the next periodic publication. Other nodes can
+use these descriptions to open new direct connections.
 
 The authenticated sender may transmit any part of the graph, including records learned
 from other members. An omitted pair is unchanged; a newer record replaces
