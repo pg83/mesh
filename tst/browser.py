@@ -35,7 +35,9 @@ with sync_playwright() as p:
     with page.expect_download() as download:
         page.get_by_role('link', name='Скачать mesh-2.json ↓').click()
     config = json.loads(Path(download.value.path()).read_text())
-    assert config['index'] == 2 and 'key' not in config and len(config['registry']) == 3
+    assert config['index'] == 2 and 'key' not in config
+    assert [peer['index'] for peer in config['registry']] == [1, 2]
+    assert config.get('registry_version', 1) == 1
     page.goto('http://127.0.0.1:8059/config')
     page.wait_for_selector('#config-cards .config-card')
     assert page.get_by_role('tab', name='Конфиги', exact=True).get_attribute('aria-selected') == 'true'

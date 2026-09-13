@@ -74,7 +74,8 @@ def test():
         topo = json.loads(get('/api/topology')[1])
         assert len(topo['routes'][lib.intip(3) + ':0']) == 2
         if python := os.environ.get('MESH_TEST_BROWSER_PYTHON'):
-            lab.run('a', [python, str(lib.Path(__file__).with_name('browser.py'))], timeout=90)
+            lab.run('a', [python, str(lib.Path(__file__).with_name('browser.py'))],
+                    timeout=90, capture_output=False)
 
         # Read-only export must not include host-specific binding or TLS key paths.
         lab.stop_node('a')
