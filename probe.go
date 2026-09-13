@@ -24,6 +24,7 @@ type ProbeCommand struct {
 	Body json.RawMessage `json:"body"`
 	Read bool            `json:"read"`
 	Text bool            `json:"text"`
+	ID   uint64          `json:"id"`
 }
 
 func main() {
@@ -109,9 +110,14 @@ func main() {
 
 		packetID++
 
+		if command.ID != 0 {
+			packetID = command.ID
+		}
+
 		var out []byte
 
 		switch command.Op {
+		case "read":
 		case "raw":
 			out = throw2(hex.DecodeString(command.Hex))
 		case "binding":
@@ -134,7 +140,9 @@ func main() {
 			throwFmt("unknown probe command %q", command.Op)
 		}
 
-		sendPacket(out, command.Text)
+		if command.Op != "read" {
+			sendPacket(out, command.Text)
+		}
 
 		report := map[string]any{"sent": true}
 

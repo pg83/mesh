@@ -1,5 +1,6 @@
 """An upgraded HTTP connection must authenticate its mesh identity and both endpoints."""
 import json
+import time
 import lib
 import ws
 
@@ -16,6 +17,7 @@ def test():
                  dict(op='inner', hex=''), dict(op='inner', hex='ff'), dict(op='inner', hex='037b'),
                  dict(op='binding', body={'from': lib.endpoint('10.1.0.1'), 'to': b}),
                  dict(op='binding', body={'from': c, 'to': b}),
+                 dict(op='binding', body={'from': a, 'to': dict(b, node=2)}),
                  dict(op='binding', body={'from': dict(a, addr='0.0.0.0'), 'to': b}),
                  dict(op='binding', body={'from': a, 'to': dict(b, path='/wrong')}),
                  dict(op='binding', body={'from': a, 'to': b}, text=True)]
@@ -34,6 +36,23 @@ def test():
         assert not probe.send(op='binding', body={'from': a, 'to': b}, read=True)['closed']
         assert probe.send(op='raw', hex='00', text=True, read=True)['closed']
         probe.finish()
+
+        # A stale connection attempt must not replace the established channel
+        # for the same source/endpoint pair, even with a valid key and binding.
+        first = ws.Probe(lab)
+        ident = time.time_ns() + 1_000_000_000
+        assert not first.send(op='binding', body={'from': a, 'to': b}, id=ident, read=True)['closed']
+        def connected_id():
+            return [connection['id'] for connection in lab.status('b')['connections']
+                    if connection['origin'] == lib.endpoint_hash(a)]
+        lab.wait(lambda: connected_id() == [ident], 'new authenticated connection installed')
+        stale = ws.Probe(lab)
+        stale.send(op='binding', body={'from': a, 'to': b}, id=ident - 1, read=True)
+        assert stale.send(op='read', read=True)['closed'], 'stale connection remained open'
+        assert connected_id() == [ident], 'stale connection replaced the live channel'
+        stale.finish()
+        assert not first.send(op='binding', body={'from': a, 'to': b}, read=True)['closed']
+        first.finish()
         lab.wait_ping('b', 'c')
 
 

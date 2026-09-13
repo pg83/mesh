@@ -12,6 +12,16 @@ def test():
         time.sleep(3)
         assert not lab.connections('a') and not lab.connections('b'), 'untrusted certificate accepted'
         lab.stop_node('a')
+        invalid_ca = lab.dir / 'invalid-ca.pem'
+        invalid_ca.write_text('not a PEM certificate\n')
+        registry = lab.registry()
+        registry[1]['endpoint'][0]['tls_ca'] = str(invalid_ca)
+        lab.configs['a']['registry'] = registry
+        lab.start_node('a')
+        time.sleep(3)
+        assert not lab.connections('a') and not lab.connections('b'), 'invalid CA accepted'
+        lab.stop_node('a')
+        del lab.configs['a']['registry']
         lab.trusted = True
         lab.start_node('a')
         lab.wait_ping('a', 'b')

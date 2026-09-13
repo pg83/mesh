@@ -60,6 +60,11 @@ def test():
         send(struct.pack('<BHHBHH', 2, 0, 1, 2, 80, 4) + b'host')
         # The first endpoint consumes the bytes reserved for a second one.
         send(struct.pack('<BHHBHH', 2, 0, 2, 2, 80, 8) + b'hostname' + b'\0\0')
+        # Source vertices have an owner and a full 16-byte address; reject
+        # every truncation before accepting the following independent record.
+        source = struct.pack('<BH', 5, 1) + socket.inet_pton(socket.AF_INET6, '::ffff:192.0.2.40')
+        for end in range(len(source)):
+            send(struct.pack('<BHH', 2, 0, 1) + source[:end])
 
         marker = lib.edge(lib.endpoint('192.0.2.20', 8000), lib.endpoint('192.0.2.21', 8000), ident)
         probe.send(op='ad', body=dict(edges=[marker]))

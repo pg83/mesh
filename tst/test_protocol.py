@@ -40,6 +40,9 @@ def test():
             inner(packet)
         send('short-transport')
         send('short-tag')
+        # A connected UDP socket still checks the transport type and sender.
+        send('raw', hex=(b'\xff' + b'\x01\0' + b'\0' * 40).hex())
+        send('raw', hex=(b'\x03' + b'\x03\0' + b'\0' * 40).hex())
         ident = time.time_ns() + 1_000_000_000
         mesh_a = lib.endpoint(lib.intip(1), 0)
         records = [lib.edge(mesh_a, a, ident), lib.edge(a, mesh_a, ident), lib.edge(b, a, ident)]

@@ -53,10 +53,43 @@ def unavailable_status(lab, error_type):
         raise AssertionError('failed status satisfied an empty-links assertion')
 
 
+def rejected_status():
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    import threading
+
+    class Response(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.server.paths.append(self.path)
+            self.send_response(self.server.status)
+            self.send_header('Location', '/redirected')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    with HTTPServer(('127.0.0.1', 0), Response) as server:
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            for status in [302, 503]:
+                server.status, server.paths = status, []
+                result = subprocess.run([lib.MESH, 'status', '-control', f'127.0.0.1:{server.server_port}'],
+                                        capture_output=True, text=True, timeout=10)
+                assert result.returncode != 0 and f'control: {status}' in result.stderr, result
+                assert not result.stdout
+                assert server.paths == ['/status'], 'control client followed a redirect'
+        finally:
+            server.shutdown()
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+
+
 def test():
     with lib.Lab(['a', 'b'], {1: ['a', 'b']}) as lab:
         lab.wait_ping('a', 'b')
         fragmented_status()
+        rejected_status()
         lab.stop_node('a')
         lab.configs['a'] = {'control': ''}
         lab.start_node('a')
