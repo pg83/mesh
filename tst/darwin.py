@@ -1,6 +1,7 @@
 """Native macOS utun: real ICMP over encrypted UDP to an independent echo peer."""
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 import socket
 import subprocess
@@ -14,7 +15,18 @@ probe = Path('.build/bin/mesh-probe').resolve()
 def run(*args):
     return subprocess.check_output([str(a) for a in args], text=True)
 
-with tempfile.TemporaryDirectory(prefix='mesh-darwin-') as directory:
+@contextmanager
+def software_checksums():
+    # BPF sees partial checksums when loopback checksum offload is enabled.
+    name = 'net.link.generic.system.hwcksum_tx'
+    previous = run('/usr/sbin/sysctl', '-n', name).strip()
+    run('/usr/sbin/sysctl', '-w', name+'=0')
+    try:
+        yield
+    finally:
+        run('/usr/sbin/sysctl', '-w', name+'='+previous)
+
+with software_checksums(), tempfile.TemporaryDirectory(prefix='mesh-darwin-') as directory:
     root = Path(directory)
     a, b = [json.loads(run(binary, 'keygen')) for _ in range(2)]
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
