@@ -60,13 +60,18 @@ jobs:
           GOFLAGS: -mod=readonly
 
       - name: Build and test
-        run: ./build -k -j 4 test
+        run: |
+          ./build -k -j 4 test
+          ./build mesh
+          mkdir -p "$RUNNER_TEMP/release-linux"
+          cp -L mesh "$RUNNER_TEMP/release-linux/mesh"
 
       - name: Save tested Linux binary
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mesh-linux-amd64
-          path: .build/bin/mesh
+          path: ${{ runner.temp }}/release-linux/mesh
+          if-no-files-found: error
           retention-days: 7
 
       - name: Save web screenshot and failure diagnostics
