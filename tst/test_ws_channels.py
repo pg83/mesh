@@ -31,7 +31,7 @@ def test():
             else:
                 marker = lib.socket_vertex('192.0.2.91', 9011)
                 probe.send(op='graph', body=lib.record(1, time.time_ns(), [(marker, False, True)]))
-                lab.wait(lambda: str(lib.endpoint_hash(marker)) in lab.status('b')['addresses'],
+                lab.wait(lambda: str(lib.record_id(1, 0)) in lab.status('b')['addresses'],
                          'send half works while read half is closed and its reader is blocked')
             last = 'stop-receive' if first == 'stop-send' else 'stop-send'
             assert probe.send(op=last)['closed']
@@ -39,7 +39,7 @@ def test():
             lab.wait(lambda: not lab.channels('b'), 'socket closes after both halves')
 
         one, two = connect(), connect()
-        assert one.source != two.source and one.source['addr'] == two.source['addr']
+        assert one.source != two.source and lib.vertex_owner(one.source) == lib.vertex_owner(two.source) == 1
         lab.wait(lambda: len(lab.channels('b')) == 4, 'four independent channels')
         lab.wait(lambda: local_edge(internal, endpoint), 'outgoing local direction added')
         assert local_edge(endpoint, internal), 'listener lost its incoming direction'

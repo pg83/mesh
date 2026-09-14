@@ -32,20 +32,20 @@ def test():
                   'packet-source-receiver')
         lab.wait(lambda: log.exists() and 'ready' in log.read_text(), 'payload receiver ready')
         previous = None
-        for kind in ['graph', 'registry', 'data']:
+        for kind_index, kind in enumerate(['graph', 'registry', 'data']):
             probe = ws.Probe(lab)
-            source = probe.source
-            assert source['proto'] == 'tcp' and source['addr'] == '10.1.0.1'
-            assert source['port'] != 0 and not source['endpoint']
+            # The packet names the client socket by id; the description only comes with the record.
+            source_id = probe.source
+            assert lib.vertex_owner(source_id) == 1 and lib.vertex_counter(source_id) != 0
+            source = lib.socket_vertex('10.1.0.1', 49152 + kind_index, 'tcp')
             assert previous is None or source != previous
-            source_id = lib.endpoint_hash(source)
             attempts = lab.intercept('b', 'a', 'observe', target_port=source['port'], syn=True, count=-1)
             reverse = lab.intercept('b', 'a', 'drop', count=-1)
             marker = lib.socket_vertex('192.0.2.123', 49152)
             if kind == 'graph':
                 ident = time.time_ns()
-                command = dict(op='graph', body=lib.record(1, ident, [(marker, False, True), (source, False, True)]))
-                applied = lambda: str(lib.endpoint_hash(marker)) in lab.status('b')['addresses']
+                command = dict(op='graph', body=lib.record(1, ident, [(marker, False, True), (source, False, True, lib.vertex_counter(source_id))]))
+                applied = lambda: str(lib.record_id(1, 0)) in lab.status('b')['addresses']
             elif kind == 'registry':
                 def string(value):
                     value = value.encode()
@@ -60,18 +60,19 @@ def test():
             assert probe.send(**command)['sent']
             lab.wait(applied, kind + ' processed while all reverse traffic is blocked', timeout=3)
             state = lab.status('b')
-            assert state['addresses'][str(source_id)] == source
+            if kind == 'graph':
+                assert state['addresses'][str(source_id)] == source
             assert sum(source_id in (c['from'], c['to']) for c in state['channels']) == 2
             assert attempts['hits'] == 0, 'client address was used as a listener'
             lab.clear(reverse)
             lab.clear(attempts)
             if kind == 'graph':
                 lab.wait(lambda: any(e['from'] == source and e['to'] == server for e in lab.status('b')['graph']), 'link resolved against the source owner record')
-                probe.send(op='graph', body=lib.record(1, ident + 1, [(dict(marker, endpoint=True), True, False), (source, False, True)]))
-                lab.wait(lambda: lab.status('b')['addresses'][str(lib.endpoint_hash(marker))]['endpoint'], 'endpoint flag updated for an existing vertex')
+                probe.send(op='graph', body=lib.record(1, ident + 1, [(dict(marker, endpoint=True), True, False), (source, False, True, lib.vertex_counter(source_id))]))
+                lab.wait(lambda: lab.status('b')['addresses'][str(lib.record_id(1, 0))]['endpoint'], 'endpoint flag updated for an existing vertex')
             probe.finish()
             lab.wait(lambda: not any(source_id in (c['from'], c['to']) for c in lab.status('b')['channels']), 'closed socket channels removed')
-            lab.wait(lambda: not any(e['from'] == source for e in lab.status('b')['graph']), 'closed socket link withdrawn')
+            lab.wait(lambda: not any(e['from'] == source_id for e in lab.status('b')['links']), 'closed socket link withdrawn')
             previous = source
 
 

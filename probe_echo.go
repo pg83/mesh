@@ -16,11 +16,11 @@ func echoProbe(path, destination string, index uint16) {
 	session := newSession(me, peer, key.private)
 	conn := throw2(net.ListenUDP("udp", cfg.Endpoint[0].binding()))
 	mine := cfg.Endpoint[0].description().vertex()
-	source := mine
+	source := me.endpointID(0)
 	target := parseUDPAddr(destination)
 	targetPort := target.Port
-	destinations := map[uint64]*net.UDPAddr{udpVertex(target.IP, target.Port).hash(): target}
-	clients := map[SocketAddress]Vertex{}
+	destinations := map[string]*net.UDPAddr{target.String(): target}
+	clients := map[SocketAddress]uint32{}
 	buf := make([]byte, maxPacket)
 	next := time.Time{}
 	id := uint64(time.Now().UnixNano())
@@ -32,10 +32,10 @@ func echoProbe(path, destination string, index uint16) {
 
 	for {
 		if time.Now().After(next) {
-			record := &GraphRecord{Owner: cfg.Index, Vertices: []RecordVertex{{Vertex: mine, Ingress: true, Egress: true}}}
+			record := &GraphRecord{Owner: cfg.Index, Vertices: []RecordVertex{{ID: source, Vertex: mine, Ingress: true, Egress: true}}}
 
 			for _, other := range clients {
-				record.Links = append(record.Links, Edge{From: other.hash(), To: mine.hash()})
+				record.Links = append(record.Links, Edge{From: other, To: source})
 			}
 
 			id++
@@ -63,12 +63,11 @@ func echoProbe(path, destination string, index uint16) {
 			continue
 		}
 
-		origin = origin.tagged(mine.hash(), peer.index)
 		clients[socketAddress(remote.IP, remote.Port)] = origin
 
-		destination := &net.UDPAddr{IP: origin.ip(), Port: targetPort}
+		destination := &net.UDPAddr{IP: remote.IP, Port: targetPort}
 
-		destinations[udpVertex(destination.IP, destination.Port).hash()] = destination
+		destinations[destination.String()] = destination
 
 		_, known := clients[socketAddress(remote.IP, remote.Port)]
 

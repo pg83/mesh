@@ -34,33 +34,19 @@ type Topology struct {
 }
 
 func topologyEdge(edge Edge) TopologyEdge {
-	return TopologyEdge{From: strconv.FormatUint(edge.From, 10), To: strconv.FormatUint(edge.To, 10)}
+	return TopologyEdge{From: strconv.FormatUint(uint64(edge.From), 10), To: strconv.FormatUint(uint64(edge.To), 10)}
 }
 
 func topology(status *Status, peers []PeerConfig) *Topology {
 	result := &Topology{Index: status.Index, Time: time.Now().UTC().Format(time.RFC3339), Peers: peers,
 		Vertices: []TopologyVertex{}, Edges: []TopologyEdge{}, Routes: map[string][]TopologyEdge{}}
 
-	owners := map[uint64]uint16{}
-
-	for _, peer := range peers {
-		owners[udpVertex(net.ParseIP(peer.Intip), 0).hash()] = peer.Index
-	}
-
 	for _, edge := range status.Graph {
-		if index := owners[edge.From]; index != 0 && status.Addresses[edge.From].isHost() {
-			owners[edge.To] = index
-		}
-
-		if index := owners[edge.To]; index != 0 && status.Addresses[edge.To].isHost() {
-			owners[edge.From] = index
-		}
-
 		result.Edges = append(result.Edges, topologyEdge(edge))
 	}
 
 	for _, id := range status.Vertices {
-		result.Vertices = append(result.Vertices, TopologyVertex{ID: strconv.FormatUint(id, 10), Vertex: status.Addresses[id], Owner: owners[id]})
+		result.Vertices = append(result.Vertices, TopologyVertex{ID: strconv.FormatUint(uint64(id), 10), Vertex: status.Addresses[id], Owner: vertexOwner(id)})
 	}
 
 	for destination, path := range status.Routes {

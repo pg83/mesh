@@ -26,12 +26,11 @@ def test():
             assert packet[16:20] == bytes([10, 2, 0, 2])
             src, dst = struct.unpack_from('!HH', packet, (packet[0] & 15) * 4)
             assert src == 18001 and dst in (7001, 7002), 'outgoing packets leave the listener socket'
-        # The sending side names its listener tagged with the target, never a private socket.
+        # The sending side describes its channel by its listener, never by a private socket.
         for channel in lab.status('a')['channels']:
             if channel['outgoing']:
                 source = lab.status('a')['addresses'][str(channel['from'])]
-                assert source['addr'] == '198.51.100.1' and source['port'] == 18001 and source['owner'] == 1, source
-                assert source['target'] == channel['to'] and not source['endpoint'], source
+                assert source == lib.socket_vertex('198.51.100.1', 18001) and lib.vertex_owner(channel['from']) == 1, source
         # The receiving graph names public endpoints, not translated socket pairs.
         for name in ['a', 'b']:
             links = lab.status(name)['links']

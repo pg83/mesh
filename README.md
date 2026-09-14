@@ -126,21 +126,29 @@ endpoints. An outgoing UDP channel sends from the node's UDP listener socket on
 its interface: the configured one, or an implicit socket that every interface
 address without a configured UDP listener gets, bound to that address on a
 kernel-chosen port and advertised like a configured listener. The channel's
-graph vertex is that listener tagged with the target vertex it sends to,
-written `ip:port:target@owner`; the tag and the owner's registry index enter
-the vertex hash, so channels of one socket to different targets, and equal
-private sockets of different nodes, are distinct vertices. A tagged vertex only
+graph vertex is a fresh id of the dialing node, described by that listener's
+address, so channels of one socket to different targets, and equal private
+sockets of different nodes, are distinct vertices. A channel vertex only
 sends and a listener only receives, so no path passes through a node without
 visiting its mesh-IP vertex. Reconnecting to the same target reuses the same
 vertex. WS/WSS client connections keep their own TCP socket and its address as
-the vertex, assigned by the OS. A vertex's `endpoint` flag explicitly says
-whether it accepts new channels. Client socket vertices, tagged vertices and
-mesh-IP:0 vertices have this flag cleared.
+the vertex description, assigned by the OS. A vertex's `endpoint` flag
+explicitly says whether it accepts new channels. Client socket vertices and
+mesh-IP vertices have this flag cleared.
+
+Every vertex is a 32-bit id: the owner's registry index in the high byte and a
+24-bit counter below it. Counter 0 is the owner's mesh-IP vertex. The
+endpoints of the registry get counters 1.. in registry order, so every node
+derives them without gossip. Runtime vertices, implicit listeners and channel
+sources, are allocated from counter 1024 upwards for the life of the process;
+the counter is never expected to wrap. The description of an id, its
+`proto`, `addr`, `port` and `path`, travels only in the owner's graph record;
+routing, links and packet sources use ids alone.
 
 All transport traffic goes through a directed `Channel` with its own protocol actor.
 UDP has no connection abstraction: an outgoing channel writes datagrams from an
 unconnected socket; a listening socket dispatches datagrams to receiving channels.
-Every authenticated message includes its full source vertex. The receiving
+Every authenticated message includes its source vertex id. The receiving
 socket supplies the destination endpoint. Any ordinary data, vertex, edge or
 registry message can be the first one; there is no preliminary message or reply.
 The receiver sends no gossip, registry or data back through that UDP channel.
@@ -177,7 +185,7 @@ Outgoing UDP channels leave the listener socket, so a forwarded listener's
 outgoing traffic uses its forwarded mapping and any other socket gets one
 dynamic mapping shared by all its channels. Every node reports, next to each
 incoming UDP link in its graph record, the wire address the packets actually
-arrive from when it differs from the address in the source vertex: that is
+arrive from when it differs from the source vertex's description: that is
 the mapping the sender's NAT chose for that socket, and since the socket is
 the sender's listener, it is where the listener can be reached from outside.
 A node dialing a private UDP listener that is on none of its own networks
@@ -247,10 +255,12 @@ header word padded with zeros. Packet IDs come from one counter per node
 shared by all its channels, started from the clock at process start, so no
 ID repeats for a sender as long as clocks do not run backwards across
 restarts. The encrypted plaintext is
-`source vertex description || inner message`. Every transport packet contains
-its complete source address, including the real port. A relay wraps the inner
-message with its outgoing channel source; it preserves the route and payload
-and advances the route cursor.
+`source vertex id (4, little-endian) || inner message`. The source id must
+belong to the sender and must not be its mesh-IP vertex; a packet whose source
+is unknown to the receiver still authenticates, but only a channel whose
+source it matches accepts it. A relay wraps the inner message with its
+outgoing channel source; it preserves the route and payload and advances the
+route cursor.
 
 Inner data starts with one byte holding the hop count minus one in its high
 nibble and the cursor in its low nibble, then the route as a list of
@@ -274,40 +284,40 @@ sends every known record once per second.
 
 Inner graph records start with the owner registry index (2), version (8),
 vertex count (2), the vertices, link count (2), the links, observation
-count (2) and the observations. Each vertex is
-one flags byte (bit 0: `vertex -> meshIP`, bit 1: `meshIP -> vertex`, zero is
-invalid; a tagged vertex allows only bit 1) followed by its description. Each link is 10 bytes: the source vertex
-hash (8) of another node's socket or listener and the index (2) of the local
-destination vertex in this record. Each observation is the source vertex hash
-(8) of one of the record's links followed by the untagged UDP address
-description its packets arrive from. Endpoint descriptions start with kind (1: UDP/IPv4=1, WS=2, WSS=3,
-UDP/IPv6=4, TCP/IPv4=5, TCP/IPv6=6, tagged UDP/IPv4=7, tagged UDP/IPv6=8) and port (2). The high bit of kind is
-the `endpoint` flag; the low seven bits identify the transport/address format.
-UDP/TCP then carry four IPv4 or sixteen IPv6 octets; tagged UDP adds the
-target vertex hash (8). The owner of a tagged vertex is the record owner and
-is not transmitted; a packet source is never tagged, the receiver tags it
-with the listener it arrived on and the sender index from the header.
-WS/WSS carry the address and path
-as two strings, each prefixed by its byte length (2). Strings use UTF-8.
+count (2) and the observations. Each vertex is its counter (3, little-endian;
+the owner byte is the record owner and is not repeated), one flags byte
+(bit 0: `vertex -> meshIP`, bit 1: `meshIP -> vertex`, zero is invalid) and
+its description. Each link is 7 bytes: the full source vertex id (4) of
+another node's socket or listener and the counter (3) of the local
+destination vertex in this record. Each observation is the source vertex id
+(4) of one of the record's links followed by the UDP address description its
+packets arrive from. Endpoint descriptions start with kind (1: UDP/IPv4=1,
+WS=2, WSS=3, UDP/IPv6=4, TCP/IPv4=5, TCP/IPv6=6) and port (2). The high bit
+of kind is the `endpoint` flag; the low seven bits identify the
+transport/address format. UDP/TCP then carry four IPv4 or sixteen IPv6
+octets. WS/WSS carry the address and path as two strings, each prefixed by
+its byte length (2). Strings use UTF-8.
 
 Counts and lengths are checked against the remaining packet before allocating
-or reading. Truncated packets, unknown protocol codes, invalid flags, link
-indexes outside the record, self-links, observations of a source that is not
-a link, non-UDP, portless or tagged observations, and trailing bytes reject the record as
-a whole. A record with an unknown owner, the receiver's own index, or a version
-not above the stored one is ignored. Lost or reordered records are repaired by
-the next periodic publication. Other nodes can use vertices with
-`endpoint: true` to open new direct channels. The flag is metadata and does not
-change the address hash.
+or reading. Truncated packets, unknown protocol codes, invalid flags, counter
+0 or duplicate counters, mesh-IP descriptions, links from a mesh-IP vertex or
+to a counter outside the record, self-links, observations of a source that is
+not a link, non-UDP or portless observations, and trailing bytes reject the
+record as a whole. A record with an unknown owner, the receiver's own index,
+or a version not above the stored one is ignored. Lost or reordered records
+are repaired by the next periodic publication. Other nodes can use vertices
+with `endpoint: true` to open new direct channels. The flag is metadata and
+does not change the id.
 
 The authenticated sender relays every record it knows, including those of
 other members, unchanged. A newer record replaces the owner's previous record
 completely. Gossip remains periodic, once per second.
 
 A WebSocket binary message contains one mesh transport packet with its source
-address inside the authenticated ciphertext. The client side is the real TCP
-local IP and port; the server side is the configured WS/WSS endpoint, including
-its public hostname and path behind a proxy. The HTTP Upgrade selects that
+id inside the authenticated ciphertext. The client side is a fresh id of the
+client described by the real TCP local IP and port; the server side is the
+configured WS/WSS endpoint, including its public hostname and path behind a
+proxy. The HTTP Upgrade selects that
 endpoint. No mesh negotiation, binding packet or binding reply is sent.
 The first ordinary message is processed immediately and identifies the peer
 and source vertex for the server's two independent channels. A client socket
@@ -323,18 +333,18 @@ record preserves its owner and version.
 
 ## Map and routing
 
-Vertices live in `map[uint64]Vertex`, rebuilt from the registry, the records
-and the local channels; the edge set is derived from the records. Routes carry
-the same hashes. Full addresses are resolved only by the local transport.
-The hash is the first eight SHA-256 bytes interpreted as a little-endian
-uint64, over `proto + NUL + addr + NUL + decimal-port + NUL + path`.
+Descriptions live in `map[uint32]Vertex`, rebuilt from the registry, the
+records and the local channels; the edge set is derived from the records and
+is a set of directed id pairs. Routes carry the same ids. Full addresses are
+resolved only by the local transport. A vertex whose description is not yet
+known still routes; it is shown by id until the owner's record arrives.
 Hostnames are lowercased, IPs normalized, and an empty WS path becomes `/`.
-UDP/TCP paths are empty. Local bind, TLS settings and the endpoint flag are excluded. Conflicting
-descriptions with the same hash fail explicitly.
+UDP/TCP paths are empty. Local bind, TLS settings and the endpoint flag are
+not part of the description.
 
 The graph remains a map of directed endpoint pairs;
-registry indexes identify encryption keys, not graph vertices. An internal
-mesh address is represented as `(meshIP, 0)`. Local graph edges describe actual input/output directions. An open listener
+registry indexes identify encryption keys and own vertex ids. An internal
+mesh address is the id with counter 0. Local graph edges describe actual input/output directions. An open listener
 advertises `endpoint -> meshIP` before accepting any peer. An outgoing channel
 adds `meshIP -> local source`; an incoming channel adds `local destination -> meshIP`.
 The graph owner takes the union of these capabilities, so closing one channel
@@ -347,7 +357,7 @@ addresses are discovery candidates, not evidence of a live network edge.
 
 Receiving an authenticated packet observes precisely its directed channel.
 UDP discovery obtains the local destination from socket packet metadata and
-the configured listener mapping. Packets carry their source address in the
+the configured listener mapping. Packets carry their source id in the
 authenticated envelope and are dispatched to the corresponding channel.
 The sender-provided source stays the same across NAT and reverse proxies. A forwarded listener uses its configured public endpoint
 in the graph. The observed link expires after five seconds without packets;
@@ -373,8 +383,8 @@ carries it. Records have no age-based expiry: the last record of a node that
 never returns stays, but its links into other nodes disappear as their channels
 expire. Older versions cannot restore a removed vertex or link.
 
-BFS follows the directed endpoint graph, with stable endpoint ordering for
-identical path lengths. Only the sequence of nodes travels in the packet;
+BFS follows the directed id graph, with stable ordering for identical path
+lengths: by description, then by id. Only the sequence of nodes travels in the packet;
 each relay picks its link to the next node from the same graph. The
 return path is computed independently. There is no separate per-host
 endpoint selector. Graph changes and the one-second local observation pass
@@ -384,8 +394,8 @@ Status exposes incoming endpoint pairs, the live graph, its vertices, every
 known record with its version, and routes keyed by destination endpoint. The
 graph owner publishes immutable snapshots through the same mailboxes used for
 packets.
-Channel identity is a directed endpoint pair. Duplicate WS attachments prefer
-the smaller origin hash, then the larger initial packet ID, independently for each
+Channel identity is a directed id pair. Duplicate WS attachments prefer
+the smaller source id, then the larger initial packet ID, independently for each
 direction. There is at most one pending dial per candidate channel. Accepted WS
 connections stay private to the transport and supply a writer and a reader to
 separate channels. Each channel can stop or be replaced without stopping its sibling.

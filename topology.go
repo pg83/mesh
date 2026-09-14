@@ -16,13 +16,9 @@ func (n *Node) sourceAvailable(local *LocalAddress) bool {
 }
 
 func (n *Node) installChannel(c *ChannelIO) {
-	local := c.target
+	local := c.localID()
 
-	if c.outgoing {
-		local = c.source
-	}
-
-	if c.ctx.Err() != nil || n.session(c.peer) != c.session || (local.isEndpoint() && n.local[local.hash()] == nil) || (!local.isEndpoint() && (c.local == nil || !n.sourceAvailable(c.local))) {
+	if c.ctx.Err() != nil || n.session(c.peer) != c.session || (c.listener && n.local[local] == nil) || (!c.listener && (c.local == nil || !n.sourceAvailable(c.local))) {
 		c.stop()
 
 		return
@@ -42,11 +38,16 @@ func (n *Node) installChannel(c *ChannelIO) {
 		previous.stop()
 	}
 
-	n.remember(c.source)
-	n.remember(c.target)
+	if c.source.valid() {
+		n.addresses[c.edge.From] = c.source
+	}
 
-	if !local.isEndpoint() {
-		n.local[local.hash()] = c.local
+	if c.target.valid() {
+		n.addresses[c.edge.To] = c.target
+	}
+
+	if !c.listener {
+		n.local[local] = c.local
 	}
 
 	actor := &Channel{node: n, edge: c.edge, peer: c.peer, outgoing: c.outgoing, inbox: newMailbox[any](c.ctx.Done()), session: c.session, io: c}
@@ -61,18 +62,14 @@ func (n *Node) syncLocal() {
 
 	for _, actor := range n.channels {
 		c := actor.io
-		local := c.target
+		local := c.localID()
 
-		if c.outgoing {
-			local = c.source
-		}
-
-		if local.isEndpoint() {
-			if n.local[local.hash()] == nil {
+		if c.listener {
+			if n.local[local] == nil {
 				c.stop()
 			}
 		} else if c.ctx.Err() == nil && n.sourceAvailable(c.local) {
-			n.local[local.hash()] = c.local
+			n.local[local] = c.local
 		} else {
 			c.stop()
 		}
@@ -91,7 +88,7 @@ func (n *Node) publishSnapshot() {
 		versions[owner] = record.Version
 	}
 
-	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local), owners: maps.Clone(n.owners),
+	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local),
 		routes: n.routes, hops: n.hops, next: n.next, channels: channels, records: versions}
 
 	view.gossip = n.advertisements()
@@ -124,7 +121,7 @@ func (n *Node) observe(r ChannelReport) {
 
 		if !exists {
 			n.metrics.linkUp.Add(1)
-			n.log.Info("link up", "from", n.addresses[r.edge.From].string(), "to", n.addresses[r.edge.To].string())
+			n.log.Info("link up", "from", n.describe(r.edge.From), "to", n.describe(r.edge.To))
 		}
 	}
 

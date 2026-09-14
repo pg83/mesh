@@ -1,17 +1,17 @@
 package main
 
 import (
+	"net"
 	"time"
 )
 
 type Snapshot struct {
 	registry  *Registry
 	graph     map[Edge]bool
-	addresses map[uint64]Vertex
-	local     map[uint64]*LocalAddress
-	owners    map[uint64]uint16
-	routes    map[uint64][]Edge
-	hops      map[uint64][]uint16
+	addresses map[uint32]Vertex
+	local     map[uint32]*LocalAddress
+	routes    map[uint32][]Edge
+	hops      map[uint32][]uint16
 	next      map[uint16]Edge
 	channels  map[Edge]*Channel
 	records   map[uint16]uint64
@@ -20,7 +20,7 @@ type Snapshot struct {
 
 type Received struct {
 	packet []byte
-	source Vertex
+	source uint32
 	inner  []byte
 	at     time.Time
 	io     *ChannelIO
@@ -29,7 +29,7 @@ type Received struct {
 type Outbound struct{ inner []byte }
 type TunPacket struct {
 	payload     []byte
-	destination uint64
+	destination net.IP
 }
 
 type ChannelReport struct {
@@ -142,7 +142,7 @@ func (a *Channel) send(kind byte, inner []byte) {
 
 	a.started = true
 
-	packet := a.session.seal(a.io.source, kind, inner, id)
+	packet := a.session.seal(a.io.edge.From, kind, inner, id)
 
 	a.node.metrics.sent[kind].Add(1)
 	a.node.metrics.sentBytes.Add(uint64(len(packet)))
@@ -183,7 +183,7 @@ func (a *Channel) receive(r Received) {
 		}
 	}
 
-	if source.hash() != a.edge.From || (r.io != nil && r.io != a.io) {
+	if source != a.edge.From || (r.io != nil && r.io != a.io) {
 		a.node.metrics.rejected[rejectSource].Add(1)
 
 		return
@@ -274,10 +274,10 @@ func (n *Node) readTun() {
 	buf := make([]byte, maxPacket)
 
 	for {
-		packet := n.tun.read(buf)
+		packet := append([]byte(nil), n.tun.read(buf)...)
 
 		if destination := ipDestination(packet); destination != nil {
-			post(n.tunInbox.in, any(TunPacket{payload: append([]byte(nil), packet...), destination: udpVertex(destination, 0).hash()}))
+			post(n.tunInbox.in, any(TunPacket{payload: packet, destination: destination}))
 		}
 	}
 }
@@ -290,7 +290,13 @@ func (n *Node) tunLoop() {
 		case *Snapshot:
 			view = v
 		case TunPacket:
-			hops := view.hops[v.destination]
+			var hops []uint16
+
+			if ip := v.destination.To4(); ip != nil {
+				if peer := view.registry.byIntip[[4]byte(ip)]; peer != nil {
+					hops = view.hops[hostID(peer.index)]
+				}
+			}
 
 			n.metrics.tunRead.Add(1)
 

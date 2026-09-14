@@ -45,30 +45,30 @@ func nonce(packet []byte) []byte {
 	return append(make([]byte, 0, chacha20poly1305.NonceSize), packet[:8]...)[:chacha20poly1305.NonceSize]
 }
 
-func (s *Session) seal(source Vertex, kind byte, inner []byte, id uint64) []byte {
-	out := make([]byte, headerTransport, headerTransport+7+len(inner)+s.send.Overhead())
+func (s *Session) seal(source uint32, kind byte, inner []byte, id uint64) []byte {
+	out := make([]byte, headerTransport, headerTransport+sourceSize+len(inner)+s.send.Overhead())
 
 	binary.LittleEndian.PutUint64(out, headerWord(kind, id))
 
 	out[8] = byte(s.local)
 
-	body := append(appendVertex(nil, source.plain()), inner...)
+	body := append(binary.LittleEndian.AppendUint32(nil, source), inner...)
 
 	return s.send.Seal(out, nonce(out), body, out[:headerTransport])
 }
 
-func (s *Session) open(packet []byte) (Vertex, []byte, bool) {
+func (s *Session) open(packet []byte) (uint32, []byte, bool) {
 	if len(packet) < headerTransport+s.recv.Overhead() {
-		return Vertex{}, nil, false
+		return 0, nil, false
 	}
 
 	inner, err := s.recv.Open(nil, nonce(packet), packet[headerTransport:], packet[:headerTransport])
 
-	if err != nil {
-		return Vertex{}, nil, false
+	if err != nil || len(inner) <= sourceSize {
+		return 0, nil, false
 	}
 
-	source, body, ok := decodeVertex(inner)
+	source := binary.LittleEndian.Uint32(inner)
 
-	return source, body, ok && source.valid() && !source.isHost() && len(body) != 0
+	return source, inner[sourceSize:], vertexOwner(source) == s.peer && !isHostID(source)
 }

@@ -11,6 +11,7 @@ type ChannelIO struct {
 	source, target Vertex
 	peer           uint16
 	outgoing       bool
+	listener       bool
 	dialed         bool
 	wire           SocketAddress
 	origin, id     uint64
@@ -21,11 +22,19 @@ type ChannelIO struct {
 	read           func(chan any)
 }
 
-func newChannelIO(session *Session, source, target Vertex, outgoing bool, origin, id uint64) *ChannelIO {
+func newChannelIO(session *Session, edge Edge, source, target Vertex, outgoing, listener bool, id uint64) *ChannelIO {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &ChannelIO{session: session, edge: Edge{From: source.hash(), To: target.hash()}, source: source, target: target,
-		peer: session.peer, outgoing: outgoing, origin: origin, id: id, queue: newMailbox[[]byte](ctx.Done()), ctx: ctx, cancel: cancel}
+	return &ChannelIO{session: session, edge: edge, source: source, target: target, listener: listener,
+		peer: session.peer, outgoing: outgoing, origin: uint64(edge.From), id: id, queue: newMailbox[[]byte](ctx.Done()), ctx: ctx, cancel: cancel}
+}
+
+func (c *ChannelIO) localID() uint32 {
+	if c.outgoing {
+		return c.edge.From
+	}
+
+	return c.edge.To
 }
 
 func (c *ChannelIO) stop() {

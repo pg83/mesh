@@ -9,12 +9,14 @@ import (
 
 type DialKey struct {
 	source InterfaceAddress
-	target uint64
+	target uint32
+	vertex Vertex
 	wire   SocketAddress
 }
 
 type DialAttempt struct {
 	key      DialKey
+	id       uint32
 	local    *LocalAddress
 	target   Vertex
 	wire     SocketAddress
@@ -49,7 +51,7 @@ func (n *Node) syncDials() {
 
 		for _, candidate := range n.candidates(peer) {
 			dst, wire := candidate.id, candidate.wire
-			target := n.addresses[dst]
+			target := candidate.vertex
 			remote := target
 
 			if target.Proto == "udp" {
@@ -61,7 +63,7 @@ func (n *Node) syncDials() {
 					continue
 				}
 
-				key := DialKey{source: src, target: dst, wire: wire}
+				key := DialKey{source: src, target: dst, vertex: target, wire: wire}
 
 				desired[key] = true
 
@@ -76,7 +78,7 @@ func (n *Node) syncDials() {
 				}
 
 				if attempt == nil {
-					attempt = &DialAttempt{key: key, target: target, wire: wire, session: peer.session, local: &LocalAddress{address: socketAddress(net.IP(src.ip.AsSlice()), 0), iface: src.iface}}
+					attempt = &DialAttempt{key: key, id: n.allocate(), target: target, wire: wire, session: peer.session, local: &LocalAddress{address: socketAddress(net.IP(src.ip.AsSlice()), 0), iface: src.iface}}
 					n.dials[key] = attempt
 				}
 
@@ -94,7 +96,7 @@ func (n *Node) syncDials() {
 							continue
 						}
 
-						attempt.socket, attempt.source, attempt.local = source.socket, source.vertex.tagged(dst, n.cfg.Index), source.local
+						attempt.socket, attempt.source, attempt.local = source.socket, source.vertex, source.local
 					}
 
 					attempt.pending = true
@@ -131,7 +133,7 @@ func (n *Node) dialChannel(attempt *DialAttempt) {
 		id := n.transportID.Add(1)
 
 		if attempt.target.Proto == "udp" {
-			result.channels = []*ChannelIO{newUDPChannel(attempt.socket, attempt.session, attempt.source, attempt.local, attempt.target, attempt.wire, id)}
+			result.channels = []*ChannelIO{newUDPChannel(attempt, id)}
 
 			return
 		}
@@ -142,7 +144,7 @@ func (n *Node) dialChannel(attempt *DialAttempt) {
 
 		socket, address := n.dialWebSocket(ctx, attempt.local, attempt.target.endpoint())
 		source := socketVertex(address)
-		ws := newWSConnection(socket, attempt.session, source, attempt.target, source.hash(), id)
+		ws := newWSConnection(socket, attempt.session, Edge{From: attempt.id, To: attempt.key.target}, source, attempt.target, false, id)
 		local := &LocalAddress{address: socketAddress(address.IP, address.Port), iface: attempt.local.iface}
 
 		ws.send.local, ws.receive.local = local, local

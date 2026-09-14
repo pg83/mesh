@@ -26,7 +26,9 @@ def test():
         old = lab.channels('a')
         lab.stop_node('b')
         lab.second_only = True
-        lab.configs['b'] = dict(endpoint=[])
+        # The listener's vertex id follows its registry position, so the
+        # registry change carries a new version for the other node to adopt.
+        lab.configs['b'] = dict(endpoint=[], registry_version=2)
         lab.start_node('b')
         lab.wait_ping('a', 'b')
         lab.wait(lambda: len(lab.channels('a')) == len(lab.channels('b')) == 4,

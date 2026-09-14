@@ -23,21 +23,21 @@ type Status struct {
 	Registry  []RegistryRecord  `json:"registry"`
 	Channels  []ChannelStatus   `json:"channels"`
 	Dialing   int               `json:"dialing"`
-	Addresses map[uint64]Vertex `json:"addresses"`
+	Addresses map[uint32]Vertex `json:"addresses"`
 	Index     uint16            `json:"index"`
 	Links     []LinkStatus      `json:"links"`
 	Graph     []Edge            `json:"graph"`
 	Records   []*GraphRecord    `json:"records"`
-	Vertices  []uint64          `json:"vertices"`
+	Vertices  []uint32          `json:"vertices"`
 	Routes    map[string][]Edge `json:"routes"`
 }
 
 func (n *Node) status() *Status {
 	now := time.Now()
-	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Edge{}, Records: []*GraphRecord{}, Vertices: []uint64{}, Routes: map[string][]Edge{}}
+	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Edge{}, Records: []*GraphRecord{}, Vertices: []uint32{}, Routes: map[string][]Edge{}}
 
 	st.Registry = n.reg.records()
-	st.Addresses = map[uint64]Vertex{}
+	st.Addresses = map[uint32]Vertex{}
 
 	for id, ep := range n.addresses {
 		st.Addresses[id] = ep
@@ -59,7 +59,7 @@ func (n *Node) status() *Status {
 		st.Links = append(st.Links, LinkStatus{Edge: edge, Idle: int(now.Sub(received).Seconds())})
 	}
 
-	vertices := map[uint64]bool{}
+	vertices := map[uint32]bool{}
 
 	for edge := range n.graph {
 		st.Graph = append(st.Graph, edge)
@@ -82,7 +82,7 @@ func (n *Node) status() *Status {
 	slices.SortFunc(st.Links, func(a, b LinkStatus) int { return compareEdge(a.Edge, b.Edge) })
 
 	for dst, path := range n.routes {
-		st.Routes[n.addresses[dst].string()] = path
+		st.Routes[n.describe(dst)] = path
 	}
 
 	return st

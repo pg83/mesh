@@ -7,9 +7,17 @@ import (
 
 const (
 	recordHeader     = 10
-	recordVertexFlag = 1
-	recordLinkSize   = 10
+	recordVertexHead = 4
+	recordLinkSize   = 7
 )
+
+func appendCounter(out []byte, id uint32) []byte {
+	return append(out, byte(id), byte(id>>8), byte(id>>16))
+}
+
+func readCounter(data []byte) uint32 {
+	return uint32(data[0]) | uint32(data[1])<<8 | uint32(data[2])<<16
+}
 
 func appendVertex(out []byte, ep Vertex) []byte {
 	var kind byte
@@ -22,13 +30,6 @@ func appendVertex(out []byte, ep Vertex) []byte {
 			kind = 4
 		}
 
-		if ep.isTagged() {
-			kind = 7
-
-			if ep.ipv6() {
-				kind = 8
-			}
-		}
 	case "tcp":
 		kind = 5
 
@@ -53,17 +54,11 @@ func appendVertex(out []byte, ep Vertex) []byte {
 	if kind != 2 && kind != 3 {
 		ip := ep.ip().To16()
 
-		if kind == 1 || kind == 5 || kind == 7 {
+		if kind == 1 || kind == 5 {
 			ip = ip.To4()
 		}
 
-		out = append(out, ip...)
-
-		if ep.isTagged() {
-			out = binary.LittleEndian.AppendUint64(out, ep.Target)
-		}
-
-		return out
+		return append(out, ip...)
 	}
 
 	for _, value := range []string{ep.Addr, ep.Path} {
@@ -89,17 +84,11 @@ func decodeVertex(data []byte) (Vertex, []byte, bool) {
 	data = data[3:]
 
 	switch kind {
-	case 1, 4, 5, 6, 7, 8:
+	case 1, 4, 5, 6:
 		size := 4
 
-		if kind == 4 || kind == 6 || kind == 8 {
+		if kind == 4 || kind == 6 {
 			size = 16
-		}
-
-		tagged := kind >= 7
-
-		if tagged {
-			size += 8
 		}
 
 		if len(data) < size {
@@ -112,12 +101,7 @@ func decodeVertex(data []byte) (Vertex, []byte, bool) {
 			ep.Proto = "tcp"
 		}
 
-		if tagged {
-			ep.Addr = net.IP(data[:size-8]).String()
-			ep.Target = binary.LittleEndian.Uint64(data[size-8:])
-		} else {
-			ep.Addr = net.IP(data[:size]).String()
-		}
+		ep.Addr = net.IP(data[:size]).String()
 
 		return ep, data[size:], true
 	case 2:
@@ -149,10 +133,9 @@ func decodeVertex(data []byte) (Vertex, []byte, bool) {
 }
 
 func encodeRecordBody(record *GraphRecord) []byte {
-	index := map[uint64]uint16{}
 	out := binary.LittleEndian.AppendUint16(nil, uint16(len(record.Vertices)))
 
-	for i, v := range record.Vertices {
+	for _, v := range record.Vertices {
 		flags := byte(0)
 
 		if v.Ingress {
@@ -163,21 +146,20 @@ func encodeRecordBody(record *GraphRecord) []byte {
 			flags |= 2
 		}
 
-		index[v.hash()] = uint16(i)
-		out = appendVertex(append(out, flags), v.Vertex)
+		out = appendVertex(append(appendCounter(out, v.ID), flags), v.Vertex)
 	}
 
 	out = binary.LittleEndian.AppendUint16(out, uint16(len(record.Links)))
 
 	for _, link := range record.Links {
-		out = binary.LittleEndian.AppendUint64(out, link.From)
-		out = binary.LittleEndian.AppendUint16(out, index[link.To])
+		out = binary.LittleEndian.AppendUint32(out, link.From)
+		out = appendCounter(out, link.To)
 	}
 
 	out = binary.LittleEndian.AppendUint16(out, uint16(len(record.Observed)))
 
 	for _, o := range record.Observed {
-		out = binary.LittleEndian.AppendUint64(out, o.From)
+		out = binary.LittleEndian.AppendUint32(out, o.From)
 		out = appendVertex(out, o.Seen)
 	}
 
@@ -208,28 +190,23 @@ func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, boo
 
 	data = data[2:]
 
-	ids := make([]uint64, 0, count)
+	ids := map[uint32]bool{}
 
 	for range count {
-		if len(data) < recordVertexFlag+7 || data[0] > 3 {
+		if len(data) < recordVertexHead+7 {
 			return nil, false
 		}
 
-		flags := data[0]
-		ep, rest, ok := decodeVertex(data[recordVertexFlag:])
+		id := vertexID(owner, readCounter(data))
+		flags := data[3]
+		ep, rest, ok := decodeVertex(data[recordVertexHead:])
 
-		if ep.isTagged() {
-			ep.Owner = owner
-		}
-
-		id := ep.canonical().hash()
-
-		if !ok || id == 0 || flags == 0 || (ep.isTagged() && flags != 2) {
+		if !ok || isHostID(id) || ids[id] || flags == 0 || flags > 3 || !ep.valid() || ep.isHost() {
 			return nil, false
 		}
 
-		record.Vertices = append(record.Vertices, RecordVertex{Vertex: ep.canonical(), Ingress: flags&1 != 0, Egress: flags&2 != 0})
-		ids = append(ids, id)
+		record.Vertices = append(record.Vertices, RecordVertex{ID: id, Vertex: ep.canonical(), Ingress: flags&1 != 0, Egress: flags&2 != 0})
+		ids[id] = true
 		data = rest
 	}
 
@@ -244,17 +221,17 @@ func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, boo
 		return nil, false
 	}
 
-	sources := map[uint64]bool{}
+	sources := map[uint32]bool{}
 
 	for range count {
-		from := binary.LittleEndian.Uint64(data)
-		to := int(binary.LittleEndian.Uint16(data[8:]))
+		from := binary.LittleEndian.Uint32(data)
+		to := vertexID(owner, readCounter(data[4:]))
 
-		if from == 0 || to >= len(ids) || from == ids[to] {
+		if isHostID(from) || !ids[to] || from == to {
 			return nil, false
 		}
 
-		record.Links = append(record.Links, Edge{From: from, To: ids[to]})
+		record.Links = append(record.Links, Edge{From: from, To: to})
 		sources[from] = true
 		data = data[recordLinkSize:]
 	}
@@ -263,14 +240,14 @@ func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, boo
 	data = data[2:]
 
 	for range count {
-		if len(data) < 8+7 {
+		if len(data) < 4+7 {
 			return nil, false
 		}
 
-		from := binary.LittleEndian.Uint64(data)
-		seen, rest, ok := decodeVertex(data[8:])
+		from := binary.LittleEndian.Uint32(data)
+		seen, rest, ok := decodeVertex(data[4:])
 
-		if !ok || !sources[from] || seen.Proto != "udp" || seen.Port == 0 || seen.isTagged() || !seen.valid() {
+		if !ok || !sources[from] || seen.Proto != "udp" || seen.Port == 0 || !seen.valid() {
 			return nil, false
 		}
 

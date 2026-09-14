@@ -62,12 +62,6 @@ def socket_vertex(address, port, proto='udp'):
     return dict(proto=proto, addr=address, port=port, endpoint=False)
 
 
-def tagged_vertex(address, port, target, owner):
-    """The vertex of an outgoing UDP channel: the sending listener tagged with its target and owner."""
-    return dict(proto='udp', addr=address, port=port, endpoint=False,
-                target=target if isinstance(target, int) else endpoint_hash(target), owner=owner)
-
-
 def vertex(value):
     return dict(value, endpoint=value.get('endpoint', value['port'] != 0 and value['proto'] != 'tcp'))
 
@@ -76,24 +70,45 @@ def endpoint_address(ep):
     return ep['addr']
 
 
-def endpoint_hash(ep):
-    if ep['addr'] in ('', '0.0.0.0', '::'):
-        return 0
-    value = '\0'.join([ep['proto'], ep['addr'].lower(), str(ep['port']), ep.get('path', '')])
-    if ep.get('target'):
-        value += '\0' + str(ep['target']) + '\0' + str(ep['owner'])
-    return int.from_bytes(hashlib.sha256(value.encode()).digest()[:8], 'little')
+def vertex_id(owner, counter):
+    """A vertex id: the owner's registry index above a counter the owner assigns."""
+    return owner << 24 | counter
+
+
+def vertex_owner(ident):
+    return ident >> 24
+
+
+def vertex_counter(ident):
+    return ident & 0xffffff
+
+
+RECORD_BASE = 101
+
+
+def record_id(owner, position):
+    """The id record() gives the vertex at this position when no counter is set."""
+    return vertex_id(owner, RECORD_BASE + position)
 
 
 def record(owner, version, vertices=(), links=(), observed=()):
-    """A node's graph record: vertices as (vertex, ingress, egress), links as (source, target),
-    observed as (source, seen address)."""
-    def ident(value):
-        return value if isinstance(value, int) else endpoint_hash(value)
-    return dict(owner=owner, version=version,
-                vertices=[dict(vertex(v), ingress=ingress, egress=egress) for v, ingress, egress in vertices],
-                links=[{'from': ident(source), 'to': ident(target)} for source, target in links],
-                observed=[{'from': ident(source), 'seen': seen} for source, seen in observed])
+    """A node's graph record: vertices as (vertex, ingress, egress[, counter]) with counters
+    defaulting to RECORD_BASE + position, links as (source id, target) where the target is a
+    vertex of this record or its counter, observed as (source id, seen address)."""
+    entries = []
+    counters = {}
+    for position, entry in enumerate(vertices):
+        v, ingress, egress = entry[:3]
+        counter = entry[3] if len(entry) > 3 else RECORD_BASE + position
+        entries.append(dict(vertex(v), id=vertex_id(owner, counter), ingress=ingress, egress=egress))
+        counters[json.dumps(vertex(v), sort_keys=True)] = counter
+
+    def local(value):
+        counter = value if isinstance(value, int) else counters[json.dumps(vertex(value), sort_keys=True)]
+        return vertex_id(owner, counter)
+    return dict(owner=owner, version=version, vertices=entries,
+                links=[{'from': source, 'to': local(target)} for source, target in links],
+                observed=[{'from': source, 'seen': seen} for source, seen in observed])
 
 
 def segaddr(seg, index):
@@ -661,8 +676,11 @@ class Lab:
             raise OSError(f'{name}: status failed: {error}') from error
         status = json.loads(data)
         descriptors = status['addresses']
+        def describe(ident):
+            # A vertex whose owner's record has not arrived yet has an id but no description.
+            return descriptors.get(str(ident), dict(proto='unknown', addr='', port=0, endpoint=False, id=ident))
         def decode(edge):
-            return dict(edge, **{k: descriptors[str(edge[k])] for k in ('from', 'to')})
+            return dict(edge, **{k: describe(edge[k]) for k in ('from', 'to')})
         status['vertices'] = [descriptors[str(i)] for i in status['vertices']]
         for key in ('links', 'graph'):
             status[key] = [decode(edge) for edge in status[key]]
@@ -720,15 +738,24 @@ class Lab:
             return ep['proto'] == 'udp' and ep['port'] == 0
         return [edge for edge in path if not host(edge['from']) and not host(edge['to'])]
 
-    def channel_source(self, name, address, target=None, proto='udp'):
+    def outgoing_channel(self, name, address, target=None, proto='udp'):
+        """The first outgoing channel of the node from this address, as (source id, source, target)."""
         state = self.status(name)
         for channel in state['channels']:
             if not channel['outgoing']:
                 continue
-            src, dst = [state['addresses'][str(channel[key])] for key in ['from', 'to']]
-            if src['addr'] == address and src['proto'] == proto and (target is None or dst['addr'] == target):
-                return src
+            src, dst = [state['addresses'].get(str(channel[key])) for key in ['from', 'to']]
+            if src and src['addr'] == address and src['proto'] == proto and (target is None or (dst and dst['addr'] == target)):
+                return channel['from'], src, dst
         return None
+
+    def channel_source(self, name, address, target=None, proto='udp'):
+        found = self.outgoing_channel(name, address, target, proto)
+        return found[1] if found else None
+
+    def source_id(self, name, address, target=None, proto='udp'):
+        found = self.outgoing_channel(name, address, target, proto)
+        return found[0] if found else None
 
     def selected_endpoint(self, src, dst):
         path = self.endpoint_route(src, dst)

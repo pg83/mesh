@@ -7,6 +7,7 @@ const (
 	kindGraph       = 1
 	kindRegistry    = 2
 	headerTransport = 8 + 1
+	sourceSize      = 4
 	maxPacket       = 65535
 	maxHops         = 16
 )

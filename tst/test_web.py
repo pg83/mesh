@@ -43,8 +43,8 @@ def test():
         assert topo['index'] == 1 and len(topo['peers']) == 3
         ids = {v['id'] for v in topo['vertices']}
         assert all(isinstance(i, str) for i in ids)
-        assert any(int(i) > 2**53 for i in ids)
         assert all(e[k] in ids for e in topo['edges'] for k in ['source', 'target'])
+        assert all(v['owner'] == lib.vertex_owner(int(v['id'])) for v in topo['vertices'])
         assert {v['owner'] for v in topo['vertices']} >= {1, 2, 3}
         assert topo['routes'][lib.intip(3) + ':0']
         code = 'import socket; s=socket.socket(); s.settimeout(2); assert s.connect_ex(("10.1.0.1",8058)) != 0'

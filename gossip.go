@@ -5,12 +5,13 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strconv"
 	"time"
 )
 
-func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalAddress {
-	local := map[uint64]*LocalAddress{}
-	incoming := map[SocketAddress]uint64{}
+func (n *Node) scanLocal(addresses InterfaceState) map[uint32]*LocalAddress {
+	local := map[uint32]*LocalAddress{}
+	incoming := map[SocketAddress]uint32{}
 
 	for _, addr := range addresses {
 		ip := net.IP(addr.ip.AsSlice())
@@ -32,23 +33,22 @@ func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalAddress {
 				public.Addr = wire.Addr.String()
 			}
 
-			if previous, exists := incoming[wire]; public.Proto == "udp" && exists && previous != public.hash() {
+			id := n.listenerID(public.vertex())
+
+			if previous, exists := incoming[wire]; public.Proto == "udp" && exists && previous != id {
 				throwFmt("ambiguous endpoint binding: %s", wire.string())
 			}
 
-			if previous := local[public.hash()]; previous != nil && previous.address != wire {
+			if previous := local[id]; previous != nil && previous.address != wire {
 				throwFmt("ambiguous public endpoint: %s", public.string())
 			}
 
 			if public.Proto == "udp" {
-				incoming[wire] = n.remember(public.vertex())
-			} else {
-				n.remember(public.vertex())
+				incoming[wire] = id
 			}
 
-			binding := &LocalAddress{address: wire, iface: addr.iface, receive: true}
-
-			local[public.hash()] = binding
+			n.addresses[id] = public.vertex().canonical()
+			local[id] = &LocalAddress{address: wire, iface: addr.iface, receive: true}
 		}
 	}
 
@@ -62,7 +62,7 @@ func (n *Node) refresh(now time.Time) {
 		if now.Sub(received) >= sessionTimeout {
 			delete(n.observed, edge)
 			n.metrics.linkDown.Add(1)
-			n.log.Info("link down", "from", n.addresses[edge.From].string(), "to", n.addresses[edge.To].string())
+			n.log.Info("link down", "from", n.describe(edge.From), "to", n.describe(edge.To))
 		}
 	}
 
@@ -82,45 +82,42 @@ func (n *Node) advertisements() [][]byte {
 }
 
 type Candidate struct {
-	id   uint64
-	wire SocketAddress
+	id     uint32
+	vertex Vertex
+	wire   SocketAddress
 }
 
 func (n *Node) candidates(peer *Peer) []Candidate {
-	addrs := []uint64{}
+	ids := map[uint32]Vertex{}
 
-	for _, ep := range peer.addresses {
-		addrs = append(addrs, n.remember(ep.vertex()))
+	for i, ep := range peer.addresses {
+		ids[peer.endpointID(i)] = ep.vertex().canonical()
 	}
 
-	for id, index := range n.owners {
-		ep := n.addresses[id]
-
-		if index == peer.index && ep.isEndpoint() && !n.subnet.Contains(ep.ip()) {
-			addrs = append(addrs, id)
+	if record := n.records[peer.index]; record != nil {
+		for _, v := range record.Vertices {
+			if v.Ingress && v.isEndpoint() && !n.subnet.Contains(v.ip()) {
+				ids[v.ID] = v.Vertex
+			}
 		}
 	}
 
-	slices.Sort(addrs)
-
 	out := []Candidate{}
 
-	for _, id := range slices.Compact(addrs) {
-		out = append(out, Candidate{id: id, wire: n.wire(peer.index, id)})
+	for _, id := range slices.Sorted(maps.Keys(ids)) {
+		out = append(out, Candidate{id: id, vertex: ids[id], wire: n.wire(id, ids[id])})
 	}
 
 	return out
 }
 
-func (n *Node) wire(owner uint16, id uint64) SocketAddress {
-	vertex := n.addresses[id]
-
+func (n *Node) wire(id uint32, vertex Vertex) SocketAddress {
 	if vertex.Proto != "udp" {
 		return SocketAddress{}
 	}
 
 	own := socketAddress(vertex.ip(), int(vertex.Port))
-	seen := n.seen[SeenKey{owner: owner, listener: id}]
+	seen := n.seen[id]
 
 	if len(seen) == 0 || !own.Addr.IsPrivate() || n.onLink(own.Addr) {
 		return own
@@ -137,4 +134,12 @@ func (n *Node) onLink(addr netip.Addr) bool {
 	}
 
 	return false
+}
+
+func (n *Node) describe(id uint32) string {
+	if v, ok := n.addresses[id]; ok {
+		return v.string()
+	}
+
+	return strconv.FormatUint(uint64(vertexOwner(id)), 10) + "/" + strconv.FormatUint(uint64(vertexCounter(id)), 10)
 }

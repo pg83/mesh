@@ -30,8 +30,8 @@ def test():
             send('inner', hex=data.hex())
         def data(hops, cursor=0, payload=b''):
             return bytes([0, (len(hops) - 1) << 4 | cursor, *hops]) + payload
-        a = ready['source']
-        b, c = [lib.endpoint(f'10.1.0.{i}') for i in (2, 3)]
+        a = lib.socket_vertex('10.1.0.1', 40000)
+        a_counter = lib.vertex_counter(ready['source'])
         for packet in [b'\x03', b'\0', b'\0\0', b'\0\xf0' + b'\0' * 15,
                        data([2], cursor=1), data([3]), data([2, 0]), data([0]), data([3, 2]),
                        b'\x01', b'\x01\x01\0' + b'\0' * 8 + b'\xff\xff']:
@@ -44,22 +44,24 @@ def test():
         ident = time.time_ns() + 1_000_000_000
         mesh_a = lib.endpoint(lib.intip(1), 0)
         a_listener = lib.endpoint('10.1.0.1')
-        body = lib.record(1, ident, [(a, False, True), (a_listener, True, False)],
-                          [(lab.channel_source('b', '10.1.0.2', '10.1.0.1'), a_listener)])
+        # The listener is registry endpoint 1 of node a, so its id is fixed by the registry.
+        body = lib.record(1, ident, [(a, False, True, a_counter), (a_listener, True, False, 1)],
+                          [(lab.source_id('b', '10.1.0.2', '10.1.0.1'), a_listener)])
         send('graph', body=body)
         lab.wait_route('b', 'a', ['a'])
         send('graph', body=body)
         # A malformed record is rejected whole and leaves the current version in place.
-        for change in [dict(version=0), dict(vertices=[dict(lib.endpoint('0.0.0.0'), ingress=True, egress=False)]),
-                       dict(links=[{'from': 0, 'to': lib.endpoint_hash(a_listener)}]),
-                       dict(links=[{'from': lib.endpoint_hash(a_listener), 'to': lib.endpoint_hash(a_listener)}])]:
+        listener_id = lib.vertex_id(1, 1)
+        for change in [dict(version=0), dict(vertices=[dict(lib.endpoint('0.0.0.0'), id=lib.vertex_id(1, 5), ingress=True, egress=False)]),
+                       dict(links=[{'from': 0, 'to': listener_id}]),
+                       dict(links=[{'from': listener_id, 'to': listener_id}]),
+                       dict(links=[{'from': lib.vertex_id(2, 1025), 'to': lib.vertex_id(1, 7)}]),
+                       dict(vertices=body['vertices'] + [dict(mesh_a, id=lib.vertex_id(1, 0), ingress=True, egress=True)]),
+                       dict(vertices=body['vertices'] + [dict(a, id=lib.vertex_id(1, 1), ingress=False, egress=True)])]:
             send('graph', body=dict(body, version=ident + 1) | change)
         # A newer identical record keeps the route.
         send('graph', body=dict(body, version=ident + 2))
-        assert lab.route('b', 'a') == ['a']
-        # The owner's own mesh vertex inside its record is ignored.
-        send('graph', body=dict(body, version=ident + 3, vertices=body['vertices'] + [dict(mesh_a, ingress=True, egress=True)]))
-        lab.wait(lambda: any(r['owner'] == 1 and r['version'] == ident + 3 for r in lab.status('b')['records']), 'record with a mesh vertex applied')
+        lab.wait(lambda: any(r['owner'] == 1 and r['version'] == ident + 2 for r in lab.status('b')['records']), 'identical newer record applied')
         assert lab.route('b', 'a') == ['a']
         assert not any(e['from'] == mesh_a and e['to'] == mesh_a for e in lab.status('b')['graph'])
         # Datagrams to a link-local address are not from any advertised listener.

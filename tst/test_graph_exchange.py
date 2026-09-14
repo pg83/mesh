@@ -23,7 +23,7 @@ def test():
         captured = lab.intercept('r', 'a', 'hold', kind=1)
         probe.send(op='graph', body=lib.record(2, ident, [(x, True, False)]))
         lab.wait(lambda: len(captured['held']) == 1, 'unsigned gossip captured')
-        assert len(captured['held'][0][1]) == 20 + 8 + 9 + 16 + 7 + 10 + 2 + 8 + 2 + 2
+        assert len(captured['held'][0][1]) == 20 + 8 + 9 + 16 + 4 + 10 + 2 + 11 + 2 + 2
         lab.clear(captured)
         lab.replay(captured, transform=lambda packet: packet[:-1] + bytes([packet[-1] ^ 1]))
         probe.send(op='graph', body=lib.record(2, ident + 1, [(x, True, False), (y, False, True)]))
@@ -38,7 +38,7 @@ def test():
         lab.wait(lambda: version('c') == ident + 2, 'newer record propagates')
         assert not present('c', host, y), 'an omitted vertex survived a newer record'
         assert present('c', x, host)
-        assert str(lib.endpoint_hash(y)) not in lab.status('c')['addresses']
+        assert str(lib.record_id(2, 1)) not in lab.status('c')['addresses']
         # An older version cannot roll a peer back.
         probe.send(op='graph', body=lib.record(2, ident + 1, [(x, True, False), (y, False, True)]))
         probe.send(op='graph', body=lib.record(2, ident + 3, [(x, True, False), (z, False, True)]))
@@ -46,7 +46,7 @@ def test():
         assert not present('c', host, y), 'a superseded record was applied'
         # Links resolve only against the current record of their source owner.
         c_socket = lab.channel_source('c', '10.1.0.3', '10.1.0.2')
-        probe.send(op='graph', body=lib.record(2, ident + 4, [(x, True, False)], [(c_socket, x), (y, x)]))
+        probe.send(op='graph', body=lib.record(2, ident + 4, [(x, True, False)], [(lab.source_id('c', '10.1.0.3', '10.1.0.2'), x), (lib.record_id(2, 1), x)]))
         lab.wait(lambda: present('a', c_socket, x), 'link with a known source vertex appears')
         assert not present('a', y, x), 'link with an unknown source vertex appeared'
 

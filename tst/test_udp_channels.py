@@ -17,11 +17,11 @@ def test():
         assert forward['hits'] > 0
         host_a, host_b = lib.endpoint(lib.intip(1), 0), lib.endpoint(lib.intip(2), 0)
         endpoint = lib.endpoint('10.1.0.2')
-        # A's implicit socket is its only UDP socket: the channel to b is that
-        # listener tagged with b's endpoint, and b dials the listener back.
+        # A's implicit socket is its only UDP socket: the channel to b is a
+        # vertex described by that listener, and b dials the listener back.
         source = lab.channel_source('a', '10.1.0.1')
         listener = lib.endpoint('10.1.0.1', source['port'])
-        assert source == lib.tagged_vertex('10.1.0.1', source['port'], endpoint, 1) and source['port'] != 7000, source
+        assert source == lib.socket_vertex('10.1.0.1', source['port']) and source['port'] != 7000, source
         rows = lab.run('a', ['cat', '/proc/net/udp']).stdout.splitlines()[1:]
         ports = [int(row.split()[1].split(':')[1], 16) for row in rows if int(row.split()[1].split(':')[0], 16) != 0]
         assert ports == [source['port']], ports
@@ -52,7 +52,7 @@ def test():
             for channel in state['channels']:
                 src, dst = [state['addresses'][str(channel[k])] for k in ['from', 'to']]
                 assert src['proto'] == dst['proto'] == 'udp'
-                assert src == lib.tagged_vertex(src['addr'], 7000, dst, src['owner']) and dst == lib.endpoint(dst['addr']), (src, dst)
+                assert src == lib.socket_vertex(src['addr'], 7000) and dst == lib.endpoint(dst['addr']), (src, dst)
             rows = lab.run(name, ['cat', '/proc/net/udp']).stdout.splitlines()[1:]
             mine = [row for row in rows if int(row.split()[1].split(':')[0], 16) == int.from_bytes(bytes([10, 1, 0, lab.nodes[name].index]), 'little')]
             assert all(int(row.split()[2].split(':')[1], 16) == 0 for row in mine), 'connected UDP socket'

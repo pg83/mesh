@@ -25,7 +25,7 @@ type ProbeCommand struct {
 	Read   bool            `json:"read"`
 	Text   bool            `json:"text"`
 	ID     uint64          `json:"id"`
-	Source *Vertex         `json:"source,omitempty"`
+	Source *uint32         `json:"source,omitempty"`
 }
 
 func main() {
@@ -51,7 +51,7 @@ func main() {
 	packetID := uint64(time.Now().UnixNano())
 
 	var sendPacket func([]byte, bool)
-	var source, target Vertex
+	var target Vertex
 	var ws *websocket.Conn
 	var halves *WSConnection
 	var received *Mailbox[any]
@@ -59,10 +59,6 @@ func main() {
 	if strings.HasPrefix(os.Args[2], "ws") {
 		transport := &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 			conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
-
-			if err == nil {
-				source = socketVertex(conn.LocalAddr())
-			}
 
 			return conn, err
 		}}
@@ -91,11 +87,11 @@ func main() {
 
 		defer conn.Close()
 
-		source = socketVertex(conn.LocalAddr())
 		target = udpVertex(remote.IP, remote.Port)
 		sendPacket = func(packet []byte, text bool) { throw2(conn.Write(packet)) }
 	}
 
+	source := vertexID(cfg.Index, runtimeVertices+uint32(os.Getpid()))
 	encoder := json.NewEncoder(os.Stdout)
 
 	throw(encoder.Encode(map[string]any{"ready": true, "source": source}))
@@ -123,7 +119,7 @@ func main() {
 
 		switch command.Op {
 		case "wrap":
-			halves = newWSConnection(ws, session, source, target, source.hash(), packetID)
+			halves = newWSConnection(ws, session, Edge{From: source, To: 0}, Vertex{}, target, false, packetID)
 			received = newMailbox[any](halves.done)
 			go halves.receive.read(received.in)
 			sendPacket = func(packet []byte, text bool) {

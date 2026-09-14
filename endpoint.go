@@ -2,13 +2,13 @@ package main
 
 import (
 	"cmp"
-	"crypto/sha256"
-	"encoding/binary"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
 )
+
+const runtimeVertices = 1024
 
 type Vertex struct {
 	Proto    string `json:"proto"`
@@ -16,13 +16,31 @@ type Vertex struct {
 	Port     uint16 `json:"port"`
 	Path     string `json:"path,omitempty"`
 	Endpoint bool   `json:"endpoint"`
-	Target   uint64 `json:"target,omitempty"`
-	Owner    uint16 `json:"owner,omitempty"`
 }
 
 type Edge struct {
-	From uint64 `json:"from"`
-	To   uint64 `json:"to"`
+	From uint32 `json:"from"`
+	To   uint32 `json:"to"`
+}
+
+func vertexID(owner uint16, counter uint32) uint32 {
+	return uint32(owner)<<24 | counter&0xffffff
+}
+
+func vertexOwner(id uint32) uint16 {
+	return uint16(id >> 24)
+}
+
+func vertexCounter(id uint32) uint32 {
+	return id & 0xffffff
+}
+
+func hostID(owner uint16) uint32 {
+	return vertexID(owner, 0)
+}
+
+func isHostID(id uint32) bool {
+	return vertexCounter(id) == 0
 }
 
 func udpVertex(ip net.IP, port int) Vertex {
@@ -58,43 +76,11 @@ func (e Vertex) valid() bool {
 		return false
 	}
 
-	if e.Target != 0 && (e.Proto != "udp" || e.Endpoint || e.Port == 0 || e.Owner == 0) {
-		return false
-	}
-
 	if e.Proto == "udp" || e.Proto == "tcp" {
 		return e.ip() != nil && !e.ip().IsLinkLocalUnicast() && e.Path == "" && (e.Port != 0 || (e.Proto == "udp" && !e.Endpoint)) && (e.Proto != "tcp" || !e.Endpoint)
 	}
 
 	return (e.Proto == "ws" || e.Proto == "wss") && e.Endpoint && e.Port != 0 && strings.HasPrefix(e.Path, "/")
-}
-
-func (e Vertex) tagged(target uint64, owner uint16) Vertex {
-	return Vertex{Proto: e.Proto, Addr: e.Addr, Port: e.Port, Target: target, Owner: owner}
-}
-
-func (e Vertex) plain() Vertex {
-	return Vertex{Proto: e.Proto, Addr: e.Addr, Port: e.Port, Path: e.Path, Endpoint: e.Endpoint}
-}
-
-func (e Vertex) isTagged() bool {
-	return e.Target != 0
-}
-
-func (e Vertex) hash() uint64 {
-	if !e.valid() {
-		return 0
-	}
-
-	text := e.Proto + "\x00" + e.Addr + "\x00" + strconv.Itoa(int(e.Port)) + "\x00" + e.Path
-
-	if e.isTagged() {
-		text += "\x00" + strconv.FormatUint(e.Target, 10) + "\x00" + strconv.Itoa(int(e.Owner))
-	}
-
-	sum := sha256.Sum256([]byte(text))
-
-	return binary.LittleEndian.Uint64(sum[:8])
 }
 
 func (e Vertex) ip() net.IP {
@@ -107,10 +93,6 @@ func (e Vertex) addr() *net.UDPAddr {
 
 func (e Vertex) string() string {
 	address := net.JoinHostPort(e.Addr, strconv.Itoa(int(e.Port)))
-
-	if e.isTagged() {
-		return address + ":" + strconv.FormatUint(e.Target, 16) + "@" + strconv.Itoa(int(e.Owner))
-	}
 
 	if e.Proto == "udp" || e.Proto == "tcp" {
 		return address
@@ -148,15 +130,7 @@ func compareVertex(a, b Vertex) int {
 		return v
 	}
 
-	if v := cmp.Compare(a.Path, b.Path); v != 0 {
-		return v
-	}
-
-	if v := cmp.Compare(a.Target, b.Target); v != 0 {
-		return v
-	}
-
-	return cmp.Compare(a.Owner, b.Owner)
+	return cmp.Compare(a.Path, b.Path)
 }
 
 func compareEdge(a, b Edge) int {
@@ -171,32 +145,12 @@ func (p *Peer) vertex() Vertex {
 	return udpVertex(net.IP(p.intip[:]), 0)
 }
 
-func (n *Node) remember(e Vertex) uint64 {
-	e = e.canonical()
-
-	id := e.hash()
-
-	if old, ok := n.addresses[id]; ok && old.identity() != e.identity() {
-		throwFmt("endpoint hash collision")
-	}
-
-	n.addresses[id] = e
-
-	return id
-}
-
 func (v Vertex) isHost() bool {
 	return v.Proto == "udp" && v.Port == 0
 }
 
 func (v Vertex) isEndpoint() bool {
 	return v.Endpoint
-}
-
-func (v Vertex) identity() Vertex {
-	v.Endpoint = false
-
-	return v
 }
 
 func socketVertex(address net.Addr) Vertex {
@@ -235,14 +189,6 @@ func (e Endpoint) valid() bool {
 
 func (e Endpoint) canonical() Endpoint {
 	return e.vertex().canonical().endpoint()
-}
-
-func (e Endpoint) hash() uint64 {
-	if !e.valid() {
-		return 0
-	}
-
-	return e.vertex().hash()
 }
 
 func (e Endpoint) ip() net.IP {

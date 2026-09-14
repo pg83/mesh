@@ -47,11 +47,6 @@ func (n *Node) handleRegistry(records RegistryRecords) bool {
 
 			reg.byIndex[peer.index] = peer
 			reg.byIntip[peer.intip] = peer
-			n.remember(peer.vertex())
-
-			for _, ep := range peer.addresses {
-				n.remember(ep.vertex())
-			}
 
 			n.log.Info("registry updated", "index", peer.index, "version", peer.version)
 		}).catch(func(e *Exception) { n.log.Debug("registry record rejected", "index", record.Index, "err", e) })

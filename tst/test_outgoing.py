@@ -1,4 +1,4 @@
-"""UDP sends from the listener socket; the channel vertex is that listener tagged with its target."""
+"""UDP sends from the listener socket; the channel vertex is described by that listener's address."""
 import lib
 import workload
 
@@ -11,7 +11,7 @@ def test():
         lab.wait_ping('client', 'server')
         lab.wait_ping('server', 'client')
         path = lab.endpoint_route('client', 'server')
-        assert path[0]['from'] == lib.tagged_vertex('10.1.0.1', 7901, lib.endpoint('10.1.0.2'), 1), path
+        assert path[0]['from'] == lib.socket_vertex('10.1.0.1', 7901), path
         assert path[0]['to'] == lib.endpoint('10.1.0.2')
         assert lab.endpoint_route('server', 'client')[0]['to'] == lib.endpoint('10.1.0.1', 7901)
         rows = [r.split() for r in lab.run('client', ['cat', '/proc/net/udp']).stdout.splitlines()[1:]]

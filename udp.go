@@ -13,12 +13,13 @@ type UDPWriter struct {
 	remote *net.UDPAddr
 }
 
-func newUDPChannel(socket *UDPSocket, session *Session, source Vertex, local *LocalAddress, target Vertex, wire SocketAddress, id uint64) *ChannelIO {
-	writer := &UDPWriter{conn: socket.conn, local: local, remote: wire.udpAddr()}
-	c := newChannelIO(session, source, target, true, source.hash(), id)
+func newUDPChannel(attempt *DialAttempt, id uint64) *ChannelIO {
+	socket, local := attempt.socket, attempt.local
+	writer := &UDPWriter{conn: socket.conn, local: local, remote: attempt.wire.udpAddr()}
+	c := newChannelIO(attempt.session, Edge{From: attempt.id, To: attempt.key.target}, attempt.source.canonical(), attempt.target, true, false, id)
 
 	c.local = &LocalAddress{address: local.address, iface: local.iface}
-	c.wire = wire
+	c.wire = attempt.wire
 
 	c.write = func(ctx context.Context, p []byte) {
 		deadline, ok := ctx.Deadline()
@@ -72,7 +73,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 		input, known := inputs[key]
 		now := time.Now()
 
-		var source Vertex
+		var source uint32
 		var inner []byte
 
 		if known && input.channel.ctx.Err() == nil {
@@ -83,8 +84,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 				continue
 			}
 
-			source = source.tagged(input.channel.edge.To, key.peer)
-			known = source.hash() == input.channel.source.hash()
+			known = source == input.channel.edge.From
 		}
 
 		if !known || input.channel.ctx.Err() != nil {
@@ -92,13 +92,13 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 			id := n.incomingID(view, key.local)
 			session, from, body, ok := n.readPacket(buf[:size], view)
 
-			if !ok || id == 0 || from.Proto != "udp" {
+			if !ok || id == 0 {
 				continue
 			}
 
-			source, inner = from.tagged(id, key.peer), body
+			source, inner = from, body
 
-			c := newChannelIO(session, source, view.addresses[id], false, source.hash(), packetID(buf))
+			c := newChannelIO(session, Edge{From: source, To: id}, Vertex{}, view.addresses[id], false, true, packetID(buf))
 
 			c.local = view.local[id]
 			c.wire = key.remote
@@ -134,7 +134,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 	}
 }
 
-func (n *Node) incomingID(view *Snapshot, wire SocketAddress) uint64 {
+func (n *Node) incomingID(view *Snapshot, wire SocketAddress) uint32 {
 	for id, local := range view.local {
 		v := view.addresses[id]
 

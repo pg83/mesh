@@ -137,18 +137,10 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 		w.value("mesh_channels", [][2]string{{"transport", key[0]}, {"direction", key[1]}}, float64(channels[key]))
 	}
 
-	owners := map[uint64]uint16{}
-
-	for _, record := range st.Records {
-		for _, v := range record.Vertices {
-			owners[v.hash()] = record.Owner
-		}
-	}
-
 	incoming := map[uint16]int{}
 
 	for _, link := range st.Links {
-		incoming[owners[link.From]]++
+		incoming[vertexOwner(link.From)]++
 	}
 
 	peers := []PeerConfig{}

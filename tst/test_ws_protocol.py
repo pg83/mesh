@@ -10,14 +10,13 @@ def test():
         lab.wait_ping('b', 'c')
         lab.wait(lambda: lab.known_nodes('b') == [1, 2, 3], 'endpoint owners known')
         lab.stop_node('a')
-        b, c = [dict(proto='ws', addr=f'10.1.0.{i}', port=7100, path='/mesh', endpoint=True) for i in (2, 3)]
         cases = [dict(op='raw', hex='00'), dict(op='raw', hex='03' + '00' * 50),
                  dict(op='raw', hex='00' * 8 + '01' + '00' * 32), dict(op='inner', hex='00'),
-                 dict(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.endpoint('10.1.0.1')),
-                 dict(op='graph', body=lib.record(1, time.time_ns(), []), source=c),
-                 dict(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.socket_vertex('0.0.0.0', 1234, 'tcp')),
-                 dict(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.socket_vertex('10.1.0.1', 0, 'tcp')),
-                 dict(op='graph', body=lib.record(1, time.time_ns(), []), source=dict(lib.socket_vertex('10.1.0.1', 1234, 'tcp'), endpoint=True)),
+                 # The source must be a vertex of the sender and not its mesh IP.
+                 dict(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.vertex_id(1, 0)),
+                 dict(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.vertex_id(3, 1)),
+                 dict(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.vertex_id(2, 1025)),
+                 dict(op='graph', body=lib.record(1, time.time_ns(), []), source=0),
                  dict(op='graph', body=lib.record(1, time.time_ns(), []), text=True)]
         for command in cases:
             probe = ws.Probe(lab)
@@ -37,15 +36,15 @@ def test():
         header = '00' * 8 + '01'
         for frame in ['00', '03' + header[2:] + '00' * 16, header[:16] + '03' + '00' * 16, header + 'ff' * 32]:
             probe.send(op='raw', hex=frame)
-        probe.send(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.socket_vertex('10.1.0.1', 1234, 'tcp'))
+        probe.send(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.vertex_id(1, 2000))
         assert not probe.send(op='read', read=True)['closed'], 'rejected frames closed the channel'
-        assert any(c['from'] == lib.endpoint_hash(a) and not c['outgoing'] for c in lab.status('b')['channels'])
+        assert any(c['from'] == a and not c['outgoing'] for c in lab.status('b')['channels'])
         rejected = [line for line in lab.http('b', '/metrics')[2].decode().splitlines() if line.startswith('mesh_packets_rejected_total')]
         assert [line.rsplit(' ', 1)[1] for line in rejected] == ['1', '2', '1', '1', '0'], rejected
         probe.send(op='raw', hex='00', text=True)
-        lab.wait(lambda: not any(c['from'] == lib.endpoint_hash(a) and not c['outgoing']
+        lab.wait(lambda: not any(c['from'] == a and not c['outgoing']
                                 for c in lab.status('b')['channels']), 'only incoming channel closed')
-        assert any(c['to'] == lib.endpoint_hash(a) and c['outgoing'] for c in lab.status('b')['channels'])
+        assert any(c['to'] == a and c['outgoing'] for c in lab.status('b')['channels'])
         assert not probe.send(op='read', read=True)['closed'], 'reverse channel stopped after invalid input'
         probe.finish()
 
@@ -57,7 +56,7 @@ def test():
         assert not first.send(op='graph', body=lib.record(1, time.time_ns(), []), id=ident, read=True)['closed']
         def connected_id():
             return [connection['id'] for connection in lab.status('b')['channels']
-                    if connection['from'] == lib.endpoint_hash(a) and not connection['outgoing']]
+                    if connection['from'] == a and not connection['outgoing']]
         lab.wait(lambda: connected_id() == [ident], 'new authenticated connection installed')
         stale = ws.Probe(lab)
         stale.send(op='graph', body=lib.record(1, time.time_ns(), []), source=a, id=ident - 1, read=True)

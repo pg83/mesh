@@ -99,20 +99,21 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var target Vertex
+		var listener uint32
 
 		for id, local := range view.local {
 			ep := view.addresses[id]
 
 			if ep.isEndpoint() && ep.Proto != "udp" && local.address == socketAddress(address.IP, address.Port) && ep.Path == r.URL.RequestURI() && strings.EqualFold(ep.Addr, host) {
-				if target.hash() != 0 {
+				if listener != 0 {
 					throwFmt("ambiguous websocket listener")
 				}
 
-				target = ep
+				target, listener = ep, id
 			}
 		}
 
-		if target.hash() == 0 {
+		if listener == 0 {
 			http.NotFound(w, r)
 
 			return
@@ -127,13 +128,13 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 		packet := readWS(ctx, socket)
 		session, source, _, ok := n.readPacket(packet, view)
 
-		if !ok || source.Proto != "tcp" {
+		if !ok {
 			return
 		}
 
-		c := newWSConnection(socket, session, target, source, source.hash(), packetID(packet))
+		c := newWSConnection(socket, session, Edge{From: listener, To: source}, target, Vertex{}, true, packetID(packet))
 
-		c.send.local, c.receive.local = view.local[target.hash()], view.local[target.hash()]
+		c.send.local, c.receive.local = view.local[listener], view.local[listener]
 
 		read := c.receive.read
 
@@ -180,7 +181,7 @@ func (n *Node) dialWebSocket(ctx context.Context, local *LocalAddress, target En
 
 	defer transport.CloseIdleConnections()
 
-	if ca := n.tlsCA[target.hash()]; ca != "" {
+	if ca := n.tlsCA[target]; ca != "" {
 		pool := throw2(x509.SystemCertPool())
 
 		if !pool.AppendCertsFromPEM(throw2(os.ReadFile(ca))) {

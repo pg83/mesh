@@ -44,7 +44,9 @@ type Node struct {
 	subnet        *net.IPNet
 	sockets       map[SocketKey]*UDPSocket
 	listeners     map[string]*WSListener
-	tlsCA         map[uint64]string
+	listenerIDs   map[Vertex]uint32
+	counter       uint32
+	tlsCA         map[Endpoint]string
 	noDial        map[DialPair]bool
 	endpoints     []ListenerBinding
 	tun           *Tun
@@ -61,12 +63,11 @@ type Node struct {
 	graph         map[Edge]bool
 	records       map[uint16]*GraphRecord
 	observed      map[Edge]time.Time
-	local         map[uint64]*LocalAddress
-	addresses     map[uint64]Vertex
-	owners        map[uint64]uint16
-	seen          map[SeenKey][]SocketAddress
-	routes        map[uint64][]Edge
-	hops          map[uint64][]uint16
+	local         map[uint32]*LocalAddress
+	addresses     map[uint32]Vertex
+	seen          map[uint32][]SocketAddress
+	routes        map[uint32][]Edge
+	hops          map[uint32][]uint16
 	next          map[uint16]Edge
 	metrics       Metrics
 	sshd          *SSHServer
@@ -86,11 +87,11 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		events: newMailbox[any](nil), tunInbox: newMailbox[any](nil), tunWrites: newMailbox[[]byte](nil), channels: map[Edge]*Channel{},
 		cfg: cfg, reg: reg, key: dh, log: log,
 		graph: map[Edge]bool{}, records: map[uint16]*GraphRecord{}, observed: map[Edge]time.Time{},
-		owners:   map[uint64]uint16{},
-		seen:     map[SeenKey][]SocketAddress{},
-		routes:   map[uint64][]Edge{},
-		packetID: uint64(time.Now().UnixNano()), addresses: map[uint64]Vertex{},
-		channelStatus: map[Edge]ChannelStatus{}, dials: map[DialKey]*DialAttempt{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
+		seen:     map[uint32][]SocketAddress{},
+		routes:   map[uint32][]Edge{},
+		packetID: uint64(time.Now().UnixNano()), addresses: map[uint32]Vertex{},
+		channelStatus: map[Edge]ChannelStatus{}, dials: map[DialKey]*DialAttempt{}, listeners: map[string]*WSListener{}, tlsCA: map[Endpoint]string{},
+		listenerIDs: map[Vertex]uint32{}, counter: runtimeVertices,
 		noDial: map[DialPair]bool{},
 	}
 
@@ -109,23 +110,17 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 			peer.session = newSession(me, peer, dh.private)
 		}
 
-		n.remember(peer.vertex())
-
 		for _, config := range peer.endpoints {
 			if config.TLSCA != "" {
-				n.tlsCA[config.description().hash()] = config.TLSCA
+				n.tlsCA[config.description()] = config.TLSCA
 			}
-		}
-
-		for _, ep := range peer.addresses {
-			n.remember(ep.vertex())
 		}
 	}
 
 	_, n.subnet = throw3(net.ParseCIDR(cfg.Subnet))
 
 	n.sockets = map[SocketKey]*UDPSocket{}
-	n.local = map[uint64]*LocalAddress{}
+	n.local = map[uint32]*LocalAddress{}
 
 	for _, config := range append(append([]EndpointConfig{}, cfg.Endpoint...), me.endpoints...) {
 		config.validate()
@@ -187,6 +182,34 @@ func (n *Node) loop(name string, body func()) {
 		n.log.Error("loop failed", "loop", name, "err", e)
 		os.Exit(1)
 	})
+}
+
+func (n *Node) allocate() uint32 {
+	n.counter++
+
+	return vertexID(n.cfg.Index, n.counter)
+}
+
+func (n *Node) listenerID(public Vertex) uint32 {
+	public = public.canonical()
+
+	if id, known := n.listenerIDs[public]; known {
+		return id
+	}
+
+	me := n.reg.byIndex[n.cfg.Index]
+
+	for i, ep := range me.addresses {
+		if ep.vertex() == public {
+			n.listenerIDs[public] = me.endpointID(i)
+
+			return me.endpointID(i)
+		}
+	}
+
+	n.listenerIDs[public] = n.allocate()
+
+	return n.listenerIDs[public]
 }
 
 func (n *Node) nextPacketID() uint64 {

@@ -15,12 +15,12 @@ func writeWS(ctx context.Context, conn *websocket.Conn, p []byte) {
 	throw(conn.Write(ctx, websocket.MessageBinary, p))
 }
 
-func newWSConnection(socket *websocket.Conn, session *Session, source, target Vertex, origin, id uint64) *WSConnection {
+func newWSConnection(socket *websocket.Conn, session *Session, edge Edge, source, target Vertex, listener bool, id uint64) *WSConnection {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	c := &WSConnection{
-		send:    newChannelIO(session, source, target, true, origin, id),
-		receive: newChannelIO(session, target, source, false, origin, id),
+		send:    newChannelIO(session, edge, source, target, true, listener, id),
+		receive: newChannelIO(session, Edge{From: edge.To, To: edge.From}, target, source, false, listener, id),
 		done:    make(chan struct{}),
 	}
 

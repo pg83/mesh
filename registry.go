@@ -62,7 +62,7 @@ func newPeer(pc PeerConfig, version uint64) *Peer {
 	for _, config := range pc.Endpoint {
 		config.validate()
 
-		if ep := config.description(); ep.hash() != 0 {
+		if ep := config.description(); ep.valid() {
 			p.addresses = append(p.addresses, ep)
 		}
 	}
@@ -74,6 +74,10 @@ func newPeer(pc PeerConfig, version uint64) *Peer {
 	}
 
 	return p
+}
+
+func (p *Peer) endpointID(i int) uint32 {
+	return vertexID(p.index, uint32(i+1))
 }
 
 func newRegistry(peers []PeerConfig, version uint64) *Registry {

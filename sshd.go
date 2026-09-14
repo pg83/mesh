@@ -228,7 +228,7 @@ func (s *SSHServer) egress() {
 		pkt.DecRef()
 
 		if destination := ipDestination(packet); destination != nil {
-			post(s.node.tunInbox.in, any(TunPacket{payload: packet, destination: udpVertex(destination, 0).hash()}))
+			post(s.node.tunInbox.in, any(TunPacket{payload: packet, destination: destination}))
 		}
 	}
 }
