@@ -12,8 +12,9 @@ import (
 )
 
 type InterfaceAddress struct {
-	ip    netip.Addr
-	iface int
+	ip     netip.Addr
+	prefix netip.Prefix
+	iface  int
 }
 
 type InterfaceState []InterfaceAddress
@@ -48,13 +49,14 @@ func (n *Node) interfaceAddresses() (InterfaceState, error) {
 		}
 
 		for _, addr := range addrs {
-			ip := netip.MustParsePrefix(addr.String()).Addr().Unmap()
+			prefix := netip.MustParsePrefix(addr.String())
+			ip := prefix.Addr().Unmap()
 
 			if (!ip.IsGlobalUnicast() && !ip.IsLoopback()) || n.subnet.Contains(net.IP(ip.AsSlice())) {
 				continue
 			}
 
-			addresses = append(addresses, InterfaceAddress{ip: ip, iface: iface.Index})
+			addresses = append(addresses, InterfaceAddress{ip: ip, prefix: netip.PrefixFrom(ip, prefix.Bits()), iface: iface.Index})
 		}
 	}
 

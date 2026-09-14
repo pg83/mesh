@@ -16,6 +16,8 @@ type Vertex struct {
 	Port     uint16 `json:"port"`
 	Path     string `json:"path,omitempty"`
 	Endpoint bool   `json:"endpoint"`
+	Target   uint64 `json:"target,omitempty"`
+	Owner    uint16 `json:"owner,omitempty"`
 }
 
 type Edge struct {
@@ -56,6 +58,10 @@ func (e Vertex) valid() bool {
 		return false
 	}
 
+	if e.Target != 0 && (e.Proto != "udp" || e.Endpoint || e.Port == 0 || e.Owner == 0) {
+		return false
+	}
+
 	if e.Proto == "udp" || e.Proto == "tcp" {
 		return e.ip() != nil && !e.ip().IsLinkLocalUnicast() && e.Path == "" && (e.Port != 0 || (e.Proto == "udp" && !e.Endpoint)) && (e.Proto != "tcp" || !e.Endpoint)
 	}
@@ -63,12 +69,30 @@ func (e Vertex) valid() bool {
 	return (e.Proto == "ws" || e.Proto == "wss") && e.Endpoint && e.Port != 0 && strings.HasPrefix(e.Path, "/")
 }
 
+func (e Vertex) tagged(target uint64, owner uint16) Vertex {
+	return Vertex{Proto: e.Proto, Addr: e.Addr, Port: e.Port, Target: target, Owner: owner}
+}
+
+func (e Vertex) plain() Vertex {
+	return Vertex{Proto: e.Proto, Addr: e.Addr, Port: e.Port, Path: e.Path, Endpoint: e.Endpoint}
+}
+
+func (e Vertex) isTagged() bool {
+	return e.Target != 0
+}
+
 func (e Vertex) hash() uint64 {
 	if !e.valid() {
 		return 0
 	}
 
-	sum := sha256.Sum256([]byte(e.Proto + "\x00" + e.Addr + "\x00" + strconv.Itoa(int(e.Port)) + "\x00" + e.Path))
+	text := e.Proto + "\x00" + e.Addr + "\x00" + strconv.Itoa(int(e.Port)) + "\x00" + e.Path
+
+	if e.isTagged() {
+		text += "\x00" + strconv.FormatUint(e.Target, 10) + "\x00" + strconv.Itoa(int(e.Owner))
+	}
+
+	sum := sha256.Sum256([]byte(text))
 
 	return binary.LittleEndian.Uint64(sum[:8])
 }
@@ -83,6 +107,10 @@ func (e Vertex) addr() *net.UDPAddr {
 
 func (e Vertex) string() string {
 	address := net.JoinHostPort(e.Addr, strconv.Itoa(int(e.Port)))
+
+	if e.isTagged() {
+		return address + ":" + strconv.FormatUint(e.Target, 16) + "@" + strconv.Itoa(int(e.Owner))
+	}
 
 	if e.Proto == "udp" || e.Proto == "tcp" {
 		return address
@@ -120,7 +148,15 @@ func compareVertex(a, b Vertex) int {
 		return v
 	}
 
-	return cmp.Compare(a.Path, b.Path)
+	if v := cmp.Compare(a.Path, b.Path); v != 0 {
+		return v
+	}
+
+	if v := cmp.Compare(a.Target, b.Target); v != 0 {
+		return v
+	}
+
+	return cmp.Compare(a.Owner, b.Owner)
 }
 
 func compareEdge(a, b Edge) int {

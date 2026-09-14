@@ -9,10 +9,14 @@ import workload
 
 def encode_vertex(ep):
     kind = 4 if ep['proto'] == 'udp' and ':' in ep['addr'] else {'udp': 1, 'ws': 2, 'wss': 3}[ep['proto']]
+    if ep.get('target'):
+        kind = 8 if ':' in ep['addr'] else 7
     kind |= 128 if ep.get('endpoint', ep['port'] != 0) else 0
     packet = bytearray(struct.pack('<BH', kind, ep['port']))
     if ep['proto'] == 'udp':
         packet += lib.ipbytes(ep['addr'])
+        if ep.get('target'):
+            packet += struct.pack('<Q', ep['target'])
     else:
         for value in (ep['addr'], ep['path']):
             data = value.encode()
@@ -20,7 +24,7 @@ def encode_vertex(ep):
     return bytes(packet)
 
 
-def encode_record(owner, version, vertices, links):
+def encode_record(owner, version, vertices, links, observed=()):
     packet = bytearray(struct.pack('<BHQH', 1, owner, version, len(vertices)))
     offsets = []
     for flags, ep in vertices:
@@ -29,6 +33,9 @@ def encode_record(owner, version, vertices, links):
     packet += struct.pack('<H', len(links))
     for source, index in links:
         packet += struct.pack('<QH', lib.endpoint_hash(source), index)
+    packet += struct.pack('<H', len(observed))
+    for source, seen in observed:
+        packet += struct.pack('<Q', lib.endpoint_hash(source)) + encode_vertex(seen)
     return bytes(packet), offsets
 
 
@@ -42,12 +49,16 @@ def test():
                      dict(proto='ws', addr='edge.example.invalid', port=80, path='/mesh/λ', endpoint=True),
                      dict(proto='wss', addr='secure.example.invalid', port=443, path='/' + 'x' * 300, endpoint=True),
                      lib.endpoint('2001:db8::1234', 9000)]
-        sockets = [lib.socket_vertex('192.0.2.12', 40000)]
+        # A tagged vertex names the owner in its hash but not on the wire: the record owner supplies it.
+        sockets = [lib.socket_vertex('192.0.2.12', 40000), lib.tagged_vertex('192.0.2.11', 9000, listeners[0], 1),
+                   lib.tagged_vertex('2001:db8::1234', 9000, listeners[3], 1)]
         ident = time.time_ns() + 1_000_000_000
         vertices = [(1, ep) for ep in listeners] + [(2, ep) for ep in sockets]
         links = [(b_socket, 0)]
+        observed = [(b_socket, lib.endpoint('203.0.113.5', 40123))]
         edges = [(ep, host) for ep in listeners] + [(host, ep) for ep in sockets] + [(b_socket, listeners[0])]
-        packet, offsets = encode_record(1, ident + 1, vertices, links)
+        packet, offsets = encode_record(1, ident + 1, vertices, links, observed)
+        tail = len(packet) - 2 - 8 - 7
 
         def send(data):
             probe.send(op='inner', hex=data.hex())
@@ -62,12 +73,19 @@ def test():
             send(packet[:end])
         send(packet + b'\0')
         send(packet[:11] + b'\xff\xff' + packet[13:])
-        send(packet[:-2] + b'\xff\xff')
-        send(packet[:-10] + b'\0' * 8 + packet[-2:])
-        send(packet[:-10] + struct.pack('<Q', lib.endpoint_hash(listeners[0])) + packet[-2:])
+        send(packet[:tail] + b'\xff\xff')
+        send(packet[:tail - 2] + b'\xff\xff' + packet[tail:])
+        send(packet[:tail - 10] + b'\0' * 8 + packet[tail - 2:])
+        send(packet[:tail - 10] + struct.pack('<Q', lib.endpoint_hash(listeners[0])) + packet[tail - 2:])
+        # Observations must name a linked source, describe a UDP address with a port and stay untagged.
+        send(packet[:tail + 2] + struct.pack('<Q', lib.endpoint_hash(listeners[0])) + packet[tail + 10:])
+        send(packet[:tail + 10] + encode_vertex(listeners[1]))
+        send(packet[:tail + 10] + encode_vertex(lib.endpoint('203.0.113.5', 0)))
+        send(packet[:tail + 10] + encode_vertex(sockets[1]))
         mutations = [(offsets[0], b'\x00'), (offsets[0], b'\x04'), (offsets[0] + 1, b'\x00'), (offsets[1] + 1, b'\xff'),
                      (offsets[1] + 4, b'\xff\xff'),
-                     (offsets[1] + 6 + len(listeners[1]['addr']), b'\xff\xff')]
+                     (offsets[1] + 6 + len(listeners[1]['addr']), b'\xff\xff'),
+                     (offsets[5], b'\x01'), (offsets[5], b'\x03'), (offsets[5] + 1, b'\x87')]
         for offset, value in mutations:
             bad = bytearray(packet)
             bad[offset:offset + len(value)] = value
@@ -91,8 +109,9 @@ def test():
         send(packet)
         lab.wait(lambda: all(present(edge) for edge in edges), 'independent binary writer accepted')
         assert not present((marker, host)), 'a replaced record kept an omitted vertex'
+        assert next(r for r in lab.status('b')['records'] if r['owner'] == 1)['observed'] == [dict(zip(['from', 'seen'], [lib.endpoint_hash(b_socket), observed[0][1]]))]
         newer = lib.record(1, ident + 2, [(ep, True, False) for ep in listeners] + [(ep, False, True) for ep in sockets],
-                           [(b_socket, listeners[0])])
+                           [(b_socket, listeners[0])], observed)
         probe.send(op='graph', body=newer)
         lab.wait(lambda: version() == ident + 2, 'Go writer record accepted')
         assert all(present(edge) for edge in edges), 'Go writer lost UDP, WS or WSS endpoints'

@@ -52,7 +52,7 @@ func (n *Node) installChannel(c *ChannelIO) {
 	actor := &Channel{node: n, edge: c.edge, peer: c.peer, outgoing: c.outgoing, inbox: newMailbox[any](c.ctx.Done()), session: c.session, io: c}
 
 	n.channels[c.edge] = actor
-	n.channelStatus[c.edge] = ChannelStatus{Transport: c.transport(), Edge: c.edge, Outgoing: c.outgoing, ID: c.id}
+	n.channelStatus[c.edge] = ChannelStatus{Transport: c.transport(), Edge: c.edge, Outgoing: c.outgoing, ID: c.id, Wire: c.wire}
 	go n.loop("channel", actor.run)
 }
 

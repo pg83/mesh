@@ -63,6 +63,7 @@ func echoProbe(path, destination string, index uint16) {
 			continue
 		}
 
+		origin = origin.tagged(mine.hash(), peer.index)
 		clients[socketAddress(remote.IP, remote.Port)] = origin
 
 		destination := &net.UDPAddr{IP: origin.ip(), Port: targetPort}

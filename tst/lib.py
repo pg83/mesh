@@ -62,6 +62,12 @@ def socket_vertex(address, port, proto='udp'):
     return dict(proto=proto, addr=address, port=port, endpoint=False)
 
 
+def tagged_vertex(address, port, target, owner):
+    """The vertex of an outgoing UDP channel: the sending listener tagged with its target and owner."""
+    return dict(proto='udp', addr=address, port=port, endpoint=False,
+                target=target if isinstance(target, int) else endpoint_hash(target), owner=owner)
+
+
 def vertex(value):
     return dict(value, endpoint=value.get('endpoint', value['port'] != 0 and value['proto'] != 'tcp'))
 
@@ -74,16 +80,20 @@ def endpoint_hash(ep):
     if ep['addr'] in ('', '0.0.0.0', '::'):
         return 0
     value = '\0'.join([ep['proto'], ep['addr'].lower(), str(ep['port']), ep.get('path', '')])
+    if ep.get('target'):
+        value += '\0' + str(ep['target']) + '\0' + str(ep['owner'])
     return int.from_bytes(hashlib.sha256(value.encode()).digest()[:8], 'little')
 
 
-def record(owner, version, vertices=(), links=()):
-    """A node's graph record: vertices as (vertex, ingress, egress), links as (source, target)."""
+def record(owner, version, vertices=(), links=(), observed=()):
+    """A node's graph record: vertices as (vertex, ingress, egress), links as (source, target),
+    observed as (source, seen address)."""
     def ident(value):
         return value if isinstance(value, int) else endpoint_hash(value)
     return dict(owner=owner, version=version,
                 vertices=[dict(vertex(v), ingress=ingress, egress=egress) for v, ingress, egress in vertices],
-                links=[{'from': ident(source), 'to': ident(target)} for source, target in links])
+                links=[{'from': ident(source), 'to': ident(target)} for source, target in links],
+                observed=[{'from': ident(source), 'seen': seen} for source, seen in observed])
 
 
 def segaddr(seg, index):
@@ -209,8 +219,8 @@ class Lab:
                 self.blocked.discard((dst, src, seg))
 
     def intercept(self, src, dst, action, count=1, kind=None, seg=None,
-                  min_size=0, max_size=None, every=1, delay=0, rate=None, source_ip=None, target_ip=None, source_port=None, target_port=None, syn=False):
-        rule = dict(src=src, dst=dst, action=action, count=count, kind=kind,
+                  min_size=0, max_size=None, every=1, delay=0, rate=None, source_ip=None, target_ip=None, source_port=None, target_port=None, syn=False, proto=None):
+        rule = dict(src=src, dst=dst, action=action, count=count, kind=kind, proto=proto,
                     seg=seg, min_size=min_size, max_size=max_size, every=every, delay=delay,
                     rate=rate, source_ip=source_ip, target_ip=target_ip,
                     source_port=source_port, target_port=target_port, syn=syn, next=0, seen=0, hits=0, held=[])
@@ -371,6 +381,7 @@ class Lab:
                             if (rule['src'] != src.name or rule['dst'] != dst.name
                                     or (rule['source_ip'] is not None and source_ip != ipbytes(rule['source_ip']))
                                     or (rule['target_ip'] is not None and target_ip != ipbytes(rule['target_ip']))
+                                    or (rule['proto'] is not None and proto != rule['proto'])
                                     or (rule['syn'] and (proto != 6 or len(packet) < head+20 or packet[head+13] & 0x12 != 0x02))
                                     or (rule['source_port'] is not None and (proto not in (6, 17) or struct.unpack_from('!H', packet, head)[0] != rule['source_port']))
                                     or (rule['target_port'] is not None and (proto not in (6, 17) or struct.unpack_from('!H', packet, head + 2)[0] != rule['target_port']))

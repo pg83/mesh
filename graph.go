@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"slices"
 	"time"
 )
@@ -12,11 +13,22 @@ type RecordVertex struct {
 	Egress  bool `json:"egress"`
 }
 
+type Observation struct {
+	From uint64 `json:"from"`
+	Seen Vertex `json:"seen"`
+}
+
+type SeenKey struct {
+	owner    uint16
+	listener uint64
+}
+
 type GraphRecord struct {
 	Owner    uint16         `json:"owner"`
 	Version  uint64         `json:"version"`
 	Vertices []RecordVertex `json:"vertices"`
 	Links    []Edge         `json:"links"`
+	Observed []Observation  `json:"observed"`
 	packet   []byte
 	applied  time.Time
 }
@@ -41,8 +53,9 @@ func (n *Node) publishRecord() {
 		}
 	}
 
-	record := &GraphRecord{Owner: n.cfg.Index, Vertices: []RecordVertex{}, Links: []Edge{}}
+	record := &GraphRecord{Owner: n.cfg.Index, Vertices: []RecordVertex{}, Links: []Edge{}, Observed: []Observation{}}
 	exported := map[uint64]bool{}
+	observed := map[uint64]SocketAddress{}
 
 	for id := range n.local {
 		vertex, known := n.addresses[id]
@@ -60,13 +73,30 @@ func (n *Node) publishRecord() {
 	}
 
 	for edge := range n.observed {
-		if exported[edge.To] && edge.From != 0 && edge.From != edge.To {
-			record.Links = append(record.Links, edge)
+		if !exported[edge.To] || edge.From == 0 || edge.From == edge.To {
+			continue
 		}
+
+		record.Links = append(record.Links, edge)
+
+		source, wire := n.addresses[edge.From], n.channelStatus[edge].Wire
+
+		if wire.Port == 0 || !source.isTagged() || socketAddress(source.ip(), int(source.Port)) == wire {
+			continue
+		}
+
+		if current, exists := observed[edge.From]; !exists || compareSocketAddress(wire, current) < 0 {
+			observed[edge.From] = wire
+		}
+	}
+
+	for from, wire := range observed {
+		record.Observed = append(record.Observed, Observation{From: from, Seen: wire.vertex()})
 	}
 
 	slices.SortFunc(record.Vertices, func(a, b RecordVertex) int { return compareVertex(a.Vertex, b.Vertex) })
 	slices.SortFunc(record.Links, compareEdge)
+	slices.SortFunc(record.Observed, func(a, b Observation) int { return cmp.Compare(a.From, b.From) })
 
 	body := encodeRecordBody(record)
 	previous := n.records[n.cfg.Index]
@@ -141,12 +171,31 @@ func (n *Node) rebuild() {
 		}
 	}
 
+	seen := map[SeenKey][]SocketAddress{}
+
 	for _, record := range n.records {
 		for _, link := range record.Links {
 			if owners[link.From] != 0 && owners[link.To] != 0 && link.From != link.To {
 				graph[link] = true
 			}
 		}
+
+		for _, o := range record.Observed {
+			source, owner := addresses[o.From], owners[o.From]
+
+			if owner == 0 || !source.isTagged() {
+				continue
+			}
+
+			key := SeenKey{owner: owner, listener: source.plain().hash()}
+
+			seen[key] = append(seen[key], socketAddress(o.Seen.ip(), int(o.Seen.Port)))
+		}
+	}
+
+	for key, wires := range seen {
+		slices.SortFunc(wires, compareSocketAddress)
+		seen[key] = slices.Compact(wires)
 	}
 
 	for id := range n.local {
@@ -166,6 +215,7 @@ func (n *Node) rebuild() {
 
 	n.addresses = addresses
 	n.owners = owners
+	n.seen = seen
 	n.graph = graph
 	n.recompute()
 }

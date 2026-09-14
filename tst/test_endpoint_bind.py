@@ -17,7 +17,9 @@ def test():
         while time.monotonic() < deadline:
             links = lab.status('b')['links']
             assert links
-            assert all(edge['to'] == lib.endpoint('10.1.0.2') for edge in links if edge['to']['proto'] == 'udp'), links
+            # The other segment only has b's implicit socket, never port 7000.
+            assert all(edge['to'] == lib.endpoint('10.1.0.2') or (edge['to']['addr'] == '10.2.0.2' and edge['to']['port'] != 7000)
+                       for edge in links if edge['to']['proto'] == 'udp'), links
             time.sleep(.1)
         lab.wait_ping('b', 'a')
 

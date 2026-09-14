@@ -3,6 +3,7 @@ package main
 import (
 	"maps"
 	"net"
+	"net/netip"
 	"slices"
 	"time"
 )
@@ -14,7 +15,7 @@ func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalAddress {
 	for _, addr := range addresses {
 		ip := net.IP(addr.ip.AsSlice())
 
-		for _, config := range n.endpoints {
+		for _, config := range n.bindings() {
 			if ip.IsLoopback() && !config.bind.ip().IsLoopback() {
 				continue
 			}
@@ -80,7 +81,12 @@ func (n *Node) advertisements() [][]byte {
 	return packets
 }
 
-func (n *Node) candidates(peer *Peer) []uint64 {
+type Candidate struct {
+	id   uint64
+	wire SocketAddress
+}
+
+func (n *Node) candidates(peer *Peer) []Candidate {
 	addrs := []uint64{}
 
 	for _, ep := range peer.addresses {
@@ -97,5 +103,38 @@ func (n *Node) candidates(peer *Peer) []uint64 {
 
 	slices.Sort(addrs)
 
-	return slices.Compact(addrs)
+	out := []Candidate{}
+
+	for _, id := range slices.Compact(addrs) {
+		out = append(out, Candidate{id: id, wire: n.wire(peer.index, id)})
+	}
+
+	return out
+}
+
+func (n *Node) wire(owner uint16, id uint64) SocketAddress {
+	vertex := n.addresses[id]
+
+	if vertex.Proto != "udp" {
+		return SocketAddress{}
+	}
+
+	own := socketAddress(vertex.ip(), int(vertex.Port))
+	seen := n.seen[SeenKey{owner: owner, listener: id}]
+
+	if len(seen) == 0 || !own.Addr.IsPrivate() || n.onLink(own.Addr) {
+		return own
+	}
+
+	return seen[0]
+}
+
+func (n *Node) onLink(addr netip.Addr) bool {
+	for _, iface := range n.interfaces {
+		if iface.prefix.Contains(addr) {
+			return true
+		}
+	}
+
+	return false
 }

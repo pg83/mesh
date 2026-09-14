@@ -21,6 +21,14 @@ func appendVertex(out []byte, ep Vertex) []byte {
 		if ep.ipv6() {
 			kind = 4
 		}
+
+		if ep.isTagged() {
+			kind = 7
+
+			if ep.ipv6() {
+				kind = 8
+			}
+		}
 	case "tcp":
 		kind = 5
 
@@ -42,14 +50,20 @@ func appendVertex(out []byte, ep Vertex) []byte {
 	out = append(out, flag)
 	out = binary.LittleEndian.AppendUint16(out, ep.Port)
 
-	if kind == 1 || kind == 4 || kind == 5 || kind == 6 {
+	if kind != 2 && kind != 3 {
 		ip := ep.ip().To16()
 
-		if kind == 1 || kind == 5 {
+		if kind == 1 || kind == 5 || kind == 7 {
 			ip = ip.To4()
 		}
 
-		return append(out, ip...)
+		out = append(out, ip...)
+
+		if ep.isTagged() {
+			out = binary.LittleEndian.AppendUint64(out, ep.Target)
+		}
+
+		return out
 	}
 
 	for _, value := range []string{ep.Addr, ep.Path} {
@@ -75,30 +89,37 @@ func decodeVertex(data []byte) (Vertex, []byte, bool) {
 	data = data[3:]
 
 	switch kind {
-	case 1, 5:
-		ep.Proto = "udp"
+	case 1, 4, 5, 6, 7, 8:
+		size := 4
 
-		if kind == 5 {
-			ep.Proto = "tcp"
+		if kind == 4 || kind == 6 || kind == 8 {
+			size = 16
 		}
 
-		ep.Addr = net.IP(data[:4]).String()
+		tagged := kind >= 7
 
-		return ep, data[4:], true
-	case 4, 6:
-		if len(data) < 16 {
+		if tagged {
+			size += 8
+		}
+
+		if len(data) < size {
 			return Vertex{}, nil, false
 		}
 
 		ep.Proto = "udp"
 
-		if kind == 6 {
+		if kind == 5 || kind == 6 {
 			ep.Proto = "tcp"
 		}
 
-		ep.Addr = net.IP(data[:16]).String()
+		if tagged {
+			ep.Addr = net.IP(data[:size-8]).String()
+			ep.Target = binary.LittleEndian.Uint64(data[size-8:])
+		} else {
+			ep.Addr = net.IP(data[:size]).String()
+		}
 
-		return ep, data[16:], true
+		return ep, data[size:], true
 	case 2:
 		ep.Proto = "ws"
 	case 3:
@@ -153,6 +174,13 @@ func encodeRecordBody(record *GraphRecord) []byte {
 		out = binary.LittleEndian.AppendUint16(out, index[link.To])
 	}
 
+	out = binary.LittleEndian.AppendUint16(out, uint16(len(record.Observed)))
+
+	for _, o := range record.Observed {
+		out = binary.LittleEndian.AppendUint64(out, o.From)
+		out = appendVertex(out, o.Seen)
+	}
+
 	return out
 }
 
@@ -174,7 +202,7 @@ func recordHead(inner []byte) (uint16, uint64, bool) {
 }
 
 func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, bool) {
-	record := &GraphRecord{Owner: owner, Version: version, Vertices: []RecordVertex{}, Links: []Edge{}, packet: inner}
+	record := &GraphRecord{Owner: owner, Version: version, Vertices: []RecordVertex{}, Links: []Edge{}, Observed: []Observation{}, packet: inner}
 	data := inner[recordHeader:]
 	count := int(binary.LittleEndian.Uint16(data))
 
@@ -189,9 +217,14 @@ func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, boo
 
 		flags := data[0]
 		ep, rest, ok := decodeVertex(data[recordVertexFlag:])
+
+		if ep.isTagged() {
+			ep.Owner = owner
+		}
+
 		id := ep.canonical().hash()
 
-		if !ok || id == 0 || flags == 0 {
+		if !ok || id == 0 || flags == 0 || (ep.isTagged() && flags != 2) {
 			return nil, false
 		}
 
@@ -207,9 +240,11 @@ func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, boo
 	count = int(binary.LittleEndian.Uint16(data))
 	data = data[2:]
 
-	if len(data) != count*recordLinkSize {
+	if len(data) < count*recordLinkSize+2 {
 		return nil, false
 	}
+
+	sources := map[uint64]bool{}
 
 	for range count {
 		from := binary.LittleEndian.Uint64(data)
@@ -220,7 +255,31 @@ func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, boo
 		}
 
 		record.Links = append(record.Links, Edge{From: from, To: ids[to]})
+		sources[from] = true
 		data = data[recordLinkSize:]
+	}
+
+	count = int(binary.LittleEndian.Uint16(data))
+	data = data[2:]
+
+	for range count {
+		if len(data) < 8+7 {
+			return nil, false
+		}
+
+		from := binary.LittleEndian.Uint64(data)
+		seen, rest, ok := decodeVertex(data[8:])
+
+		if !ok || !sources[from] || seen.Proto != "udp" || seen.Port == 0 || seen.isTagged() || !seen.valid() {
+			return nil, false
+		}
+
+		record.Observed = append(record.Observed, Observation{From: from, Seen: seen.canonical()})
+		data = rest
+	}
+
+	if len(data) != 0 {
+		return nil, false
 	}
 
 	return record, true

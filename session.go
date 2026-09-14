@@ -52,7 +52,7 @@ func (s *Session) seal(source Vertex, kind byte, inner []byte, id uint64) []byte
 
 	out[8] = byte(s.local)
 
-	body := append(appendVertex(nil, source), inner...)
+	body := append(appendVertex(nil, source.plain()), inner...)
 
 	return s.send.Seal(out, nonce(out), body, out[:headerTransport])
 }
