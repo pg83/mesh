@@ -9,7 +9,8 @@ import workload
 
 
 def encode(path, payload, cursor=1):
-    return bytes([1, len(path), cursor]) + b''.join(struct.pack('<QQ', lib.endpoint_hash(e['from']), lib.endpoint_hash(e['to'])) for e in path) + payload
+    vertices = [path[0]['from']] + [e['to'] for e in path]
+    return bytes([1, len(path), cursor]) + b''.join(struct.pack('<Q', lib.endpoint_hash(v)) for v in vertices) + payload
 
 
 def checksum(data):

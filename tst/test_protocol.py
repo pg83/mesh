@@ -29,13 +29,13 @@ def test():
         def inner(data):
             send('inner', hex=data.hex())
         def data(path, cursor=0, payload=b''):
-            return bytes([1, len(path), cursor]) + b''.join(struct.pack('<Q', lib.endpoint_hash(ep))
-                     for edge in path for ep in edge) + payload
+            vertices = [path[0][0]] + [b for _, b in path]
+            return bytes([1, len(path), cursor]) + b''.join(struct.pack('<Q', lib.endpoint_hash(v)) for v in vertices) + payload
         a = ready['source']
         b, c = [lib.endpoint(f'10.1.0.{i}') for i in (2, 3)]
         for packet in [b'', b'\xff', b'\x01', b'\x01\0\0', b'\x01\x11\0',
                        data([(a,b)], cursor=1), data([(a,c)]), data([(a,b),(b,lib.endpoint('10.1.0.99'))]),
-                       data([(a,a)]), data([(a,lib.endpoint('0.0.0.0'))]), data([(a,b),(c,lib.endpoint(lib.intip(2), 0))]),
+                       data([(a,a)]), data([(a,lib.endpoint('0.0.0.0'))]), data([(a,b),(b,b)]),
                        b'\x06', b'\x06\x01\0' + b'\0' * 8 + b'\xff\xff']:
             inner(packet)
         send('short-transport')

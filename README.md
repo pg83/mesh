@@ -220,8 +220,9 @@ its complete source address, including the real port. A relay wraps the inner
 message with its outgoing channel source; it preserves the route and payload
 and advances the route cursor.
 
-Inner data starts with `1`, edge count (1), cursor (1), then the route. Each
-edge is a pair of vertices: source vertex hash (8), destination vertex hash (8). The opaque payload follows. The complete route includes the source and destination
+Inner data starts with `1`, edge count (1), cursor (1), then the route as a
+vertex list: edge count plus one vertex hashes (8 each), consecutive vertices
+forming the edges. The opaque payload follows. The complete route includes the source and destination
 mesh vertices and all local attachment edges. Routes allow at most 16 network
 hops and 48 total edges. Disconnected, zero-length and malformed paths are rejected.
 A relay checks its receiving channel against the current edge, follows the explicit

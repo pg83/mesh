@@ -27,12 +27,12 @@ type Data struct {
 }
 
 func encodeData(d *Data) []byte {
-	out := make([]byte, 0, 3+16*len(d.path)+len(d.payload))
+	out := make([]byte, 0, 3+8*(len(d.path)+1)+len(d.payload))
 
 	out = append(out, innerData, byte(len(d.path)), byte(d.cursor))
+	out = binary.LittleEndian.AppendUint64(out, d.path[0].From)
 
 	for _, edge := range d.path {
-		out = binary.LittleEndian.AppendUint64(out, edge.From)
 		out = binary.LittleEndian.AppendUint64(out, edge.To)
 	}
 
@@ -45,22 +45,24 @@ func decodeData(inner []byte) (*Data, bool) {
 	}
 
 	hops := int(inner[1])
-	head := 3 + 16*hops
+	head := 3 + 8*(hops+1)
 
 	if hops == 0 || hops > maxRouteEdges || len(inner) < head || int(inner[2]) >= hops {
 		return nil, false
 	}
 
 	d := &Data{path: make([]Edge, hops), cursor: int(inner[2]), payload: inner[head:]}
+	from := binary.LittleEndian.Uint64(inner[3:])
 
 	for i := range d.path {
-		start := 3 + 16*i
+		to := binary.LittleEndian.Uint64(inner[11+8*i:])
 
-		d.path[i] = Edge{From: binary.LittleEndian.Uint64(inner[start:]), To: binary.LittleEndian.Uint64(inner[start+8:])}
-
-		if d.path[i].From == 0 || d.path[i].To == 0 || d.path[i].From == d.path[i].To || (i > 0 && d.path[i-1].To != d.path[i].From) {
+		if from == 0 || to == 0 || from == to {
 			return nil, false
 		}
+
+		d.path[i] = Edge{From: from, To: to}
+		from = to
 	}
 
 	return d, true

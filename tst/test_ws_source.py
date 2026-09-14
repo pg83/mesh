@@ -55,7 +55,7 @@ def test():
                 applied = lambda: any(p['index'] == 50 and p['version'] == 9 for p in lab.status('b')['registry'])
             else:
                 path = [(host_a, source), (source, server), (server, host_b)]
-                data = b'\1\3\1' + b''.join(struct.pack('<QQ', lib.endpoint_hash(a), lib.endpoint_hash(b)) for a, b in path)
+                data = b'\1\3\1' + b''.join(struct.pack('<Q', lib.endpoint_hash(v)) for v in [path[0][0]] + [b for _, b in path])
                 command = dict(op='inner', hex=(data + udp_payload(b'first-message-is-data')).hex())
                 applied = lambda: b'first-message-is-data'.hex() in log.read_text()
             assert probe.send(**command)['sent']
