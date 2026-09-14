@@ -92,7 +92,7 @@ func (n *Node) publishSnapshot() {
 	}
 
 	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local), owners: maps.Clone(n.owners),
-		routes: n.routes, channels: channels, records: versions}
+		routes: n.routes, hops: n.hops, next: n.next, channels: channels, records: versions}
 
 	view.gossip = n.advertisements()
 	n.snapshot = view

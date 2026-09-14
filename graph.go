@@ -218,7 +218,7 @@ func (n *Node) recompute() {
 			}
 		}
 
-		if hops == 0 || hops > maxHops || len(path) > maxRouteEdges {
+		if hops == 0 || hops > maxHops {
 			continue
 		}
 
@@ -227,4 +227,34 @@ func (n *Node) recompute() {
 	}
 
 	n.routes = routes
+	n.hops = map[uint64][]uint16{}
+
+	for dst, path := range routes {
+		nodes := []uint16{}
+
+		for _, edge := range path {
+			if n.addresses[edge.To].isHost() {
+				nodes = append(nodes, n.owners[edge.To])
+			}
+		}
+
+		if len(nodes) != 0 && slices.Max(nodes) < 256 {
+			n.hops[dst] = nodes
+		}
+	}
+
+	n.next = map[uint16]Edge{}
+
+	for edge, status := range n.channelStatus {
+		if !status.Outgoing || !n.graph[edge] {
+			continue
+		}
+
+		peer := n.owners[edge.To]
+		current, exists := n.next[peer]
+
+		if !exists || compareVertex(n.addresses[edge.From], n.addresses[current.From]) < 0 {
+			n.next[peer] = edge
+		}
+	}
 }

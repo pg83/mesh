@@ -28,14 +28,12 @@ def test():
             assert response()['sent']
         def inner(data):
             send('inner', hex=data.hex())
-        def data(path, cursor=0, payload=b''):
-            vertices = [path[0][0]] + [b for _, b in path]
-            return bytes([1, len(path), cursor]) + b''.join(struct.pack('<Q', lib.endpoint_hash(v)) for v in vertices) + payload
+        def data(hops, cursor=0, payload=b''):
+            return bytes([1, len(hops), cursor, *hops]) + payload
         a = ready['source']
         b, c = [lib.endpoint(f'10.1.0.{i}') for i in (2, 3)]
         for packet in [b'', b'\xff', b'\x01', b'\x01\0\0', b'\x01\x11\0',
-                       data([(a,b)], cursor=1), data([(a,c)]), data([(a,b),(b,lib.endpoint('10.1.0.99'))]),
-                       data([(a,a)]), data([(a,lib.endpoint('0.0.0.0'))]), data([(a,b),(b,b)]),
+                       data([2], cursor=1), data([3]), data([2, 0]), data([0]), data(list(range(1, 18))), data([3, 2]),
                        b'\x06', b'\x06\x01\0' + b'\0' * 8 + b'\xff\xff']:
             inner(packet)
         send('short-transport')
@@ -71,11 +69,9 @@ def test():
             lab.ports[(1, socket.inet_aton('169.254.1.2'))] = lab.ports[(1, socket.inet_aton('10.1.0.2'))]
         lab.run('a', [sys.executable, '-c',
                      "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind(('169.254.1.1', 0)); s.sendto(bytes([3, 2, 0]) + b'\\0' * 40, ('169.254.1.2', 7000))"])
-        mesh_b = lib.endpoint(lib.intip(2), 0)
-        full_path = [(mesh_a, a), (a, b), (b, mesh_b)]
         for ip in (b'bad', b'\x65' + b'\0' * 19, b'\x44' + b'\0' * 19,
                    b'\x4f' + b'\0' * 19, b'\x45' + b'\0' * 19):
-            inner(data(full_path, cursor=1, payload=ip))
+            inner(data([2], payload=ip))
         # Route destination, not the payload address, selects the local TUN.
         other = '10.77.0.99'
         lab.run('b', ['ip', 'addr', 'add', other + '/32', 'dev', 'lo'])
@@ -94,15 +90,14 @@ def test():
             return bytes(head) + udp
         wrong = b'wrong-inner-destination'
         good = b'correct-inner-destination'
-        inner(data([(mesh_a, a), (a, b), (b, lib.endpoint(lib.intip(3), 0))], cursor=1, payload=ipv4_udp(other, wrong)))
-        inner(data(full_path, cursor=1, payload=ipv4_udp(lib.intip(2), good)))
+        inner(data([2, 3], payload=ipv4_udp(other, wrong)))
+        inner(data([2], payload=ipv4_udp(lib.intip(2), good)))
         lab.wait(lambda: good.hex() in log.read_text().splitlines(), 'valid authenticated UDP reaches the server')
         assert wrong.hex() not in log.read_text().splitlines(), 'mesh delivered a packet for another route destination'
-        b_socket = lab.channel_source('b', '10.1.0.2', '10.1.0.1')
-        inner(data([(mesh_a, a), (a, b), (b, b_socket), (b_socket, mesh_b)], cursor=1, payload=ipv4_udp(lib.intip(2), b'local-edge-outside-graph')))
-        inner(data(full_path, cursor=1, payload=ipv4_udp(other, b'opaque-destination')))
+        inner(data([2, 2], payload=ipv4_udp(lib.intip(2), b'local-edge-outside-graph')))
+        inner(data([2], payload=ipv4_udp(other, b'opaque-destination')))
         lab.wait(lambda: b'opaque-destination'.hex() in log.read_text().splitlines(), 'payload destination is independent of route destination')
-        assert b'local-edge-outside-graph'.hex() not in log.read_text().splitlines(), 'a local edge outside the graph carried data'
+        assert b'local-edge-outside-graph'.hex() not in log.read_text().splitlines(), 'a route revisiting the node delivered data'
         lab.wait_ping('b', 'c')
         lab.wait_ping('c', 'b')
         probe.stdin.close()

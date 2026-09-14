@@ -37,7 +37,7 @@ type Metrics struct {
 	receivedBytes, sentBytes                     atomic.Uint64
 	rejected                                     [len(rejectReasons)]atomic.Uint64
 	recordsApplied, recordsStale, recordsInvalid atomic.Uint64
-	forwardNoChannel, forwardNoEdge              atomic.Uint64
+	forwardNoChannel                             atomic.Uint64
 	tunRead, tunUnrouted, tunDelivered           atomic.Uint64
 	linkUp, linkDown, dialFailed                 atomic.Uint64
 }
@@ -124,7 +124,6 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 	w.counter("mesh_records_stale_total", "Graph records not newer than the stored version.", &m.recordsStale)
 	w.counter("mesh_records_invalid_total", "Graph records rejected by the decoder.", &m.recordsInvalid)
 	w.counter("mesh_forward_dropped_total", "Data packets dropped by a relay without a channel for the next hop.", &m.forwardNoChannel)
-	w.counter("mesh_forward_unlinked_total", "Data packets dropped on a local hop that is not in the graph.", &m.forwardNoEdge)
 	w.counter("mesh_tun_read_total", "IP packets read from the TUN device.", &m.tunRead)
 	w.counter("mesh_tun_unrouted_total", "IP packets from the TUN device without a route.", &m.tunUnrouted)
 	w.counter("mesh_tun_delivered_total", "IP packets written to the TUN device.", &m.tunDelivered)

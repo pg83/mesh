@@ -12,6 +12,8 @@ type Snapshot struct {
 	local     map[uint64]*LocalAddress
 	owners    map[uint64]uint16
 	routes    map[uint64][]Edge
+	hops      map[uint64][]uint16
+	next      map[uint16]Edge
 	channels  map[Edge]*Channel
 	records   map[uint16]uint64
 	gossip    [][]byte
@@ -232,43 +234,17 @@ func (a *Channel) graph(inner []byte) {
 func (a *Channel) forward(inner []byte) {
 	d, ok := decodeData(inner)
 
-	if !ok || d.path[d.cursor] != a.edge {
+	if !ok || d.hops[d.cursor] != a.node.cfg.Index || (d.cursor > 0 && d.hops[d.cursor-1] != a.peer) {
 		return
 	}
 
 	d.cursor++
+	advanceCursor(inner, d.cursor)
 	a.node.routeData(a.view, d, inner)
 }
 
 func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
-	me := view.registry.byIndex[n.cfg.Index].vertex().hash()
-	local := func(id uint64) bool { return id == me || view.local[id] != nil }
-
-	for d.cursor < len(d.path) {
-		edge := d.path[d.cursor]
-
-		if !local(edge.To) {
-			advanceCursor(inner, d.cursor)
-
-			if actor := view.channels[edge]; actor != nil {
-				actor.post(Outbound{inner: inner})
-			} else {
-				n.metrics.forwardNoChannel.Add(1)
-			}
-
-			return
-		}
-
-		if !view.graph[edge] {
-			n.metrics.forwardNoEdge.Add(1)
-
-			return
-		}
-
-		d.cursor++
-	}
-
-	if d.path[len(d.path)-1].To == me {
+	if d.cursor == len(d.hops) {
 		n.metrics.tunDelivered.Add(1)
 
 		if n.sshd != nil && n.sshd.accepts(d.payload) {
@@ -276,6 +252,14 @@ func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
 		} else {
 			post(n.tunWrites.in, d.payload)
 		}
+
+		return
+	}
+
+	if actor := view.channels[view.next[d.hops[d.cursor]]]; actor != nil {
+		actor.post(Outbound{inner: inner})
+	} else {
+		n.metrics.forwardNoChannel.Add(1)
 	}
 }
 
@@ -299,17 +283,17 @@ func (n *Node) tunLoop() {
 		case *Snapshot:
 			view = v
 		case TunPacket:
-			path := view.routes[v.destination]
+			hops := view.hops[v.destination]
 
 			n.metrics.tunRead.Add(1)
 
-			if len(path) == 0 {
+			if len(hops) == 0 {
 				n.metrics.tunUnrouted.Add(1)
 
 				continue
 			}
 
-			d := &Data{path: path, payload: v.payload}
+			d := &Data{hops: hops, payload: v.payload}
 
 			n.routeData(view, d, encodeData(d))
 		}

@@ -8,9 +8,8 @@ import lib
 import workload
 
 
-def encode(path, payload, cursor=1):
-    vertices = [path[0]['from']] + [e['to'] for e in path]
-    return bytes([1, len(path), cursor]) + b''.join(struct.pack('<Q', lib.endpoint_hash(v)) for v in vertices) + payload
+def encode(hops, payload, cursor=0):
+    return bytes([1, len(hops), cursor, *hops]) + payload
 
 
 def checksum(data):
@@ -30,7 +29,7 @@ def test():
         assert route[-1]['to'] == lib.endpoint(lib.intip(3), 0)
         assert all(a['to'] == b['from'] for a, b in zip(route, route[1:]))
         origin = workload.Probe(lab, 'a', 'r')
-        route[0]['to'] = route[1]['from'] = origin.source
+        hops = [lab.nodes['r'].index, lab.nodes['b'].index]
         destination = 'fd77::3'
         lab.run('b', ['ip', '-6', 'addr', 'add', destination+'/128', 'dev', 'lo', 'nodad'])
         log = lab.dir/'ipv6-receive.log'
@@ -43,7 +42,7 @@ def test():
         pseudo = src+dst+struct.pack('!I3xB', len(udp), 17)
         struct.pack_into('!H', udp, 6, checksum(pseudo+udp))
         packet = struct.pack('!IHBB', 6 << 28, len(udp), 17, 64)+src+dst+udp
-        origin.send(op='inner', hex=encode(route, packet).hex())
+        origin.send(op='inner', hex=encode(hops, packet).hex())
         lab.wait(lambda: body.hex() in log.read_text(), 'IPv6 traversed relay and reached TUN by full route')
 
         # Authenticate/decode as the destination without interpreting its payload.
@@ -51,7 +50,7 @@ def test():
         copied = lab.intercept('r', 'b', 'copy', target_port=7000, kind=3, count=-1)
         offset = 0
         for payload in [b'\0opaque\xff', b'\x60not-an-IP-header', b'', bytes(range(256))*4]:
-            origin.send(op='inner', hex=encode(route, payload).hex())
+            origin.send(op='inner', hex=encode(hops, payload).hex())
             def arrived():
                 nonlocal offset
                 packets = list(copied['held'])
@@ -64,7 +63,7 @@ def test():
                     assert report['opened']
                     data = bytes.fromhex(report['hex'])
                     if data[:1] == b'\1':
-                        assert data == encode(route, payload, cursor=4), 'route or opaque payload changed in transit'
+                        assert data == encode(hops, payload, cursor=1), 'route or opaque payload changed in transit'
                         return True
                 return False
             lab.wait(arrived, 'opaque data forwarded without IP parsing')

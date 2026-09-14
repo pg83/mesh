@@ -54,7 +54,7 @@ def test():
         assert m['mesh_records_stale_total'] > 0, 'relayed records were not filtered by version'
         assert m['mesh_records_invalid_total'] == 0
         assert m['mesh_link_up_total'] == 1 and m['mesh_link_down_total'] == 0
-        assert m['mesh_forward_dropped_total'] == 0 and m['mesh_forward_unlinked_total'] == 0
+        assert m['mesh_forward_dropped_total'] == 0
         assert sum(v for k, v in m.items() if k.startswith('mesh_packets_rejected_total')) == 0
         relay = metrics(lab, 'r')
         assert relay['mesh_tun_delivered_total'] == 0

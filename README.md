@@ -220,14 +220,16 @@ its complete source address, including the real port. A relay wraps the inner
 message with its outgoing channel source; it preserves the route and payload
 and advances the route cursor.
 
-Inner data starts with `1`, edge count (1), cursor (1), then the route as a
-vertex list: edge count plus one vertex hashes (8 each), consecutive vertices
-forming the edges. The opaque payload follows. The complete route includes the source and destination
-mesh vertices and all local attachment edges. Routes allow at most 16 network
-hops and 48 total edges. Disconnected, zero-length and malformed paths are rejected.
-A relay checks its receiving channel against the current edge, follows the explicit
-local edges, and sends through the next outgoing channel. Local edges must be
-currently available. Only a path ending at the node's TUN vertex delivers to TUN.
+Inner data starts with `1`, hop count (1), cursor (1), then the route as a
+list of registry indexes (1 byte each), the nodes the packet must visit in
+order, ending with the destination. The opaque payload follows. Routes allow
+at most 16 hops and only nodes with an index below 256. Zero-length and
+malformed routes are rejected. A relay accepts a packet only when the node
+at the cursor is itself and the previous node is the channel's peer, advances
+the cursor, and sends through its own channel to the next node: the first
+outgoing socket in canonical order that has a graph edge to a listener of
+that node, the same choice the sender's BFS would make. When the cursor
+passes the last hop the packet is delivered to TUN.
 The transport never reads the payload to find an address or choose a destination.
 The TUN adapter handles IPv4/IPv6 packet framing and destination lookup on ingress;
 node address allocation in the current registry remains IPv4.
@@ -326,8 +328,8 @@ never returns stays, but its links into other nodes disappear as their channels
 expire. Older versions cannot restore a removed vertex or link.
 
 BFS follows the directed endpoint graph, with stable endpoint ordering for
-identical path lengths. The complete path is carried unchanged, including local attachment edges;
-movements between endpoints on the same host require no network packet. The
+identical path lengths. Only the sequence of nodes travels in the packet;
+each relay picks its link to the next node from the same graph. The
 return path is computed independently. There is no separate per-host
 endpoint selector. Graph changes and the one-second local observation pass
 rebuild routes.

@@ -97,7 +97,7 @@ func echoProbe(path, destination string, index uint16) {
 
 		destination = &net.UDPAddr{IP: remote.IP, Port: targetPort}
 
-		send(destination, encodeData(&Data{path: []Edge{{From: me.vertex().hash(), To: source.hash()}, {From: source.hash(), To: udpVertex(destination.IP, destination.Port).hash()}, {From: udpVertex(destination.IP, destination.Port).hash(), To: peer.vertex().hash()}}, cursor: 1, payload: packet}))
+		send(destination, encodeData(&Data{hops: []uint16{peer.index}, payload: packet}))
 	}
 }
 
