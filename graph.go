@@ -13,11 +13,17 @@ type RecordVertex struct {
 	Egress  bool `json:"egress"`
 }
 
+// Observation reports the wire address the packets of a linked source vertex
+// arrive from when it differs from the address the vertex describes: the
+// mapping the sender's NAT chose for that socket.
 type Observation struct {
 	From uint64 `json:"from"`
 	Seen Vertex `json:"seen"`
 }
 
+// SeenKey names a listener of one node: observations of the node's tagged
+// vertices with the listener's address apply to the listener, since they
+// share the socket.
 type SeenKey struct {
 	owner    uint16
 	listener uint64
