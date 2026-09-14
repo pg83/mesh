@@ -87,10 +87,6 @@ func (e Vertex) ip() net.IP {
 	return net.ParseIP(e.Addr)
 }
 
-func (e Vertex) addr() *net.UDPAddr {
-	return &net.UDPAddr{IP: e.ip(), Port: int(e.Port)}
-}
-
 func (e Vertex) string() string {
 	address := net.JoinHostPort(e.Addr, strconv.Itoa(int(e.Port)))
 

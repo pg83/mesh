@@ -110,19 +110,21 @@ func newSSHServer(n *Node, cfg *Config, intip [4]byte) *SSHServer {
 
 	s.link = channel.New(sshQueue, uint32(cfg.Mtu), "")
 
-	if err := s.stack.CreateNIC(sshNIC, s.link); err != nil {
-		throwFmt("sshd nic: %v", err)
-	}
+	netstackCheck("nic", s.stack.CreateNIC(sshNIC, s.link))
 
 	address := tcpip.ProtocolAddress{Protocol: ipv4.ProtocolNumber, AddressWithPrefix: tcpip.AddrFrom4(intip).WithPrefix()}
 
-	if err := s.stack.AddProtocolAddress(sshNIC, address, stack.AddressProperties{}); err != nil {
-		throwFmt("sshd address: %v", err)
-	}
+	netstackCheck("address", s.stack.AddProtocolAddress(sshNIC, address, stack.AddressProperties{}))
 
 	s.stack.SetRouteTable([]tcpip.Route{{Destination: header.IPv4EmptySubnet, NIC: sshNIC}})
 
 	return s
+}
+
+func netstackCheck(what string, err tcpip.Error) {
+	if err != nil {
+		throwFmt("sshd %s: %v", what, err)
+	}
 }
 
 func (s *SSHServer) loadAuthorizedKeys(path string) {
@@ -217,11 +219,6 @@ func (s *SSHServer) run() {
 func (s *SSHServer) egress() {
 	for {
 		pkt := s.link.ReadContext(context.Background())
-
-		if pkt == nil {
-			return
-		}
-
 		data := pkt.ToBuffer()
 		packet := data.Flatten()
 

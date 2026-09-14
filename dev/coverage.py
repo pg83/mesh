@@ -10,7 +10,7 @@ import sys
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', required=True)
-    parser.add_argument('--minimum', type=float, default=95)
+    parser.add_argument('--minimum', type=float, default=98)
     parser.add_argument('dirs', nargs='+')
     args = parser.parse_args()
     directories = []

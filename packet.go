@@ -51,10 +51,6 @@ func encodeData(d *Data) []byte {
 }
 
 func decodeData(inner []byte) (*Data, bool) {
-	if len(inner) < 1 {
-		return nil, false
-	}
-
 	count := int(inner[0]>>4) + 1
 	cursor := int(inner[0] & 15)
 	head := 1 + count

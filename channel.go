@@ -154,10 +154,6 @@ func (a *Channel) send(kind byte, inner []byte) {
 }
 
 func (a *Channel) receive(r Received) {
-	if a.outgoing || a.view == nil || a.view.local[a.edge.To] == nil {
-		return
-	}
-
 	if len(r.packet) < headerTransport {
 		a.node.metrics.rejected[rejectShort].Add(1)
 

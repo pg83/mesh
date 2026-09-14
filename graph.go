@@ -153,13 +153,8 @@ func (n *Node) rebuild() {
 
 	listener := func(id uint32) uint32 {
 		source := addresses[id]
-		record := n.records[vertexOwner(id)]
 
-		if record == nil {
-			return 0
-		}
-
-		for _, v := range record.Vertices {
+		for _, v := range n.records[vertexOwner(id)].Vertices {
 			if v.Ingress && v.isEndpoint() && v.Proto == "udp" && v.Addr == source.Addr && v.Port == source.Port {
 				return v.ID
 			}
@@ -178,7 +173,11 @@ func (n *Node) rebuild() {
 		}
 
 		for _, o := range record.Observed {
-			if id := listener(o.From); present[o.From] && id != 0 {
+			if !present[o.From] {
+				continue
+			}
+
+			if id := listener(o.From); id != 0 {
 				seen[id] = append(seen[id], socketAddress(o.Seen.ip(), int(o.Seen.Port)))
 			}
 		}

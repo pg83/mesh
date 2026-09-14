@@ -36,6 +36,13 @@ def test():
         assert edge(b, source, endpoint) and not edge(b, endpoint, source)
         assert edge(a, lab.channel_source('b', '10.1.0.2'), listener)
         lab.wait(lambda: all(len(lab.status(n)['channels']) == 2 for n in ['a', 'b']), 'two directed channels each')
+        # A new interface address gets its own implicit socket; the existing one stays.
+        lab.run('a', ['ip', 'addr', 'add', '10.1.0.11/24', 'dev', 's1'])
+        lab.wait(lambda: len(implicit_ports(lab)) == 2, 'implicit socket for the added address', timeout=10)
+        assert source['port'] in implicit_ports(lab), implicit_ports(lab)
+        assert lab.channel_source('a', '10.1.0.1') == source
+        lab.run('a', ['ip', 'addr', 'del', '10.1.0.11/24', 'dev', 's1'])
+        lab.wait(lambda: implicit_ports(lab) == [source['port']], 'implicit socket removed with its address', timeout=10)
         # A configured listener replaces the implicit socket as the source.
         lab.stop_node('a')
         lab.configs['a'] = dict(endpoint=[lib.endpoint('0.0.0.0')])
@@ -57,6 +64,11 @@ def test():
             mine = [row for row in rows if int(row.split()[1].split(':')[0], 16) == int.from_bytes(bytes([10, 1, 0, lab.nodes[name].index]), 'little')]
             assert all(int(row.split()[2].split(':')[1], 16) == 0 for row in mine), 'connected UDP socket'
             assert not mine, 'a socket bound to the address besides the wildcard listener'
+
+
+def implicit_ports(lab):
+    rows = lab.run('a', ['cat', '/proc/net/udp']).stdout.splitlines()[1:]
+    return sorted(int(row.split()[1].split(':')[1], 16) for row in rows if int(row.split()[1].split(':')[0], 16) != 0)
 
 
 lib.main(test)
