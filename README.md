@@ -209,12 +209,16 @@ and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
 |---|---|
-| data transport | `3`, sender index (2), packet ID (8), random nonce (24), XChaCha20-Poly1305 ciphertext and tag (16) |
+| data transport | `3`, sender index (2), packet ID (8), source tag (4), ChaCha20-Poly1305 ciphertext and tag (16) |
 | graph transport | `4`, the same remaining header and encryption |
 | registry transport | `5`, the same remaining header and encryption |
 
-The header is authenticated as associated data. Every packet gets a fresh
-random nonce, including after a process restart. The encrypted plaintext is
+The header is authenticated as associated data. The nonce is not sent: it is
+the packet ID followed by the source tag, the low 32 bits of the source
+vertex hash. A socket has one counter that only grows and a new socket is a
+new vertex, so the pair never repeats under one key as long as clocks do not
+run backwards across restarts; the receiver also checks the tag against the
+decrypted source vertex. The encrypted plaintext is
 `source vertex description || inner message`. Every transport packet contains
 its complete source address, including the real port. A relay wraps the inner
 message with its outgoing channel source; it preserves the route and payload

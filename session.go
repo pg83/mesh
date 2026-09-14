@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/cipher"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"io"
@@ -28,7 +27,7 @@ func sessionCipher(shared, sender, receiver []byte) cipher.AEAD {
 
 	throw2(io.ReadFull(hkdf.New(sha256.New, shared, nil, info), key))
 
-	return throw2(chacha20poly1305.NewX(key))
+	return throw2(chacha20poly1305.New(key))
 }
 
 func newSession(local, peer *Peer, private []byte) *Session {
@@ -57,11 +56,11 @@ func (s *Session) seal(source Vertex, inner []byte, id uint64) []byte {
 
 	binary.LittleEndian.PutUint16(out[1:], s.local)
 	binary.LittleEndian.PutUint64(out[3:], id)
-	throw2(rand.Read(out[11:headerTransport]))
+	binary.LittleEndian.PutUint32(out[11:], uint32(source.hash()))
 
 	body := append(appendVertex(nil, source), inner...)
 
-	return s.send.Seal(out, out[11:headerTransport], body, out[:headerTransport])
+	return s.send.Seal(out, out[3:headerTransport], body, out[:headerTransport])
 }
 
 func (s *Session) open(packet []byte) (Vertex, []byte, bool) {
@@ -69,7 +68,7 @@ func (s *Session) open(packet []byte) (Vertex, []byte, bool) {
 		return Vertex{}, nil, false
 	}
 
-	inner, err := s.recv.Open(nil, packet[11:headerTransport], packet[headerTransport:], packet[:headerTransport])
+	inner, err := s.recv.Open(nil, packet[3:headerTransport], packet[headerTransport:], packet[:headerTransport])
 
 	if err != nil {
 		return Vertex{}, nil, false
@@ -77,5 +76,5 @@ func (s *Session) open(packet []byte) (Vertex, []byte, bool) {
 
 	source, body, ok := decodeVertex(inner)
 
-	return source, body, ok && source.valid() && !source.isHost() && len(body) != 0
+	return source, body, ok && source.valid() && !source.isHost() && len(body) != 0 && uint32(source.hash()) == binary.LittleEndian.Uint32(packet[11:])
 }

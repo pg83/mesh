@@ -34,7 +34,7 @@ def test():
         assert not probe.send(op='graph', body=lib.record(1, time.time_ns(), []), read=True)['closed']
         a = probe.source
         # Frames on an established channel are checked like the first one.
-        header = '03' + '0100' + '00' * 8 + '00' * 24
+        header = '03' + '0100' + '00' * 8 + '00' * 4
         for frame in ['00', 'ff' + header[2:] + '00' * 16, '03' + '0300' + header[6:] + '00' * 16, header + 'ff' * 32]:
             probe.send(op='raw', hex=frame)
         probe.send(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.socket_vertex('10.1.0.1', 1234, 'tcp'))
