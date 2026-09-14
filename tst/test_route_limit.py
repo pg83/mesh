@@ -8,7 +8,19 @@ import workload
 def test():
     names = [f'n{i}' for i in range(18)]
     segments = {i + 1: [names[i], names[i + 1]] for i in range(17)}
-    with lib.Lab(names, segments) as lab:
+    lab = lib.Lab(names, segments)
+    # Only adjacent interfaces are wired together. Without these exclusions
+    # every node sends the growing graph toward every other segment, filling
+    # the userspace switch queues with unreachable traffic on small CI runners.
+    for source in lab.nodes.values():
+        lab.configs[source.name] = dict(no_dial=[
+            {'from': lib.segaddr(src_seg, source.index),
+             'to': lib.segaddr(dst_seg, target.index)}
+            for src_seg in source.segments
+            for target in lab.nodes.values() if target != source
+            for dst_seg in target.segments if src_seg != dst_seg
+        ])
+    with lab:
         lab.wait_nodes('n0', names, timeout=60)
         lab.wait_route('n0', 'n16', names[1:17], timeout=60)
         lab.wait_route('n16', 'n0', list(reversed(names[:16])), timeout=60)
@@ -40,6 +52,8 @@ def test():
         # This scenario assumes lossless physical links; detect accidental
         # queue overflow in the test wiring separately from a routing failure.
         for name, node in lab.nodes.items():
+            channels = lab.status(name)['channels']
+            assert sum(c['outgoing'] for c in channels) == len(node.segments), (name, channels)
             links = json.loads(lab.run(name, ['ip', '-s', '-j', 'link', 'show']).stdout)
             for link in links:
                 if link['ifname'] in {f's{seg}' for seg in node.segments}:
