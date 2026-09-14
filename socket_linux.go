@@ -6,7 +6,12 @@ import (
 	"golang.org/x/sys/unix"
 	"net"
 	"strconv"
+	"syscall"
 )
+
+func udpClientControl(iface int) func(string, string, syscall.RawConn) error {
+	return nil
+}
 
 func udpGuard(key SocketKey) net.Listener {
 	return throw2(net.Listen("unix", "@mesh-"+key.network("udp")+"-"+key.addr+"-"+strconv.Itoa(int(key.port))))

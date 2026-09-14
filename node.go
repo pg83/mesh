@@ -47,6 +47,8 @@ type Node struct {
 	endpoints     []ListenerBinding
 	tun           *Tun
 	events        *Mailbox[any]
+	multicast     *Mailbox[any]
+	socketPool    SocketPool
 	tunInbox      *Mailbox[any]
 	tunWrites     *Mailbox[[]byte]
 	channels      map[Edge]*Channel
@@ -75,7 +77,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	dh := deriveKey(decodeKey(cfg.Key))
 
 	n := &Node{
-		events: newMailbox[any](nil), tunInbox: newMailbox[any](nil), tunWrites: newMailbox[[]byte](nil), channels: map[Edge]*Channel{},
+		events: newMailbox[any](nil), multicast: newMailbox[any](nil), tunInbox: newMailbox[any](nil), tunWrites: newMailbox[[]byte](nil), channels: map[Edge]*Channel{},
 		cfg: cfg, reg: reg, key: dh, log: log,
 		graph: map[Edge]State{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
 		owners:   map[uint64]uint16{},
@@ -139,6 +141,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 
 func (n *Node) run() {
 	n.publishSnapshot()
+	go n.loop("multicast", n.multicastLoop)
 	go n.loop("interfaces", n.watchInterfaces)
 
 	go n.loop("TUN reader", n.readTun)

@@ -50,6 +50,11 @@ func (n *Node) status() *Status {
 
 	for _, c := range n.channelStatus {
 		st.Channels = append(st.Channels, c)
+
+		io := n.channels[c.Edge].io
+
+		st.Addresses[c.From] = io.source
+		st.Addresses[c.To] = io.target
 	}
 
 	for edge, received := range n.observed {

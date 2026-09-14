@@ -59,6 +59,10 @@ func (s *Session) seal(source Vertex, inner []byte, id uint64) []byte {
 		out[0] = packetRegistry
 	}
 
+	if len(inner) > 0 && inner[0] == innerMulticast {
+		out[0] = packetMulticast
+	}
+
 	binary.LittleEndian.PutUint16(out[1:], s.local)
 	binary.LittleEndian.PutUint64(out[3:], id)
 	throw2(rand.Read(out[11:headerTransport]))

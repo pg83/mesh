@@ -88,10 +88,11 @@ func (n *Node) publishSnapshot() {
 	channels := maps.Clone(n.channels)
 
 	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local), owners: maps.Clone(n.owners),
-		routes: n.routes, channels: channels}
+		routes: n.routes, channels: channels, retired: n.socketPool.retired()}
 
 	view.gossip = n.advertisements()
 	n.snapshot = view
+	post(n.multicast.in, any(view))
 
 	for _, actor := range n.channels {
 		actor.post(view)
@@ -115,6 +116,9 @@ func (n *Node) observe(r ChannelReport) bool {
 	}
 
 	if r.status != nil && !r.seen.IsZero() && time.Since(r.seen) < sessionTimeout && r.seen.After(n.observed[r.edge]) {
+		n.remember(r.actor.io.source)
+		n.remember(r.actor.io.target)
+
 		_, exists := n.observed[r.edge]
 
 		n.observed[r.edge] = r.seen
@@ -166,6 +170,9 @@ func (n *Node) graphLoop() {
 					n.remember(vertex)
 				}
 
+				dirty = true
+			case DeleteVertices:
+				n.forgetVertices(v)
 				dirty = true
 			case RegistryRecords:
 				if n.handleRegistry(v) {

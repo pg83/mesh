@@ -152,6 +152,31 @@ func (n *Node) advertisements() [][]byte {
 }
 
 func (n *Node) handleEdges(updates EdgeRecords) {
+	me := n.reg.byIndex[n.cfg.Index].vertex().hash()
+	stale := map[uint64]bool{}
+
+	for _, update := range updates {
+		id := uint64(0)
+
+		if update.From == me {
+			id = update.To
+		} else if update.To == me {
+			id = update.From
+		}
+
+		if vertex, exists := n.addresses[id]; update.ID != 0 && exists && !vertex.isHost() && n.local[id] == nil {
+			stale[id] = true
+		}
+
+		if update.ID != 0 {
+			for _, id := range []uint64{update.From, update.To} {
+				if _, exists := n.addresses[id]; exists && n.local[id] == nil && n.snapshot.retired[id] {
+					stale[id] = true
+				}
+			}
+		}
+	}
+
 	for _, update := range updates {
 		if update.ID == 0 || n.addresses[update.From].hash() == 0 || n.addresses[update.To].hash() == 0 || update.From == update.To {
 			continue
@@ -162,6 +187,17 @@ func (n *Node) handleEdges(updates EdgeRecords) {
 		if !exists || update.ID > previous.ID {
 			n.graph[update.Edge] = update.State
 		}
+	}
+
+	if len(stale) != 0 {
+		vertices := make(DeleteVertices, 0, len(stale))
+
+		for id := range stale {
+			vertices = append(vertices, id)
+		}
+
+		n.forgetVertices(vertices)
+		post(n.multicast.in, any(vertices))
 	}
 }
 

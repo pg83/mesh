@@ -6,7 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 )
+
+func udpClientControl(iface int) func(string, string, syscall.RawConn) error {
+	return tcpControl(iface)
+}
 
 func udpGuard(key SocketKey) io.Closer {
 	path := filepath.Join(os.TempDir(), "mesh-"+key.network("udp")+"-"+key.addr+"-"+strconv.Itoa(int(key.port))+".lock")

@@ -10,6 +10,7 @@ type Snapshot struct {
 	graph     map[Edge]State
 	addresses map[uint64]Vertex
 	local     map[uint64]*LocalAddress
+	retired   map[uint64]bool
 	owners    map[uint64]uint16
 	routes    map[uint64][]Edge
 	channels  map[Edge]*Channel
@@ -198,6 +199,10 @@ func (a *Channel) receive(r Received) {
 		if records, ok := decodeRegistry(inner); ok {
 			post(a.node.events.in, any(records))
 		}
+	case innerMulticast:
+		if message, ok := decodeMulticast(inner); ok {
+			post(a.node.multicast.in, any(message))
+		}
 	}
 }
 
@@ -208,8 +213,11 @@ func (a *Channel) edges(inner []byte) {
 		return
 	}
 
+	me := a.view.registry.byIndex[a.node.cfg.Index].vertex().hash()
+
 	for _, u := range updates {
-		if u.ID > a.view.graph[u.Edge].ID {
+		if u.From == me || u.To == me || u.ID > a.view.graph[u.Edge].ID ||
+			a.view.retired[u.From] || a.view.retired[u.To] {
 			post(a.node.events.in, any(updates))
 
 			return
