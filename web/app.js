@@ -34,13 +34,82 @@ function layout() {
  }));
  if(mode === 'hosts') cy.nodes().positions(n => {const p=positions[n.data('owner')] || [0,0];return {x:p[0],y:p[1]};});
  else for(const [owner,center] of Object.entries(positions)) {
+  if(mode === 'physics') physics.seed(owner);
   const group=cy.nodes().filter(n=>n.data('owner')===Number(owner));
   const endpoints=group.filter(n=>!n.hasClass('ip') && !n.hasClass('offline'));
   group.filter(n=>n.hasClass('ip') || n.hasClass('offline')).positions(()=>({x:center[0],y:center[1]}));
   endpoints.positions((n,i)=>({x:center[0]+Math.cos(i*2*Math.PI/endpoints.length)*100,y:center[1]+Math.sin(i*2*Math.PI/endpoints.length)*72}));
  }
  cy.fit(undefined,40);
+ if(mode === 'physics') physics.restart();
 }
+// Springs: hosts carry a large charge and repel everything, endpoint circles a
+// small one; every edge is a spring, attachments short and stiff, links
+// between nodes longer and softer. Where the layout settles, the distance
+// between two hosts reflects how many links pull them together.
+const physics = {
+ steps:0, energy:0, converged:false, running:false, offsets:new Map(),
+ velocity:new Map(), grabbed:new Set(),
+ charge(){return Math.pow(10, Number($('physics-charge').value));},
+ length(){return Number($('physics-length').value);},
+ damping(){return Number($('physics-damping').value);},
+ seed(owner){this.offsets.set(Number(owner), Math.random() * 2 * Math.PI);},
+ wake(){this.converged=false;if(!this.running && mode==='physics' && !$('topology-page').hidden){this.running=true;requestAnimationFrame(()=>this.frame());}this.report();},
+ restart(){this.steps=0;this.velocity.clear();this.wake();},
+ shake(){for(const n of cy.nodes()) this.velocity.set(n.id(),{x:(Math.random()-.5)*40,y:(Math.random()-.5)*40});this.wake();},
+ place(n){
+  const host=cy.nodes('.ip').filter(m=>m.data('owner')===n.data('owner'))[0];
+  const center=host?host.position():{x:0,y:0};
+  const angle=(this.offsets.get(n.data('owner')) || 0)+Math.random()*2*Math.PI;
+  n.position({x:center.x+Math.cos(angle)*60,y:center.y+Math.sin(angle)*60});
+ },
+ step(){
+  const nodes=cy.nodes(), bodies=nodes.map(n=>({n, id:n.id(), host:n.hasClass('ip') || n.hasClass('host'), p:n.position(), f:{x:0,y:0}}));
+  const q=this.charge(), qe=q/80, link=this.length(), damping=this.damping();
+  for(let i=0;i<bodies.length;i++) for(let j=i+1;j<bodies.length;j++){
+   const a=bodies[i], b=bodies[j];
+   let dx=b.p.x-a.p.x, dy=b.p.y-a.p.y, d2=dx*dx+dy*dy;
+   if(d2<1){dx=Math.random()-.5;dy=Math.random()-.5;d2=1;}
+   const d=Math.sqrt(d2), f=(a.host?q:qe)*(b.host?q:qe)/q/Math.max(d2,100);
+   a.f.x-=f*dx/d;a.f.y-=f*dy/d;b.f.x+=f*dx/d;b.f.y+=f*dy/d;
+  }
+  const at=new Map(bodies.map(b=>[b.id,b]));
+  for(const e of cy.edges()){
+   const a=at.get(e.source().id()), b=at.get(e.target().id());
+   if(!a || !b) continue;
+   const attachment=e.hasClass('attachment'), rest=attachment?55:link, k=attachment?.08:.025;
+   const dx=b.p.x-a.p.x, dy=b.p.y-a.p.y, d=Math.max(Math.sqrt(dx*dx+dy*dy),1), f=(d-rest)*k;
+   a.f.x+=f*dx/d;a.f.y+=f*dy/d;b.f.x-=f*dx/d;b.f.y-=f*dy/d;
+  }
+  let energy=0, moved=0;
+  for(const b of bodies){
+   if(this.grabbed.has(b.id)) continue;
+   const mass=b.host?4:1, v=this.velocity.get(b.id) || {x:0,y:0};
+   v.x=(v.x+(b.f.x-b.p.x*.002)/mass)*damping;v.y=(v.y+(b.f.y-b.p.y*.002)/mass)*damping;
+   const speed=Math.sqrt(v.x*v.x+v.y*v.y);
+   if(speed>30){v.x*=30/speed;v.y*=30/speed;}
+   this.velocity.set(b.id,v);
+   b.n.position({x:b.p.x+v.x,y:b.p.y+v.y});
+   energy+=mass*speed*speed/2;moved=Math.max(moved,speed);
+  }
+  this.steps++;this.energy=energy;
+  return moved;
+ },
+ frame(){
+  if(mode!=='physics' || $('topology-page').hidden){this.running=false;return;}
+  let moved=0;
+  cy.batch(()=>{for(let i=0;i<3;i++) moved=this.step();});
+  if(moved<.05 && this.grabbed.size===0){this.converged=true;this.running=false;}
+  else requestAnimationFrame(()=>this.frame());
+  this.report();
+ },
+ report(){$('physics-status').textContent=`шаг ${this.steps} · энергия ${this.energy.toFixed(1)} · ${this.converged?'сошлось':'идёт'}`;}
+};
+$('physics-restart').onclick=()=>{layout();};
+$('physics-shake').onclick=()=>physics.shake();
+for(const id of ['physics-charge','physics-length','physics-damping']) $(id).oninput=()=>physics.wake();
+cy.on('grab','node',e=>{physics.grabbed.add(e.target.id());physics.wake();});
+cy.on('free','node',e=>{physics.grabbed.delete(e.target.id());physics.velocity.delete(e.target.id());physics.wake();});
 function buildGraph(preserve = false) {
  const positions = new Map(cy.nodes().map(n => [n.id(), {...n.position()}]));
  const elements=[];
@@ -59,9 +128,12 @@ function buildGraph(preserve = false) {
   for(const e of t.edges) if(shown.has(e.source) && shown.has(e.target)) elements.push({data:{id:e.source+':'+e.target,source:e.source,target:e.target},classes:isHost(byID.get(e.source)) || isHost(byID.get(e.target))?'attachment':''});
  }
  cy.batch(()=>{cy.elements().remove();cy.add(elements);});
- $('hosts-mode').classList.toggle('active',mode==='hosts');$('endpoints-mode').classList.toggle('active',mode==='endpoints');
- if (!preserve || cy.nodes().some(n => !positions.has(n.id()))) layout();
- else cy.nodes().positions(n => positions.get(n.id()));
+ $('physics-controls').hidden = mode !== 'physics';
+ if (!preserve || (mode !== 'physics' && cy.nodes().some(n => !positions.has(n.id())))) layout();
+ else {
+  cy.nodes().filter(n => positions.has(n.id())).positions(n => positions.get(n.id()));
+  if (mode === 'physics') { for (const n of cy.nodes().filter(n => !positions.has(n.id()))) physics.place(n); physics.wake(); }
+ }
 }
 function inspect(index, highlight=true) {
  selected=index;const p=peer(index); if(!p)return;
@@ -92,11 +164,11 @@ for(const p of t.peers){
 }
 $('fit').onclick=()=>cy.fit(undefined,40);$('reset').onclick=layout;
 $('route-dest').onchange=()=>{if($('route-dest').value)localRoute(Number($('route-dest').value));else clear();};
-cy.on('tap','node',event=>{const n=event.target;if(peer(n.data('owner')))inspect(n.data('owner'));if(mode==='endpoints')focusVertex(n.id());});
+cy.on('tap','node',event=>{const n=event.target;if(peer(n.data('owner')))inspect(n.data('owner'));if(mode!=='hosts')focusVertex(n.id());});
 cy.on('tap','edge',event=>{clear();const e=event.target;e.addClass('focus');$('selected-name').textContent='Направленная связь';$('selected-ip').textContent='';$('selected-note').textContent=mode==='hosts'?`${peer(e.source().data('owner')).name} → ${peer(e.target().data('owner')).name}: ${e.data('count')} рёбер между endpoint`:`${label(e.source().data('vertex'))} → ${label(e.target().data('vertex'))}`;});
 cy.on('tap',event=>{if(event.target===cy)clear();});
 function setPage(page) {
- const graphPage = page === 'hosts' || page === 'endpoints';
+ const graphPage = page === 'hosts' || page === 'endpoints' || page === 'physics';
  $('topology-page').hidden = !graphPage;
  $('matrix-page').hidden = page !== 'matrix';
  $('configs-page').hidden = page !== 'configs';
@@ -110,6 +182,7 @@ function setPage(page) {
   mode = page;
   cy.resize();
   if (changed) { buildGraph(); ready = t.peers.length > 0; }
+  else if (mode === 'physics') physics.wake();
  }
 }
 function graphPath(source, target) {

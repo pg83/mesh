@@ -11,7 +11,7 @@ with sync_playwright() as p:
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.goto('http://127.0.0.1:8059/')
     page.wait_for_function('ready && t.peers.length === 3')
-    assert page.get_by_role('tab').count() == 4
+    assert page.get_by_role('tab').count() == 5
     assert page.evaluate('cy.nodes().length') >= 6
     # Every endpoint circle shown is linked to a vertex of another node; lone attachments are hidden.
     assert page.evaluate('t.vertices.some(v => !(v.proto === "udp" && v.port === 0) && !cy.getElementById(v.id).length)')
@@ -25,6 +25,14 @@ with sync_playwright() as p:
     assert page.evaluate('cy.zoom()') == 1.3
     assert page.evaluate('cy.pan()') == {'x': 71, 'y': 83}
     assert page.evaluate('cy.nodes()[0].position()') == {'x': 321, 'y': 123}
+    # The spring simulation runs until the bodies stop; hosts end up apart from each other.
+    page.get_by_role('tab', name='Пружины', exact=True).click()
+    page.wait_for_function('physics.steps > 30')
+    page.wait_for_function('physics.converged', timeout=90000)
+    hosts = page.evaluate('cy.nodes(".ip").map(n => n.position())')
+    assert len(hosts) == 3
+    assert all(((a['x'] - b['x']) ** 2 + (a['y'] - b['y']) ** 2) ** .5 > 100 for i, a in enumerate(hosts) for b in hosts[i + 1:]), hosts
+    assert 'сошлось' in page.locator('#physics-status').text_content()
     page.get_by_role('tab', name='Хосты', exact=True).click()
     assert page.evaluate('cy.nodes().length') == 3
     page.get_by_role('tab', name='Matrix', exact=True).click()
