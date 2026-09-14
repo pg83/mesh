@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"slices"
 	"strconv"
@@ -152,7 +153,7 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 		channels[[2]string{c.Transport, direction}]++
 	}
 
-	for _, key := range slices.SortedFunc(mapKeys(channels), func(a, b [2]string) int { return slices.Compare(a[:], b[:]) }) {
+	for _, key := range slices.SortedFunc(maps.Keys(channels), func(a, b [2]string) int { return slices.Compare(a[:], b[:]) }) {
 		w.value("mesh_channels", [][2]string{{"transport", key[0]}, {"direction", key[1]}}, float64(channels[key]))
 	}
 
@@ -235,15 +236,5 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 
 	for _, record := range foreign {
 		w.value("mesh_record_links", [][2]string{{"peer", names[record.Owner]}}, float64(len(record.Links)))
-	}
-}
-
-func mapKeys[K comparable, V any](m map[K]V) func(func(K) bool) {
-	return func(yield func(K) bool) {
-		for key := range m {
-			if !yield(key) {
-				return
-			}
-		}
 	}
 }
