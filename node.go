@@ -17,11 +17,10 @@ const (
 )
 
 type UDPSocket struct {
-	guard    io.Closer
-	conn     *net.UDPConn
-	read     func([]byte) (int, net.IP, net.Addr, error)
-	port     uint16
-	implicit bool
+	guard io.Closer
+	conn  *net.UDPConn
+	read  func([]byte) (int, net.IP, net.Addr, error)
+	port  uint16
 }
 
 type SocketKey struct {
@@ -64,7 +63,6 @@ type Node struct {
 	local         map[uint64]*LocalAddress
 	addresses     map[uint64]Vertex
 	owners        map[uint64]uint16
-	seen          map[uint64][]SocketAddress
 	routes        map[uint64][]Edge
 	hops          map[uint64][]uint16
 	next          map[uint16]Edge
@@ -87,7 +85,6 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		cfg: cfg, reg: reg, key: dh, log: log,
 		graph: map[Edge]bool{}, records: map[uint16]*GraphRecord{}, observed: map[Edge]time.Time{},
 		owners:   map[uint64]uint16{},
-		seen:     map[uint64][]SocketAddress{},
 		routes:   map[uint64][]Edge{},
 		packetID: uint64(time.Now().UnixNano()), addresses: map[uint64]Vertex{},
 		channelStatus: map[Edge]ChannelStatus{}, dials: map[DialKey]*DialAttempt{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},

@@ -1,10 +1,8 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
-	"io"
 	"net"
 	"net/netip"
 	"net/url"
@@ -98,19 +96,14 @@ func (k SocketKey) wildcard() string {
 	return "0.0.0.0"
 }
 
-func newUDPSocket(key SocketKey, implicit bool) *UDPSocket {
-	var guard io.Closer
-
-	if !implicit {
-		guard = udpGuard(key)
-	}
-
+func newUDPSocket(key SocketKey) *UDPSocket {
+	guard := udpGuard(key)
 	lc := net.ListenConfig{Control: udpControl(0)}
 	udp := throw2(lc.ListenPacket(context.Background(), key.network("udp"), net.JoinHostPort(key.addr, strconv.Itoa(int(key.port))))).(*net.UDPConn)
 
 	throw(udp.SetReadBuffer(1 << 20))
 
-	socket := &UDPSocket{conn: udp, port: uint16(udp.LocalAddr().(*net.UDPAddr).Port), guard: guard, implicit: implicit}
+	socket := &UDPSocket{conn: udp, port: key.port, guard: guard}
 
 	if key.ipv6 {
 		conn := ipv6.NewPacketConn(udp)
@@ -148,24 +141,8 @@ func newUDPSocket(key SocketKey, implicit bool) *UDPSocket {
 }
 
 type SocketAddress struct {
-	Addr netip.Addr `json:"addr"`
-	Port uint16     `json:"port"`
-}
-
-func compareSocketAddress(a, b SocketAddress) int {
-	if v := a.Addr.Compare(b.Addr); v != 0 {
-		return v
-	}
-
-	return cmp.Compare(a.Port, b.Port)
-}
-
-func (s SocketAddress) udpAddr() *net.UDPAddr {
-	return net.UDPAddrFromAddrPort(netip.AddrPortFrom(s.Addr, s.Port))
-}
-
-func (s SocketAddress) vertex() Vertex {
-	return udpVertex(s.ip(), int(s.Port))
+	Addr netip.Addr
+	Port uint16
 }
 
 func socketAddress(ip net.IP, port int) SocketAddress {

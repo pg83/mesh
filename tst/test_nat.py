@@ -25,7 +25,7 @@ def test():
             assert packet[12:16] == bytes([198, 51, 100, 1])
             assert packet[16:20] == bytes([10, 2, 0, 2])
             src, dst = struct.unpack_from('!HH', packet, (packet[0] & 15) * 4)
-            assert src == 18001 and dst in (7001, 7002), 'outgoing packets leave the listener socket'
+            assert src != 18001 and dst in (7001, 7002)
         # The receiving graph names public endpoints, not translated socket pairs.
         for name in ['a', 'b']:
             links = lab.status(name)['links']

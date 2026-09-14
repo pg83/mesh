@@ -29,7 +29,6 @@ def encode_record(owner, version, vertices, links):
     packet += struct.pack('<H', len(links))
     for source, index in links:
         packet += struct.pack('<QH', lib.endpoint_hash(source), index)
-    packet += struct.pack('<H', 0)
     return bytes(packet), offsets
 
 
@@ -64,9 +63,8 @@ def test():
         send(packet + b'\0')
         send(packet[:11] + b'\xff\xff' + packet[13:])
         send(packet[:-2] + b'\xff\xff')
-        send(packet[:-4] + b'\xff\xff' + packet[-2:])
-        send(packet[:-12] + b'\0' * 8 + packet[-4:])
-        send(packet[:-12] + struct.pack('<Q', lib.endpoint_hash(listeners[0])) + packet[-4:])
+        send(packet[:-10] + b'\0' * 8 + packet[-2:])
+        send(packet[:-10] + struct.pack('<Q', lib.endpoint_hash(listeners[0])) + packet[-2:])
         mutations = [(offsets[0], b'\x00'), (offsets[0], b'\x04'), (offsets[0] + 1, b'\x00'), (offsets[1] + 1, b'\xff'),
                      (offsets[1] + 4, b'\xff\xff'),
                      (offsets[1] + 6 + len(listeners[1]['addr']), b'\xff\xff')]

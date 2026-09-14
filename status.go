@@ -14,9 +14,8 @@ type LinkStatus struct {
 type ChannelStatus struct {
 	Transport string `json:"transport"`
 	Edge
-	Outgoing bool          `json:"outgoing"`
-	ID       uint64        `json:"id"`
-	Wire     SocketAddress `json:"wire"`
+	Outgoing bool   `json:"outgoing"`
+	ID       uint64 `json:"id"`
 }
 
 type Status struct {

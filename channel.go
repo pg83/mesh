@@ -119,7 +119,7 @@ func (a *Channel) report() {
 	report := ChannelReport{session: a.session, edge: a.edge, peer: a.peer, seen: a.seen, actor: a}
 
 	if a.io != nil && a.io.ctx.Err() == nil {
-		report.status = &ChannelStatus{Transport: a.io.transport(), Edge: a.edge, Outgoing: a.outgoing, ID: a.io.id, Wire: a.io.wire}
+		report.status = &ChannelStatus{Transport: a.io.transport(), Edge: a.edge, Outgoing: a.outgoing, ID: a.io.id}
 	}
 
 	post(a.node.events.in, any(report))

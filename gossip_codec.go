@@ -153,13 +153,6 @@ func encodeRecordBody(record *GraphRecord) []byte {
 		out = binary.LittleEndian.AppendUint16(out, index[link.To])
 	}
 
-	out = binary.LittleEndian.AppendUint16(out, uint16(len(record.Observed)))
-
-	for _, o := range record.Observed {
-		out = binary.LittleEndian.AppendUint64(out, o.From)
-		out = appendVertex(out, o.Seen)
-	}
-
 	return out
 }
 
@@ -181,7 +174,7 @@ func recordHead(inner []byte) (uint16, uint64, bool) {
 }
 
 func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, bool) {
-	record := &GraphRecord{Owner: owner, Version: version, Vertices: []RecordVertex{}, Links: []Edge{}, Observed: []Observation{}, packet: inner}
+	record := &GraphRecord{Owner: owner, Version: version, Vertices: []RecordVertex{}, Links: []Edge{}, packet: inner}
 	data := inner[recordHeader:]
 	count := int(binary.LittleEndian.Uint16(data))
 
@@ -214,11 +207,9 @@ func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, boo
 	count = int(binary.LittleEndian.Uint16(data))
 	data = data[2:]
 
-	if len(data) < count*recordLinkSize+2 {
+	if len(data) != count*recordLinkSize {
 		return nil, false
 	}
-
-	sources := map[uint64]bool{}
 
 	for range count {
 		from := binary.LittleEndian.Uint64(data)
@@ -229,31 +220,7 @@ func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, boo
 		}
 
 		record.Links = append(record.Links, Edge{From: from, To: ids[to]})
-		sources[from] = true
 		data = data[recordLinkSize:]
-	}
-
-	count = int(binary.LittleEndian.Uint16(data))
-	data = data[2:]
-
-	for range count {
-		if len(data) < 8+7 {
-			return nil, false
-		}
-
-		from := binary.LittleEndian.Uint64(data)
-		seen, rest, ok := decodeVertex(data[8:])
-
-		if !ok || !sources[from] || seen.Proto != "udp" || seen.Port == 0 || !seen.valid() {
-			return nil, false
-		}
-
-		record.Observed = append(record.Observed, Observation{From: from, Seen: seen.canonical()})
-		data = rest
-	}
-
-	if len(data) != 0 {
-		return nil, false
 	}
 
 	return record, true
