@@ -445,6 +445,24 @@ On failure the suite prints application/mesh logs and channel counters. Set
 `MESH_TEST_ARTIFACTS` to preserve these along with status snapshots outside
 the build temporary directory; CI uploads them as failure artifacts.
 
+## Embedded SSH
+
+`sshd: true` (or `mesh run -sshd`) serves SSH on the node's mesh address,
+port `sshd_port` (`-sshd-port`, default 22). The listener lives in a
+userspace TCP stack (gVisor netstack) fed straight from decrypted mesh
+packets: nothing reaches the kernel, so the server is unreachable from any
+system interface, needs no system sshd or firewall rule, and works wherever
+mesh runs. TCP to that port on the mesh address never enters the TUN; other
+traffic is unaffected.
+
+The host key is the node key, so a client can verify it against the ring
+(`<mesh ip> ssh-ed25519 <peer pub>` in `known_hosts`). Any ring member's
+Ed25519 key logs in; `sshd_authorized_keys` (`-sshd-authorized-keys`) names an
+OpenSSH `authorized_keys` file with extra keys. Sessions run as the user
+mesh runs as. When mesh runs as root, `user@` selects the account (uid, gid,
+groups, home and login shell from the system). Supported: exec, shell with
+pty, env, window resize and exit status; no SFTP or port forwarding yet.
+
 ## Local control and web
 
 `control` optionally enables a read-only HTTP server. It accepts only literal

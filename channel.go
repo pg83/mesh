@@ -263,7 +263,12 @@ func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
 
 	if d.path[len(d.path)-1].To == me {
 		n.metrics.tunDelivered.Add(1)
-		post(n.tunWrites.in, d.payload)
+
+		if n.sshd != nil && n.sshd.accepts(d.payload) {
+			n.sshd.inject(d.payload)
+		} else {
+			post(n.tunWrites.in, d.payload)
+		}
 	}
 }
 

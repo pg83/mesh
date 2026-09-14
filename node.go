@@ -63,6 +63,7 @@ type Node struct {
 	owners        map[uint64]uint16
 	routes        map[uint64][]Edge
 	metrics       Metrics
+	sshd          *SSHServer
 }
 
 func newNode(cfg *Config, log *slog.Logger) *Node {
@@ -133,6 +134,11 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	}
 
 	n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
+
+	if cfg.Sshd {
+		n.sshd = newSSHServer(n, cfg, me.intip)
+	}
+
 	n.refresh(time.Now())
 
 	return n
@@ -151,6 +157,11 @@ func (n *Node) run() {
 	})
 	go n.loop("control", n.controlLoop)
 	go n.loop("signal", func() { stopOnSignal(n.log) })
+
+	if n.sshd != nil {
+		go n.loop("sshd", n.sshd.run)
+	}
+
 	n.loop("graph", n.graphLoop)
 }
 

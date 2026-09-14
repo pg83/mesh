@@ -22,6 +22,9 @@ func main() {
 			fs := flag.NewFlagSet("run", flag.ExitOnError)
 			config := fs.String("c", "", "config file")
 			keyFile := fs.String("key-file", "", "private key file (base64 seed or OpenSSH Ed25519)")
+			sshd := fs.Bool("sshd", false, "serve SSH on the mesh address")
+			sshdPort := fs.Int("sshd-port", 0, "SSH port on the mesh address (default 22)")
+			sshdKeys := fs.String("sshd-authorized-keys", "", "extra authorized keys file for SSH")
 
 			throw(fs.Parse(os.Args[2:]))
 
@@ -29,6 +32,16 @@ func main() {
 
 			if *keyFile != "" {
 				cfg.Key = loadPrivateKey(*keyFile)
+			}
+
+			cfg.Sshd = cfg.Sshd || *sshd
+
+			if *sshdPort != 0 {
+				cfg.SshdPort = *sshdPort
+			}
+
+			if *sshdKeys != "" {
+				cfg.SshdAuthorizedKeys = *sshdKeys
 			}
 
 			newNode(cfg, log).run()
