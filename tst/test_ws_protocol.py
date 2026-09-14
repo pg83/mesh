@@ -33,6 +33,13 @@ def test():
         probe = ws.Probe(lab)
         assert not probe.send(op='graph', body=lib.record(1, time.time_ns(), []), read=True)['closed']
         a = probe.source
+        # Frames on an established channel are checked like the first one.
+        header = '03' + '0100' + '00' * 8 + '00' * 24
+        for frame in ['00', 'ff' + header[2:] + '00' * 16, '03' + '0300' + header[6:] + '00' * 16, header + 'ff' * 32]:
+            probe.send(op='raw', hex=frame)
+        probe.send(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.socket_vertex('10.1.0.1', 1234, 'tcp'))
+        assert not probe.send(op='read', read=True)['closed'], 'rejected frames closed the channel'
+        assert any(c['from'] == lib.endpoint_hash(a) and not c['outgoing'] for c in lab.status('b')['channels'])
         probe.send(op='raw', hex='00', text=True)
         lab.wait(lambda: not any(c['from'] == lib.endpoint_hash(a) and not c['outgoing']
                                 for c in lab.status('b')['channels']), 'only incoming channel closed')
@@ -56,6 +63,12 @@ def test():
         assert connected_id() == [ident], 'stale connection replaced the live channel'
         stale.finish()
         assert not first.send(op='graph', body=lib.record(1, time.time_ns(), []), read=True)['closed']
+        # A newer attempt for the same pair replaces the established channels.
+        newer = ws.Probe(lab)
+        newer.send(op='graph', body=lib.record(1, time.time_ns(), []), source=a, id=ident + 1, read=True)
+        lab.wait(lambda: connected_id() == [ident + 1], 'newer connection replaced the channel')
+        lab.wait(lambda: first.send(op='read', read=True)['closed'], 'replaced connection closed', timeout=15)
+        newer.finish()
         first.finish()
         lab.wait_ping('b', 'c')
 

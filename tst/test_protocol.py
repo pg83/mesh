@@ -35,6 +35,7 @@ def test():
         b, c = [lib.endpoint(f'10.1.0.{i}') for i in (2, 3)]
         for packet in [b'', b'\xff', b'\x01', b'\x01\0\0', b'\x01\x11\0',
                        data([(a,b)], cursor=1), data([(a,c)]), data([(a,b),(b,lib.endpoint('10.1.0.99'))]),
+                       data([(a,a)]), data([(a,lib.endpoint('0.0.0.0'))]), data([(a,b),(c,lib.endpoint(lib.intip(2), 0))]),
                        b'\x06', b'\x06\x01\0' + b'\0' * 8 + b'\xff\xff']:
             inner(packet)
         send('short-transport')
@@ -58,6 +59,16 @@ def test():
         # A newer identical record keeps the route.
         send('graph', body=dict(body, version=ident + 2))
         assert lab.route('b', 'a') == ['a']
+        # The owner's own mesh vertex inside its record is ignored.
+        send('graph', body=dict(body, version=ident + 3, vertices=body['vertices'] + [dict(mesh_a, ingress=True, egress=True)]))
+        lab.wait(lambda: any(r['owner'] == 1 and r['version'] == ident + 3 for r in lab.status('b')['records']), 'record with a mesh vertex applied')
+        assert lab.route('b', 'a') == ['a']
+        assert not any(e['from'] == mesh_a and e['to'] == mesh_a for e in lab.status('b')['graph'])
+        # Datagrams to a link-local address are not from any advertised listener.
+        lab.run('b', ['ip', 'addr', 'add', '169.254.1.2/16', 'dev', 's1'])
+        lab.run('a', ['ip', 'addr', 'add', '169.254.1.1/16', 'dev', 's1'])
+        lab.run('a', [sys.executable, '-c',
+                     "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind(('169.254.1.1', 0)); s.sendto(bytes([3, 2, 0]) + b'\\0' * 40, ('169.254.1.2', 7000))"])
         mesh_b = lib.endpoint(lib.intip(2), 0)
         full_path = [(mesh_a, a), (a, b), (b, mesh_b)]
         for ip in (b'bad', b'\x65' + b'\0' * 19, b'\x44' + b'\0' * 19,
@@ -85,8 +96,11 @@ def test():
         inner(data(full_path, cursor=1, payload=ipv4_udp(lib.intip(2), good)))
         lab.wait(lambda: good.hex() in log.read_text().splitlines(), 'valid authenticated UDP reaches the server')
         assert wrong.hex() not in log.read_text().splitlines(), 'mesh delivered a packet for another route destination'
+        b_socket = lab.channel_source('b', '10.1.0.2', '10.1.0.1')
+        inner(data([(mesh_a, a), (a, b), (b, b_socket), (b_socket, mesh_b)], cursor=1, payload=ipv4_udp(lib.intip(2), b'local-edge-outside-graph')))
         inner(data(full_path, cursor=1, payload=ipv4_udp(other, b'opaque-destination')))
         lab.wait(lambda: b'opaque-destination'.hex() in log.read_text().splitlines(), 'payload destination is independent of route destination')
+        assert b'local-edge-outside-graph'.hex() not in log.read_text().splitlines(), 'a local edge outside the graph carried data'
         lab.wait_ping('b', 'c')
         lab.wait_ping('c', 'b')
         probe.stdin.close()

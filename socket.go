@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/netip"
 	"net/url"
@@ -75,11 +76,7 @@ func udpControl(iface int) func(string, string, syscall.RawConn) error {
 
 		err := raw.Control(func(fd uintptr) { result = socketReuse(int(fd), iface, strings.HasSuffix(network, "6")) })
 
-		if err != nil {
-			result = err
-		}
-
-		return result
+		return errors.Join(err, result)
 	}
 }
 
@@ -162,10 +159,6 @@ func (s SocketAddress) ipv6() bool {
 	return s.Addr.Is6()
 }
 
-func (s SocketAddress) addr() *net.UDPAddr {
-	return &net.UDPAddr{IP: s.ip(), Port: int(s.Port)}
-}
-
 func (s SocketAddress) socketKey() SocketKey {
 	return SocketKey{addr: s.Addr.String(), port: s.Port, ipv6: s.ipv6()}
 }
@@ -180,10 +173,6 @@ func tcpControl(iface int) func(string, string, syscall.RawConn) error {
 
 		err := raw.Control(func(fd uintptr) { result = socketInterface(int(fd), iface, strings.HasSuffix(network, "6")) })
 
-		if err != nil {
-			result = err
-		}
-
-		return result
+		return errors.Join(err, result)
 	}
 }

@@ -96,9 +96,7 @@ func decodeRegistry(inner []byte) (RegistryRecords, bool) {
 
 		r := &RegistryReader{data: inner}
 
-		if r.take(1)[0] != innerRegistry {
-			throwFmt("bad registry type")
-		}
+		r.take(1)
 
 		count := int(r.number())
 

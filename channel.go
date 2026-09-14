@@ -147,14 +147,6 @@ func (a *Channel) receive(r Received) {
 		return
 	}
 
-	if r.io != nil {
-		select {
-		case <-r.io.ctx.Done():
-			return
-		default:
-		}
-	}
-
 	if binary.LittleEndian.Uint16(r.packet[1:]) != a.peer || !validPacketType(r.packet[0]) {
 		return
 	}
@@ -184,10 +176,6 @@ func (a *Channel) receive(r Received) {
 		a.report()
 	}
 
-	if len(inner) == 0 {
-		return
-	}
-
 	switch inner[0] {
 	case innerGraph:
 		a.graph(inner)
@@ -207,7 +195,7 @@ func (a *Channel) graph(inner []byte) {
 		return
 	}
 
-	if record, ok := decodeRecord(inner); ok {
+	if record, ok := decodeRecord(owner, version, inner); ok {
 		post(a.node.events.in, any(record))
 	}
 }
@@ -229,10 +217,6 @@ func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
 
 	for d.cursor < len(d.path) {
 		edge := d.path[d.cursor]
-
-		if !local(edge.From) {
-			return
-		}
 
 		if !local(edge.To) {
 			advanceCursor(inner, d.cursor)
@@ -276,10 +260,6 @@ func (n *Node) tunLoop() {
 		case *Snapshot:
 			view = v
 		case TunPacket:
-			if view == nil {
-				continue
-			}
-
 			path := view.routes[v.destination]
 
 			if len(path) != 0 {

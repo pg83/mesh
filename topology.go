@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"maps"
 	"time"
 )
@@ -213,21 +212,10 @@ func (n *Node) graphLoop() {
 	}
 }
 
-func (n *Node) currentSnapshot(ctx context.Context) *Snapshot {
+func (n *Node) currentSnapshot() *Snapshot {
 	reply := make(chan *Snapshot, 1)
 
-	select {
-	case n.events.in <- reply:
-	case <-ctx.Done():
-		throw(ctx.Err())
-	}
+	n.events.in <- reply
 
-	select {
-	case view := <-reply:
-		return view
-	case <-ctx.Done():
-		throw(ctx.Err())
-
-		return nil
-	}
+	return <-reply
 }

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -47,29 +46,18 @@ func writeJSON(w http.ResponseWriter, value any) {
 	throw2(w.Write(append(data, '\n')))
 }
 
-func (n *Node) readStatus(ctx context.Context) *Status {
+func (n *Node) readStatus() *Status {
 	reply := make(chan *Status, 1)
 
-	select {
-	case n.events.in <- reply:
-	case <-ctx.Done():
-		throw(ctx.Err())
-	}
+	n.events.in <- reply
 
-	select {
-	case status := <-reply:
-		return status
-	case <-ctx.Done():
-		throw(ctx.Err())
-	}
-
-	return nil
+	return <-reply
 }
 
-func (n *Node) publicRegistry(ctx context.Context) []PeerConfig {
+func (n *Node) publicRegistry() []PeerConfig {
 	peers := []PeerConfig{}
 
-	for _, record := range n.currentSnapshot(ctx).registry.records() {
+	for _, record := range n.currentSnapshot().registry.records() {
 		peers = append(peers, record.PeerConfig)
 	}
 
@@ -77,7 +65,7 @@ func (n *Node) publicRegistry(ctx context.Context) []PeerConfig {
 }
 
 func (n *Node) exportConfig(w http.ResponseWriter, r *http.Request) {
-	peers := n.publicRegistry(r.Context())
+	peers := n.publicRegistry()
 	name := r.URL.Query().Get("node")
 
 	for _, peer := range peers {
@@ -123,11 +111,11 @@ func (n *Node) controlLoop() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /status", httpBoundary(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, n.readStatus(r.Context()))
+		writeJSON(w, n.readStatus())
 	}))
 
 	mux.HandleFunc("GET /topology", httpBoundary(func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, topology(n.readStatus(r.Context()), n.publicRegistry(r.Context())))
+		writeJSON(w, topology(n.readStatus(), n.publicRegistry()))
 	}))
 
 	mux.HandleFunc("GET /config", httpBoundary(n.exportConfig))

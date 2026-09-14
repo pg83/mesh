@@ -48,13 +48,7 @@ func (n *Node) interfaceAddresses() (InterfaceState, error) {
 		}
 
 		for _, addr := range addrs {
-			prefix, err := netip.ParsePrefix(addr.String())
-
-			if err != nil {
-				continue
-			}
-
-			ip := prefix.Addr().Unmap()
+			ip := netip.MustParsePrefix(addr.String()).Addr().Unmap()
 
 			if (!ip.IsGlobalUnicast() && !ip.IsLoopback()) || n.subnet.Contains(net.IP(ip.AsSlice())) {
 				continue

@@ -92,7 +92,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 		}
 
 		if !known || input.channel.ctx.Err() != nil {
-			view := n.currentSnapshot(context.Background())
+			view := n.currentSnapshot()
 			id := n.incomingID(view, key.local)
 			session, from, body, ok := n.readPacket(buf[:size], view)
 

@@ -80,10 +80,6 @@ func (n *Node) publishRecord() {
 }
 
 func (n *Node) handleRecord(record *GraphRecord) {
-	if record.Owner == n.cfg.Index || n.reg.byIndex[record.Owner] == nil {
-		return
-	}
-
 	if previous := n.records[record.Owner]; previous != nil && record.Version <= previous.Version {
 		return
 	}
@@ -117,15 +113,7 @@ func (n *Node) rebuild() {
 	}
 
 	for index, record := range n.records {
-		peer := n.reg.byIndex[index]
-
-		if peer == nil {
-			delete(n.records, index)
-
-			continue
-		}
-
-		host := peer.vertex().hash()
+		host := n.reg.byIndex[index].vertex().hash()
 
 		for _, v := range record.Vertices {
 			id := keep(v.Vertex)

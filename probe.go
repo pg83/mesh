@@ -87,7 +87,7 @@ func main() {
 		}
 	} else {
 		remote := parseUDPAddr(os.Args[2])
-		conn := throw2(net.DialUDP(cfg.Endpoint[0].description().socketKey().network("udp"), &net.UDPAddr{IP: cfg.Endpoint[0].binding().IP}, remote))
+		conn := throw2(net.DialUDP("udp", &net.UDPAddr{IP: cfg.Endpoint[0].binding().IP}, remote))
 
 		defer conn.Close()
 

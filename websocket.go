@@ -91,7 +91,7 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 
 		defer cancel()
 
-		view := n.currentSnapshot(ctx)
+		view := n.currentSnapshot()
 		address := r.Context().Value(http.LocalAddrContextKey).(*net.TCPAddr)
 		host := r.Host
 

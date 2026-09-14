@@ -37,10 +37,6 @@ func (e Vertex) ipv6() bool {
 	return ip != nil && ip.To4() == nil
 }
 
-func (e Vertex) socketKey() SocketKey {
-	return SocketKey{addr: e.Addr, port: e.Port, ipv6: e.ipv6()}
-}
-
 func (e Vertex) canonical() Vertex {
 	e.Addr = strings.ToLower(e.Addr)
 
@@ -219,14 +215,6 @@ func (e Endpoint) hash() uint64 {
 
 func (e Endpoint) ip() net.IP {
 	return e.vertex().ip()
-}
-
-func (e Endpoint) ipv6() bool {
-	return e.vertex().ipv6()
-}
-
-func (e Endpoint) socketKey() SocketKey {
-	return e.vertex().socketKey()
 }
 
 func (e Endpoint) string() string {

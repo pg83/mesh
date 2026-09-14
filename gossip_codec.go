@@ -31,8 +31,6 @@ func appendVertex(out []byte, ep Vertex) []byte {
 		kind = 2
 	case "wss":
 		kind = 3
-	default:
-		throwFmt("bad endpoint protocol %q", ep.Proto)
 	}
 
 	flag := kind
@@ -49,10 +47,6 @@ func appendVertex(out []byte, ep Vertex) []byte {
 
 		if kind == 1 || kind == 5 {
 			ip = ip.To4()
-		}
-
-		if ip == nil {
-			throwFmt("bad UDP address %q", ep.Addr)
 		}
 
 		return append(out, ip...)
@@ -134,10 +128,6 @@ func decodeVertex(data []byte) (Vertex, []byte, bool) {
 }
 
 func encodeRecordBody(record *GraphRecord) []byte {
-	if len(record.Vertices) > 65535 || len(record.Links) > 65535 {
-		throwFmt("graph record too large")
-	}
-
 	index := map[uint64]uint16{}
 	out := binary.LittleEndian.AppendUint16(nil, uint16(len(record.Vertices)))
 
@@ -184,13 +174,7 @@ func recordHead(inner []byte) (uint16, uint64, bool) {
 	return binary.LittleEndian.Uint16(inner[1:]), binary.LittleEndian.Uint64(inner[3:]), true
 }
 
-func decodeRecord(inner []byte) (*GraphRecord, bool) {
-	owner, version, ok := recordHead(inner)
-
-	if !ok || owner == 0 || version == 0 {
-		return nil, false
-	}
-
+func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, bool) {
 	record := &GraphRecord{Owner: owner, Version: version, Vertices: []RecordVertex{}, Links: []Edge{}, packet: inner}
 	data := inner[recordHeader:]
 	count := int(binary.LittleEndian.Uint16(data))

@@ -14,7 +14,7 @@ func echoProbe(path, destination string, index uint16) {
 	me, peer := reg.byIndex[cfg.Index], reg.byIndex[index]
 	key := deriveKey(decodeKey(cfg.Key))
 	session := newSession(me, peer, key.private)
-	conn := throw2(net.ListenUDP(cfg.Endpoint[0].description().socketKey().network("udp"), cfg.Endpoint[0].binding()))
+	conn := throw2(net.ListenUDP("udp", cfg.Endpoint[0].binding()))
 	mine := cfg.Endpoint[0].description().vertex()
 	source := mine
 	target := parseUDPAddr(destination)
