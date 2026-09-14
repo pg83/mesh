@@ -7,12 +7,13 @@ import (
 
 type Snapshot struct {
 	registry  *Registry
-	graph     map[Edge]State
+	graph     map[Edge]bool
 	addresses map[uint64]Vertex
 	local     map[uint64]*LocalAddress
 	owners    map[uint64]uint16
 	routes    map[uint64][]Edge
 	channels  map[Edge]*Channel
+	records   map[uint16]uint64
 	gossip    [][]byte
 }
 
@@ -188,10 +189,8 @@ func (a *Channel) receive(r Received) {
 	}
 
 	switch inner[0] {
-	case innerEdges:
-		a.edges(inner)
-	case innerVertices:
-		a.vertices(inner)
+	case innerGraph:
+		a.graph(inner)
 	case innerData:
 		a.forward(inner)
 	case innerRegistry:
@@ -201,37 +200,15 @@ func (a *Channel) receive(r Received) {
 	}
 }
 
-func (a *Channel) edges(inner []byte) {
-	updates, ok := decodeEdges(inner)
+func (a *Channel) graph(inner []byte) {
+	owner, version, ok := recordHead(inner)
 
-	if !ok {
+	if !ok || owner == a.node.cfg.Index || a.view.registry.byIndex[owner] == nil || version <= a.view.records[owner] {
 		return
 	}
 
-	for _, u := range updates {
-		if u.ID > a.view.graph[u.Edge].ID {
-			post(a.node.events.in, any(updates))
-
-			return
-		}
-	}
-}
-
-func (a *Channel) vertices(inner []byte) {
-	vertices, ok := decodeVertices(inner)
-
-	if !ok {
-		return
-	}
-
-	for _, vertex := range vertices {
-		if id := vertex.hash(); id != 0 {
-			if old, known := a.view.addresses[id]; !known || old.Endpoint != vertex.Endpoint {
-				post(a.node.events.in, any(vertices))
-
-				return
-			}
-		}
+	if record, ok := decodeRecord(inner); ok {
+		post(a.node.events.in, any(record))
 	}
 }
 
@@ -267,7 +244,7 @@ func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
 			return
 		}
 
-		if !view.graph[edge].Alive {
+		if !view.graph[edge] {
 			return
 		}
 

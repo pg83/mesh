@@ -1,43 +1,185 @@
 package main
 
-import "slices"
+import (
+	"bytes"
+	"slices"
+)
 
-type State struct {
-	ID    uint64 `json:"id"`
-	Alive bool   `json:"alive"`
+type RecordVertex struct {
+	Vertex
+	Ingress bool `json:"ingress"`
+	Egress  bool `json:"egress"`
 }
 
-type Update struct {
-	Edge
-	State
+type GraphRecord struct {
+	Owner    uint16         `json:"owner"`
+	Version  uint64         `json:"version"`
+	Vertices []RecordVertex `json:"vertices"`
+	Links    []Edge         `json:"links"`
+	packet   []byte
 }
 
-func (n *Node) record(edge Edge, alive bool) {
-	n.graph[edge] = State{ID: n.nextPacketID(), Alive: alive}
+func (n *Node) publishRecord() {
+	ingress := map[uint64]bool{}
+	egress := map[uint64]bool{}
+
+	for id, local := range n.local {
+		if local.receive {
+			ingress[id] = true
+		}
+	}
+
+	for edge, channel := range n.channelStatus {
+		if channel.Outgoing {
+			if n.local[edge.From] != nil {
+				egress[edge.From] = true
+			}
+		} else if n.local[edge.To] != nil {
+			ingress[edge.To] = true
+		}
+	}
+
+	record := &GraphRecord{Owner: n.cfg.Index, Vertices: []RecordVertex{}, Links: []Edge{}}
+	exported := map[uint64]bool{}
+
+	for id := range n.local {
+		vertex, known := n.addresses[id]
+
+		if !known {
+			n.log.Error("local vertex without address", "id", id, "address", n.local[id].address.string())
+
+			continue
+		}
+
+		if ingress[id] || egress[id] {
+			record.Vertices = append(record.Vertices, RecordVertex{Vertex: vertex, Ingress: ingress[id], Egress: egress[id]})
+			exported[id] = true
+		}
+	}
+
+	for edge := range n.observed {
+		if exported[edge.To] && edge.From != 0 && edge.From != edge.To {
+			record.Links = append(record.Links, edge)
+		}
+	}
+
+	slices.SortFunc(record.Vertices, func(a, b RecordVertex) int { return compareVertex(a.Vertex, b.Vertex) })
+	slices.SortFunc(record.Links, compareEdge)
+
+	body := encodeRecordBody(record)
+	previous := n.records[n.cfg.Index]
+
+	if previous != nil && bytes.Equal(previous.packet[recordHeader:], body) {
+		return
+	}
+
+	record.Version = n.nextPacketID()
+	record.packet = encodeRecord(n.cfg.Index, record.Version, body)
+
+	n.records[n.cfg.Index] = record
+}
+
+func (n *Node) handleRecord(record *GraphRecord) {
+	if record.Owner == n.cfg.Index || n.reg.byIndex[record.Owner] == nil {
+		return
+	}
+
+	if previous := n.records[record.Owner]; previous != nil && record.Version <= previous.Version {
+		return
+	}
+
+	n.records[record.Owner] = record
+}
+
+func (n *Node) rebuild() {
+	addresses := map[uint64]Vertex{}
+	owners := map[uint64]uint16{}
+	graph := map[Edge]bool{}
+
+	keep := func(v Vertex) uint64 {
+		v = v.canonical()
+
+		id := v.hash()
+
+		if id != 0 {
+			addresses[id] = v
+		}
+
+		return id
+	}
+
+	for index, peer := range n.reg.byIndex {
+		owners[keep(peer.vertex())] = index
+
+		for _, ep := range peer.addresses {
+			keep(ep.vertex())
+		}
+	}
+
+	for index, record := range n.records {
+		peer := n.reg.byIndex[index]
+
+		if peer == nil {
+			delete(n.records, index)
+
+			continue
+		}
+
+		host := peer.vertex().hash()
+
+		for _, v := range record.Vertices {
+			id := keep(v.Vertex)
+
+			if id == 0 || id == host {
+				continue
+			}
+
+			owners[id] = index
+
+			if v.Ingress {
+				graph[Edge{From: id, To: host}] = true
+			}
+
+			if v.Egress {
+				graph[Edge{From: host, To: id}] = true
+			}
+		}
+	}
+
+	for _, record := range n.records {
+		for _, link := range record.Links {
+			if owners[link.From] != 0 && owners[link.To] != 0 && link.From != link.To {
+				graph[link] = true
+			}
+		}
+	}
+
+	for id := range n.local {
+		keep(n.addresses[id])
+	}
+
+	for _, actor := range n.channels {
+		keep(actor.io.source)
+		keep(actor.io.target)
+	}
+
+	for edge := range n.observed {
+		if v, ok := n.addresses[edge.From]; ok {
+			keep(v)
+		}
+	}
+
+	n.addresses = addresses
+	n.owners = owners
+	n.graph = graph
+	n.recompute()
 }
 
 func (n *Node) recompute() {
 	adjacency := map[uint64][]uint64{}
-	owners := map[uint64]uint16{}
 
-	for index, peer := range n.reg.byIndex {
-		owners[peer.vertex().hash()] = index
-	}
-
-	for edge, record := range n.graph {
-		if !record.Alive {
-			continue
-		}
-
+	for edge := range n.graph {
 		adjacency[edge.From] = append(adjacency[edge.From], edge.To)
-
-		if index := owners[edge.From]; n.addresses[edge.From].isHost() && index != 0 && !n.addresses[edge.To].isHost() {
-			owners[edge.To] = index
-		}
-
-		if index := owners[edge.To]; n.addresses[edge.To].isHost() && index != 0 && !n.addresses[edge.From].isHost() {
-			owners[edge.From] = index
-		}
 	}
 
 	for _, neighbors := range adjacency {
@@ -76,7 +218,7 @@ func (n *Node) recompute() {
 
 			path = append(path, Edge{From: from, To: cur})
 
-			if owners[from] != owners[cur] {
+			if n.owners[from] != n.owners[cur] {
 				hops++
 			}
 		}
@@ -89,6 +231,5 @@ func (n *Node) recompute() {
 		routes[dst] = path
 	}
 
-	n.owners = owners
 	n.routes = routes
 }

@@ -56,7 +56,7 @@ func topology(status *Status, peers []PeerConfig) *Topology {
 			owners[edge.From] = index
 		}
 
-		result.Edges = append(result.Edges, topologyEdge(edge.Edge))
+		result.Edges = append(result.Edges, topologyEdge(edge))
 	}
 
 	for _, id := range status.Vertices {

@@ -1,4 +1,4 @@
-"""Authenticated malformed packets and independent directed graph record merging."""
+"""Authenticated malformed packets and whole graph record replacement."""
 import json
 import os
 import select
@@ -23,11 +23,6 @@ def test():
         ready = response()
         assert ready['ready']
         def send(op, **fields):
-            if op == 'ad':
-                ad = lib.wire_ad(fields['body'])
-                send('vertices', body=ad['vertices'])
-                send('edges', body=ad['edges'])
-                return
             probe.stdin.write(json.dumps(dict(op=op, **fields)).encode() + b'\n')
             probe.stdin.flush()
             assert response()['sent']
@@ -40,7 +35,7 @@ def test():
         b, c = [lib.endpoint(f'10.1.0.{i}') for i in (2, 3)]
         for packet in [b'', b'\xff', b'\x01', b'\x01\0\0', b'\x01\x11\0',
                        data([(a,b)], cursor=1), data([(a,c)]), data([(a,b),(b,lib.endpoint('10.1.0.99'))]),
-                       b'\x02', b'\x02{']:
+                       b'\x06', b'\x06\x01\0' + b'\0' * 8 + b'\xff\xff']:
             inner(packet)
         send('short-transport')
         send('short-tag')
@@ -50,16 +45,18 @@ def test():
         ident = time.time_ns() + 1_000_000_000
         mesh_a = lib.endpoint(lib.intip(1), 0)
         a_listener = lib.endpoint('10.1.0.1')
-        records = [lib.edge(mesh_a, a, ident), lib.edge(a_listener, mesh_a, ident), lib.edge(lab.channel_source('b', '10.1.0.2', '10.1.0.1'), a_listener, ident)]
-        body = dict(edges=records)
-        send('ad', body=body)
+        body = lib.record(1, ident, [(a, False, True), (a_listener, True, False)],
+                          [(lab.channel_source('b', '10.1.0.2', '10.1.0.1'), a_listener)])
+        send('graph', body=body)
         lab.wait_route('b', 'a', ['a'])
-        send('ad', body=body)
-        # Reject malformed graph entries without discarding independent valid pairs.
-        for change in [dict(id=0), {'from':lib.endpoint('0.0.0.0')}, {'to':b}]:
-            send('ad', body=dict(edges=[dict(records[2], **dict(id=ident+1) | change)]))
-        # An update to one pair does not remove another pair omitted from this batch.
-        send('ad', body=dict(edges=[dict(records[0], id=ident+2)]))
+        send('graph', body=body)
+        # A malformed record is rejected whole and leaves the current version in place.
+        for change in [dict(version=0), dict(vertices=[dict(lib.endpoint('0.0.0.0'), ingress=True, egress=False)]),
+                       dict(links=[{'from': 0, 'to': lib.endpoint_hash(a_listener)}]),
+                       dict(links=[{'from': lib.endpoint_hash(a_listener), 'to': lib.endpoint_hash(a_listener)}])]:
+            send('graph', body=dict(body, version=ident + 1) | change)
+        # A newer identical record keeps the route.
+        send('graph', body=dict(body, version=ident + 2))
         assert lab.route('b', 'a') == ['a']
         mesh_b = lib.endpoint(lib.intip(2), 0)
         full_path = [(mesh_a, a), (a, b), (b, mesh_b)]

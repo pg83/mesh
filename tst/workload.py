@@ -282,13 +282,9 @@ class Probe:
         return json.loads(self.proc.stdout.readline())
 
     def send(self, **command):
-        if command.get('op') == 'ad':
-            ad = lib.wire_ad(command['body'])
-            self.send(op='vertices', body=ad['vertices'])
-            self.send(op='edges', body=ad['edges'])
-            return
-        if command.get('op') == 'vertices':
-            command['body'] = [lib.vertex(v) for v in command['body']]
+        if command.get('op') == 'graph':
+            command['body'] = dict(command['body'], vertices=[dict(lib.vertex(v), ingress=v['ingress'], egress=v['egress'])
+                                                             for v in command['body']['vertices']])
         self.proc.stdin.write(json.dumps(command).encode() + b'\n')
         assert self.read()['sent']
 

@@ -125,7 +125,7 @@ Outgoing channels are created for eligible interface addresses and known remote
 endpoints. The OS assigns their local UDP/TCP port. UDP never reuses a configured
 listener's port for outgoing traffic. The graph uses the actual local socket
 address and port, not an interface placeholder. A new port on reconnect creates
-a new vertex; closing the old channels withdraws their edges. A vertex's
+a new vertex; closing the old channels drops them from the node's graph record. A vertex's
 `endpoint` flag explicitly says whether it accepts new channels. Client socket
 vertices and mesh-IP:0 vertices have this flag cleared.
 
@@ -193,8 +193,8 @@ On macOS, closing the process's utun descriptor removes the interface and route.
 
 `key` is one 32-byte seed from which the X25519 static keypair (`pub`) is
 derived. Every transport packet, including gossip, is authenticated by the
-link cipher. Nodes merge graph records and advertise their own graph view;
-there is no separate advertisement signature or signing key.
+link cipher. Nodes relay every node's graph record unchanged and keep only
+the newest version; there is no separate advertisement signature or signing key.
 
 ## Wire format
 
@@ -210,9 +210,8 @@ and the receiver's public key. There is no handshake or forward secrecy.
 | Type | Layout |
 |---|---|
 | data transport | `3`, sender index (2), packet ID (8), random nonce (24), XChaCha20-Poly1305 ciphertext and tag (16) |
-| edge transport | `4`, the same remaining header and encryption |
+| graph transport | `4`, the same remaining header and encryption |
 | registry transport | `5`, the same remaining header and encryption |
-| vertex transport | `6`, the same remaining header and encryption |
 
 The header is authenticated as associated data. Every packet gets a fresh
 random nonce, including after a process restart. The encrypted plaintext is
@@ -232,14 +231,17 @@ The transport never reads the payload to find an address or choose a destination
 The TUN adapter handles IPv4/IPv6 packet framing and destination lookup on ingress;
 node address allocation in the current registry remains IPv4.
 
-Edges and vertices are sent in separate packet types every second. Each vertex
-appears once per round on an outgoing channel. An edge whose source or destination is
-unknown is discarded; a later round can deliver it after the vertices arrive.
+The graph is a set of per-node records. A node's record holds its listener and
+client socket vertices, each with its attachment directions, and the links it
+observes into them. One record travels in one packet; every outgoing channel
+sends every known record once per second.
 
-Inner edges start with `2`, edge count (2), followed by the edges. Each edge is 25 bytes:
-source hash (8), destination hash (8), record ID (8), and alive (1, either 0
-or 1). Inner vertices start with `5`, vertex count (2), followed by the
-vertex descriptions. Endpoint descriptions start with kind (1: UDP/IPv4=1, WS=2, WSS=3,
+Inner graph records start with `6`, owner registry index (2), version (8),
+vertex count (2), the vertices, link count (2), and the links. Each vertex is
+one flags byte (bit 0: `vertex -> meshIP`, bit 1: `meshIP -> vertex`, zero is
+invalid) followed by its description. Each link is 10 bytes: the source vertex
+hash (8) of another node's socket or listener and the index (2) of the local
+destination vertex in this record. Endpoint descriptions start with kind (1: UDP/IPv4=1, WS=2, WSS=3,
 UDP/IPv6=4, TCP/IPv4=5, TCP/IPv6=6) and port (2). The high bit of kind is
 the `endpoint` flag; the low seven bits identify the transport/address format.
 UDP/TCP then carry four IPv4 or sixteen IPv6 octets.
@@ -247,19 +249,17 @@ WS/WSS carry the address and path
 as two strings, each prefixed by its byte length (2). Strings use UTF-8.
 
 Counts and lengths are checked against the remaining packet before allocating
-or reading. Truncated packets, unknown protocol codes, invalid alive values,
-and trailing bytes are rejected as a whole. Descriptions appear once per
-publication, independently of the edge packets.
-Edges split at eight records; vertex packets target at most 1000 inner bytes.
-A single large vertex record can exceed that target. Lost or reordered
-descriptions are repaired by the next periodic publication. Other nodes can
-use descriptions with `endpoint: true` to open new direct channels. The flag
-is metadata and does not change the address hash; an updated vertex publication
-also updates the flag of an already known address.
+or reading. Truncated packets, unknown protocol codes, invalid flags, link
+indexes outside the record, self-links, and trailing bytes reject the record as
+a whole. A record with an unknown owner, the receiver's own index, or a version
+not above the stored one is ignored. Lost or reordered records are repaired by
+the next periodic publication. Other nodes can use vertices with
+`endpoint: true` to open new direct channels. The flag is metadata and does not
+change the address hash.
 
-The authenticated sender may transmit any part of the graph, including records learned
-from other members. An omitted pair is unchanged; a newer record replaces
-an older one. Gossip remains periodic, once per second.
+The authenticated sender relays every record it knows, including those of
+other members, unchanged. A newer record replaces the owner's previous record
+completely. Gossip remains periodic, once per second.
 
 A WebSocket binary message contains one mesh transport packet with its source
 address inside the authenticated ciphertext. The client side is the real TCP
@@ -271,14 +271,15 @@ and source vertex for the server's two independent channels. A client socket
 can receive through the existing connection without becoming a listener.
 
 The graph owner and each outgoing edge have separate counters initialized
-from Unix nanoseconds. The graph counter versions local records; an edge's
-counter identifies its outgoing transport packets and WebSocket attempts.
-Forwarding a graph record preserves its ID and alive flag.
+from Unix nanoseconds. The graph counter versions the local record, advancing
+only when the record's content changes; an edge's counter identifies its
+outgoing transport packets and WebSocket attempts. Forwarding a record
+preserves its owner and version.
 
 ## Map and routing
 
-Vertices live in `map[uint64]Vertex`; the graph key is a pair of uint64
-hashes and the value contains only record ID and alive state. Routes carry
+Vertices live in `map[uint64]Vertex`, rebuilt from the registry, the records
+and the local channels; the edge set is derived from the records. Routes carry
 the same hashes. Full addresses are resolved only by the local transport.
 The hash is the first eight SHA-256 bytes interpreted as a little-endian
 uint64, over `proto + NUL + addr + NUL + decimal-port + NUL + path`.
@@ -295,17 +296,19 @@ The graph owner takes the union of these capabilities, so closing one channel
 cannot withdraw a direction still provided by another channel or listener.
 A WS return channel can add `meshIP -> listener` on the server and
 `source -> meshIP` on the client. Neither direction is implied by the address or
-transport name. Obsolete local edges, including those learned after a restart,
-are withdrawn independently. Static registry addresses are discovery candidates,
-not evidence of a live network edge.
+transport name. A restarted node publishes a record without its old sockets,
+so their edges disappear everywhere once the record arrives. Static registry
+addresses are discovery candidates, not evidence of a live network edge.
 
 Receiving an authenticated packet observes precisely its directed channel.
 UDP discovery obtains the local destination from socket packet metadata and
 the configured listener mapping. Packets carry their source address in the
 authenticated envelope and are dispatched to the corresponding channel.
 The sender-provided source stays the same across NAT and reverse proxies. A forwarded listener uses its configured public endpoint
-in the graph. The observed edge expires after five seconds without packets;
-closing its channel withdraws it without inventing the reverse edge.
+in the graph. The observed link expires after five seconds without packets;
+closing its channel removes it from the record without inventing the reverse link.
+A link only becomes an edge while its source vertex is in the current record of
+its owner.
 
 Every second each host sends its known graph on outgoing channels only.
 Dial candidates combine local source addresses with remote listening endpoints
@@ -315,14 +318,11 @@ Addresses within the mesh subnet are filtered. UDP writes use the selected sourc
 address and interface through socket control metadata. Establishing a channel
 is independent of graph payload availability and of any reverse channel.
 
-Gossip merges each directed pair independently. An omitted pair is unchanged;
-a newer record replaces an older version of that pair. Receiving gossip updates
-the graph without sending a reply or forwarding it immediately. The next
-periodic gossip send includes the updated graph snapshot.
-Records have no age-based expiry. A newer `alive=false` record withdraws an
-edge; older versions cannot restore it. Automatic cleanup of unreachable
-parts of the graph is not implemented.
-Local observations generate fresh versions each second.
+Gossip replaces records whole. Receiving a newer record updates the graph
+without sending a reply or forwarding it immediately; the next periodic send
+carries it. Records have no age-based expiry: the last record of a node that
+never returns stays, but its links into other nodes disappear as their channels
+expire. Older versions cannot restore a removed vertex or link.
 
 BFS follows the directed endpoint graph, with stable endpoint ordering for
 identical path lengths. The complete path is carried unchanged, including local attachment edges;
@@ -331,10 +331,10 @@ return path is computed independently. There is no separate per-host
 endpoint selector. Graph changes and the one-second local observation pass
 rebuild routes.
 
-Status exposes incoming endpoint pairs, the live graph, its vertices, and
-routes keyed by destination endpoint. Each edge reports its latest observation
-periodically; the graph owner publishes immutable snapshots through the same
-mailboxes used for packets.
+Status exposes incoming endpoint pairs, the live graph, its vertices, every
+known record with its version, and routes keyed by destination endpoint. The
+graph owner publishes immutable snapshots through the same mailboxes used for
+packets.
 Channel identity is a directed endpoint pair. Duplicate WS attachments prefer
 the smaller origin hash, then the larger initial packet ID, independently for each
 direction. There is at most one pending dial per candidate channel. Accepted WS

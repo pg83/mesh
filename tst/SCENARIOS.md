@@ -18,7 +18,7 @@ inside the nodes' network namespaces.
 | 10 | route_stale | Delayed gossip and an obsolete in-flight source route |
 | 11 | route_asymmetric | Different forward and return paths with reverse directions blocked |
 | 12 | gossip_cycles | Bounded flooding despite cycles and duplicate delivery |
-| 13 | gossip_stale | A superseded announcement cannot restore a withdrawn edge |
+| 13 | gossip_stale | A superseded record cannot restore a withdrawn vertex |
 | 14 | gossip_lost_withdrawal | Periodic gossip delivers missed withdrawals while data keeps its incoming link alive |
 | 15 | endpoint_fanout | Working endpoint after 32 unreachable candidates |
 | 16 | packet_header_auth | Changing the transport ID invalidates authentication |

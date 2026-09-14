@@ -18,7 +18,7 @@ def test():
 
         def attached():
             status = lab.status('laptop')
-            return any(e['alive'] and e['from']['addr'] == '10.77.0.2'
+            return any(e['from']['addr'] == '10.77.0.2'
                        and e['to']['addr'] == '2001:db8:1::99' for e in status['graph'])
 
         proc = lab.nodes['laptop'].proc

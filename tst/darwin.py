@@ -141,7 +141,7 @@ def status():
 def attached(address):
     state = status()
     endpoints = state.get('addresses', {})
-    return any(e['alive'] and endpoints[str(e['from'])]['addr'] == address
+    return any(endpoints[str(e['from'])]['addr'] == address
                and endpoints[str(e['from'])]['proto'] == 'udp'
                and endpoints[str(e['to'])]['addr'] == '10.77.0.1' for e in state.get('graph', []))
 

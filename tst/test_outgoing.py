@@ -6,7 +6,7 @@ import workload
 def test():
     lab = lib.Lab(['client', 'server'], {1: ['client', 'server']}, statics=['server'])
     lab.configs['client'] = dict(endpoint=[lib.endpoint('0.0.0.0', 7901)])
-    lab.intercept('client', 'server', 'drop', kind=6, count=1)
+    lab.intercept('client', 'server', 'drop', kind=4, count=1)
     with lab:
         lab.wait_ping('client', 'server')
         lab.wait_ping('server', 'client')

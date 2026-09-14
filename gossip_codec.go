@@ -5,7 +5,11 @@ import (
 	"net"
 )
 
-const gossipEdgeSize = 25
+const (
+	recordHeader     = 11
+	recordVertexFlag = 1
+	recordLinkSize   = 10
+)
 
 func appendVertex(out []byte, ep Vertex) []byte {
 	var kind byte
@@ -129,100 +133,114 @@ func decodeVertex(data []byte) (Vertex, []byte, bool) {
 	return ep, data, true
 }
 
-func encodeEdges(edges EdgeRecords) []byte {
-	if len(edges) > 65535 {
-		throwFmt("too many edge records")
+func encodeRecordBody(record *GraphRecord) []byte {
+	if len(record.Vertices) > 65535 || len(record.Links) > 65535 {
+		throwFmt("graph record too large")
 	}
 
-	out := make([]byte, 1, 3+gossipEdgeSize*len(edges))
+	index := map[uint64]uint16{}
+	out := binary.LittleEndian.AppendUint16(nil, uint16(len(record.Vertices)))
 
-	out[0] = innerEdges
-	out = binary.LittleEndian.AppendUint16(out, uint16(len(edges)))
+	for i, v := range record.Vertices {
+		flags := byte(0)
 
-	for _, update := range edges {
-		out = binary.LittleEndian.AppendUint64(out, update.From)
-		out = binary.LittleEndian.AppendUint64(out, update.To)
-		out = binary.LittleEndian.AppendUint64(out, update.ID)
-
-		alive := byte(0)
-
-		if update.Alive {
-			alive = 1
+		if v.Ingress {
+			flags |= 1
 		}
 
-		out = append(out, alive)
+		if v.Egress {
+			flags |= 2
+		}
+
+		index[v.hash()] = uint16(i)
+		out = appendVertex(append(out, flags), v.Vertex)
+	}
+
+	out = binary.LittleEndian.AppendUint16(out, uint16(len(record.Links)))
+
+	for _, link := range record.Links {
+		out = binary.LittleEndian.AppendUint64(out, link.From)
+		out = binary.LittleEndian.AppendUint16(out, index[link.To])
 	}
 
 	return out
 }
 
-func decodeEdges(inner []byte) (EdgeRecords, bool) {
-	if len(inner) < 3 {
+func encodeRecord(owner uint16, version uint64, body []byte) []byte {
+	out := make([]byte, 1, recordHeader+len(body))
+
+	out[0] = innerGraph
+	out = binary.LittleEndian.AppendUint16(out, owner)
+	out = binary.LittleEndian.AppendUint64(out, version)
+
+	return append(out, body...)
+}
+
+func recordHead(inner []byte) (uint16, uint64, bool) {
+	if len(inner) < recordHeader+4 {
+		return 0, 0, false
+	}
+
+	return binary.LittleEndian.Uint16(inner[1:]), binary.LittleEndian.Uint64(inner[3:]), true
+}
+
+func decodeRecord(inner []byte) (*GraphRecord, bool) {
+	owner, version, ok := recordHead(inner)
+
+	if !ok || owner == 0 || version == 0 {
 		return nil, false
 	}
 
-	count := int(binary.LittleEndian.Uint16(inner[1:3]))
-	data := inner[3:]
+	record := &GraphRecord{Owner: owner, Version: version, Vertices: []RecordVertex{}, Links: []Edge{}, packet: inner}
+	data := inner[recordHeader:]
+	count := int(binary.LittleEndian.Uint16(data))
 
-	if count*gossipEdgeSize != len(data) {
-		return nil, false
-	}
+	data = data[2:]
 
-	edges := make(EdgeRecords, count)
+	ids := make([]uint64, 0, count)
 
-	for i := range edges {
-		if data[24] > 1 {
+	for range count {
+		if len(data) < recordVertexFlag+7 || data[0] > 3 {
 			return nil, false
 		}
 
-		edges[i] = Update{Edge: Edge{From: binary.LittleEndian.Uint64(data), To: binary.LittleEndian.Uint64(data[8:])},
-			State: State{ID: binary.LittleEndian.Uint64(data[16:]), Alive: data[24] == 1}}
-		data = data[gossipEdgeSize:]
-	}
+		flags := data[0]
+		ep, rest, ok := decodeVertex(data[recordVertexFlag:])
+		id := ep.canonical().hash()
 
-	return edges, true
-}
-
-func encodeVertices(vertices VertexRecords) []byte {
-	if len(vertices) > 65535 {
-		throwFmt("too many vertex records")
-	}
-
-	out := binary.LittleEndian.AppendUint16([]byte{innerVertices}, uint16(len(vertices)))
-
-	for _, vertex := range vertices {
-		out = appendVertex(out, vertex)
-	}
-
-	return out
-}
-
-func decodeVertices(inner []byte) (VertexRecords, bool) {
-	if len(inner) < 3 {
-		return nil, false
-	}
-
-	count := int(binary.LittleEndian.Uint16(inner[1:3]))
-	data := inner[3:]
-
-	if count*7 > len(data) {
-		return nil, false
-	}
-
-	vertices := make(VertexRecords, count)
-
-	for i := range vertices {
-		ep, rest, ok := decodeVertex(data)
-
-		if !ok {
+		if !ok || id == 0 || flags == 0 {
 			return nil, false
 		}
 
-		vertices[i] = ep
+		record.Vertices = append(record.Vertices, RecordVertex{Vertex: ep.canonical(), Ingress: flags&1 != 0, Egress: flags&2 != 0})
+		ids = append(ids, id)
 		data = rest
 	}
 
-	return vertices, len(data) == 0
+	if len(data) < 2 {
+		return nil, false
+	}
+
+	count = int(binary.LittleEndian.Uint16(data))
+	data = data[2:]
+
+	if len(data) != count*recordLinkSize {
+		return nil, false
+	}
+
+	for range count {
+		from := binary.LittleEndian.Uint64(data)
+		to := int(binary.LittleEndian.Uint16(data[8:]))
+
+		if from == 0 || to >= len(ids) || from == ids[to] {
+			return nil, false
+		}
+
+		record.Links = append(record.Links, Edge{From: from, To: ids[to]})
+		data = data[recordLinkSize:]
+	}
+
+	return record, true
 }
 
 func appendEndpoint(out []byte, ep Endpoint) []byte {

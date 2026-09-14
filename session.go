@@ -47,12 +47,8 @@ func (s *Session) seal(source Vertex, inner []byte, id uint64) []byte {
 
 	out[0] = packetTransport
 
-	if len(inner) > 0 && inner[0] == innerEdges {
-		out[0] = packetEdges
-	}
-
-	if len(inner) > 0 && inner[0] == innerVertices {
-		out[0] = packetVertices
+	if len(inner) > 0 && inner[0] == innerGraph {
+		out[0] = packetGraph
 	}
 
 	if len(inner) > 0 && inner[0] == innerRegistry {

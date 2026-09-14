@@ -77,14 +77,13 @@ def endpoint_hash(ep):
     return int.from_bytes(hashlib.sha256(value.encode()).digest()[:8], 'little')
 
 
-def wire_ad(ad):
-    descriptors = {endpoint_hash(e[k]): e[k] for e in ad['edges'] for k in ('from', 'to')}
-    return dict(ad, vertices=list(descriptors.values()),
-                edges=[dict(e, **{k: endpoint_hash(e[k]) for k in ('from', 'to')}) for e in ad['edges']])
-
-
-def edge(source, target, ident, alive=True):
-    return dict(**{'from': source, 'to': target}, id=ident, alive=alive)
+def record(owner, version, vertices=(), links=()):
+    """A node's graph record: vertices as (vertex, ingress, egress), links as (source, target)."""
+    def ident(value):
+        return value if isinstance(value, int) else endpoint_hash(value)
+    return dict(owner=owner, version=version,
+                vertices=[dict(vertex(v), ingress=ingress, egress=egress) for v, ingress, egress in vertices],
+                links=[{'from': ident(source), 'to': ident(target)} for source, target in links])
 
 
 def segaddr(seg, index):

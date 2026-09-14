@@ -1,4 +1,4 @@
-"""Delivery needs the directed endpoint-to-internal-IP attachment, not its reverse."""
+"""Delivery needs the directed endpoint-to-internal-IP attachment; records may add its reverse."""
 import time
 import lib
 import workload
@@ -16,13 +16,21 @@ def test():
         source = lab.channel_source('a', lab.nodes['a'].addresses[1], lab.nodes['b'].addresses[1])
         target = lib.endpoint(lab.nodes['b'].addresses[1])
         internal = lib.endpoint(lib.intip(lab.nodes['b'].index), 0)
-        lab.intercept('a', 'b', 'drop', kind=4, count=-1)
-        probe.send(op='ad', body=dict(edges=[lib.edge(internal, target, time.time_ns(), alive=False)]))
-        lab.wait(lambda: not any(e['from'] == internal and e['to'] == target
-                                 for e in lab.status('a')['graph']), 'outward attachment withdrawn')
+
+        def attached(src, dst):
+            return any(e['from'] == src and e['to'] == dst for e in lab.status('a')['graph'])
+
+        assert attached(target, internal) and not attached(internal, target)
+        outward = next(r for r in lab.status('a')['records'] if r['owner'] == lab.nodes['b'].index)
+        outward['version'] = time.time_ns() + 1_000_000_000
+        for v in outward['vertices']:
+            if v['endpoint']:
+                v['egress'] = True
+        probe.send(op='graph', body=outward)
+        lab.wait(lambda: attached(internal, target), 'outward attachment added by a newer record')
         path = lab.endpoint_route('a', 'b')
         assert path == [{'from': source, 'to': target}], path
-        assert any(e['from'] == target and e['to'] == internal for e in lab.status('a')['graph'])
+        assert attached(target, internal)
         udp.send(b'one-way-attachment')
         assert udp.recv() == b'one-way-attachment'
         probe.finish()

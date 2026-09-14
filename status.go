@@ -1,6 +1,7 @@
 package main
 
 import (
+	"maps"
 	"slices"
 	"time"
 )
@@ -24,14 +25,15 @@ type Status struct {
 	Addresses map[uint64]Vertex `json:"addresses"`
 	Index     uint16            `json:"index"`
 	Links     []LinkStatus      `json:"links"`
-	Graph     []Update          `json:"graph"`
+	Graph     []Edge            `json:"graph"`
+	Records   []*GraphRecord    `json:"records"`
 	Vertices  []uint64          `json:"vertices"`
 	Routes    map[string][]Edge `json:"routes"`
 }
 
 func (n *Node) status() *Status {
 	now := time.Now()
-	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Update{}, Vertices: []uint64{}, Routes: map[string][]Edge{}}
+	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Edge{}, Records: []*GraphRecord{}, Vertices: []uint64{}, Routes: map[string][]Edge{}}
 
 	st.Registry = n.reg.records()
 	st.Addresses = map[uint64]Vertex{}
@@ -58,15 +60,15 @@ func (n *Node) status() *Status {
 
 	vertices := map[uint64]bool{}
 
-	for edge, record := range n.graph {
-		if !record.Alive {
-			continue
-		}
-
-		st.Graph = append(st.Graph, Update{Edge: edge, State: record})
+	for edge := range n.graph {
+		st.Graph = append(st.Graph, edge)
 
 		vertices[edge.From] = true
 		vertices[edge.To] = true
+	}
+
+	for _, owner := range slices.Sorted(maps.Keys(n.records)) {
+		st.Records = append(st.Records, n.records[owner])
 	}
 
 	for ep := range vertices {
@@ -75,7 +77,7 @@ func (n *Node) status() *Status {
 
 	slices.SortFunc(st.Channels, func(a, b ChannelStatus) int { return compareEdge(a.Edge, b.Edge) })
 	slices.Sort(st.Vertices)
-	slices.SortFunc(st.Graph, func(a, b Update) int { return compareEdge(a.Edge, b.Edge) })
+	slices.SortFunc(st.Graph, compareEdge)
 	slices.SortFunc(st.Links, func(a, b LinkStatus) int { return compareEdge(a.Edge, b.Edge) })
 
 	for dst, path := range n.routes {

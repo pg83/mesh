@@ -19,7 +19,7 @@ def test():
 
         def connect():
             probe = ws.Probe(lab)
-            assert not probe.send(op='vertices', body=[], read=True)['closed']
+            assert not probe.send(op='graph', body=lib.record(1, time.time_ns(), []), read=True)['closed']
             return probe
 
         for first in ['stop-send', 'stop-receive']:
@@ -29,8 +29,8 @@ def test():
             if first == 'stop-send':
                 assert not probe.send(op='read', read=True)['closed']
             else:
-                marker = lib.endpoint('192.0.2.91', 9011)
-                probe.send(op='vertices', body=[marker])
+                marker = lib.socket_vertex('192.0.2.91', 9011)
+                probe.send(op='graph', body=lib.record(1, time.time_ns(), [(marker, False, True)]))
                 lab.wait(lambda: str(lib.endpoint_hash(marker)) in lab.status('b')['addresses'],
                          'send half works while read half is closed and its reader is blocked')
             last = 'stop-receive' if first == 'stop-send' else 'stop-send'

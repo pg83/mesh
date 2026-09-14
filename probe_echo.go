@@ -32,23 +32,18 @@ func echoProbe(path, destination string, index uint16) {
 
 	for {
 		if time.Now().After(next) {
-			edges := []Edge{{From: me.vertex().hash(), To: source.hash()}, {From: mine.hash(), To: me.vertex().hash()}}
-			vertices := VertexRecords{me.vertex(), mine, source}
+			record := &GraphRecord{Owner: cfg.Index, Vertices: []RecordVertex{{Vertex: mine, Ingress: true, Egress: true}}}
 
 			for _, other := range clients {
-				vertices = append(vertices, other)
-				edges = append(edges, Edge{From: other.hash(), To: mine.hash()})
+				record.Links = append(record.Links, Edge{From: other.hash(), To: mine.hash()})
 			}
 
-			updates := EdgeRecords{}
+			id++
 
-			for _, edge := range edges {
-				updates = append(updates, Update{Edge: edge, State: State{ID: uint64(time.Now().UnixNano()), Alive: true}})
-			}
+			packet := encodeRecord(cfg.Index, id, encodeRecordBody(record))
 
 			for _, target := range destinations {
-				send(target, encodeVertices(vertices))
-				send(target, encodeEdges(updates))
+				send(target, packet)
 			}
 
 			next = time.Now().Add(200 * time.Millisecond)

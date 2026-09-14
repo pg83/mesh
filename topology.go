@@ -86,9 +86,14 @@ func (n *Node) publishSnapshot() {
 	n.syncDials()
 
 	channels := maps.Clone(n.channels)
+	versions := map[uint16]uint64{}
+
+	for owner, record := range n.records {
+		versions[owner] = record.Version
+	}
 
 	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local), owners: maps.Clone(n.owners),
-		routes: n.routes, channels: channels}
+		routes: n.routes, channels: channels, records: versions}
 
 	view.gossip = n.advertisements()
 	n.snapshot = view
@@ -106,20 +111,15 @@ func (n *Node) observe(r ChannelReport) {
 	}
 
 	if r.status == nil {
-		if _, exists := n.observed[r.edge]; exists {
-			delete(n.observed, r.edge)
-			n.record(r.edge, false)
-		}
+		delete(n.observed, r.edge)
 	}
 
 	if r.status != nil && !r.seen.IsZero() && time.Since(r.seen) < sessionTimeout && r.seen.After(n.observed[r.edge]) {
 		_, exists := n.observed[r.edge]
 
 		n.observed[r.edge] = r.seen
-		n.owned[r.edge] = true
 
 		if !exists {
-			n.record(r.edge, true)
 			n.log.Info("link up", "from", n.addresses[r.edge.From].string(), "to", n.addresses[r.edge.To].string())
 		}
 	}
@@ -153,14 +153,8 @@ func (n *Node) graphLoop() {
 				n.refresh(time.Now())
 				n.publishSnapshot()
 				dirty = false
-			case EdgeRecords:
-				n.handleEdges(v)
-				dirty = true
-			case VertexRecords:
-				for _, vertex := range v {
-					n.remember(vertex)
-				}
-
+			case *GraphRecord:
+				n.handleRecord(v)
 				dirty = true
 			case RegistryRecords:
 				if n.handleRegistry(v) {
@@ -196,6 +190,12 @@ func (n *Node) graphLoop() {
 			case chan *Snapshot:
 				post(v, n.snapshot)
 			case chan *Status:
+				if dirty {
+					n.refresh(time.Now())
+					n.publishSnapshot()
+					dirty = false
+				}
+
 				post(v, n.status())
 			}
 		case now := <-ticker.C:

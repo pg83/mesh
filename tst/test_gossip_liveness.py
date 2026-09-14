@@ -28,7 +28,6 @@ def test():
             lab.clear(rule)
         dropped = lab.intercept('a', 'b', 'drop', kind=4, count=-1)
         registry_dropped = lab.intercept('a', 'b', 'drop', kind=5, count=-1)
-        vertices_dropped = lab.intercept('a', 'b', 'drop', kind=6, count=-1)
         up_before = (lab.dir / 'b.log').read_text().count('link up')
         # Only the incoming edge is proven by data. Send without requiring the
         # reverse route, whose graph announcements are deliberately suppressed.
@@ -53,7 +52,6 @@ def test():
         lab.wait_route('a', 'b', None, timeout=3)
         lab.clear(dropped)
         lab.clear(registry_dropped)
-        lab.clear(vertices_dropped)
         lab.unblock('a', 'b', both=False)
         lab.wait_links('b', ['a'], timeout=3)
         lab.wait_ping('a', 'b')

@@ -160,18 +160,16 @@ func main() {
 		case "short-tag":
 			out = session.seal(from, nil, packetID)
 			out = out[:len(out)-1]
-		case "edges":
-			var edges EdgeRecords
+		case "graph":
+			var record GraphRecord
 
-			throw(json.Unmarshal(command.Body, &edges))
+			throw(json.Unmarshal(command.Body, &record))
 
-			out = session.seal(from, encodeEdges(edges), packetID)
-		case "vertices":
-			var vertices VertexRecords
+			for i := range record.Vertices {
+				record.Vertices[i].Vertex = record.Vertices[i].canonical()
+			}
 
-			throw(json.Unmarshal(command.Body, &vertices))
-
-			out = session.seal(from, encodeVertices(vertices), packetID)
+			out = session.seal(from, encodeRecord(record.Owner, record.Version, encodeRecordBody(&record)), packetID)
 		case "open":
 			origin, inner, ok := session.open(throw2(hex.DecodeString(command.Hex)))
 

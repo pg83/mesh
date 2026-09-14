@@ -55,8 +55,8 @@ type Node struct {
 	dials         map[DialKey]*DialAttempt
 	interfaces    InterfaceState
 	packetID      uint64
-	graph         map[Edge]State
-	owned         map[Edge]bool
+	graph         map[Edge]bool
+	records       map[uint16]*GraphRecord
 	observed      map[Edge]time.Time
 	local         map[uint64]*LocalAddress
 	addresses     map[uint64]Vertex
@@ -77,7 +77,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	n := &Node{
 		events: newMailbox[any](nil), tunInbox: newMailbox[any](nil), tunWrites: newMailbox[[]byte](nil), channels: map[Edge]*Channel{},
 		cfg: cfg, reg: reg, key: dh, log: log,
-		graph: map[Edge]State{}, owned: map[Edge]bool{}, observed: map[Edge]time.Time{},
+		graph: map[Edge]bool{}, records: map[uint16]*GraphRecord{}, observed: map[Edge]time.Time{},
 		owners:   map[uint64]uint16{},
 		routes:   map[uint64][]Edge{},
 		packetID: uint64(time.Now().UnixNano()), addresses: map[uint64]Vertex{},

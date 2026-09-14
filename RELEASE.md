@@ -1,5 +1,5 @@
-Mesh now sends graph vertices and edges as separate authenticated packet types once per second. Vertex descriptions appear only once per publication. Edges with unknown vertices are discarded and can be accepted on a later publication after the descriptions arrive.
+Mesh now exchanges the graph as one versioned record per node instead of separate edge and vertex packets. A record holds the node's listener and socket vertices with their attachment directions and the links it observes into them, and travels in one packet. Receivers keep only the newest version of each record, relay it unchanged, and derive the edge set from the records: a vertex dropped from a record disappears with every edge on it, so sockets of a previous incarnation cannot survive as zombies. The edge alive flag and per-edge versions are gone.
 
-For the captured lab graph, this reduces one publication from 32,477 to 21,976 bytes of UDP payload. Connection selection, publication frequency and edge versions are unchanged.
+A record's version advances only when its content changes, so an idle network carries no graph updates for the graph actor to process.
 
-This release uses mesh/11. Update peers together; releases through 12 use an incompatible wire format.
+This release uses mesh/13. Update peers together; releases through 17 use an incompatible graph format.
