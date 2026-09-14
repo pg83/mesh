@@ -100,10 +100,12 @@ func (n *Node) publishSnapshot() {
 	post(n.tunInbox.in, any(view))
 }
 
-func (n *Node) observe(r ChannelReport) {
+func (n *Node) observe(r ChannelReport) bool {
 	if n.channels[r.edge] != r.actor || r.session != n.session(r.peer) {
-		return
+		return false
 	}
+
+	changed := r.status == nil || n.channelStatus[r.edge] != *r.status
 
 	if r.status == nil {
 		if _, exists := n.observed[r.edge]; exists {
@@ -120,6 +122,7 @@ func (n *Node) observe(r ChannelReport) {
 
 		if !exists {
 			n.record(r.edge, true)
+			changed = true
 			n.log.Info("link up", "from", n.addresses[r.edge.From].string(), "to", n.addresses[r.edge.To].string())
 		}
 	}
@@ -130,6 +133,8 @@ func (n *Node) observe(r ChannelReport) {
 	} else {
 		n.channelStatus[r.edge] = *r.status
 	}
+
+	return changed
 }
 
 func (n *Node) graphLoop() {
@@ -168,8 +173,13 @@ func (n *Node) graphLoop() {
 					dirty = false
 				}
 			case ChannelReport:
-				n.observe(v)
-				dirty = true
+				if n.observe(v) {
+					if v.status == nil {
+						n.refresh(time.Now())
+					}
+
+					dirty = true
+				}
 			case DialResult:
 				if n.dials[v.attempt.key] != v.attempt {
 					for _, c := range v.channels {
@@ -205,7 +215,6 @@ func (n *Node) graphLoop() {
 			dirty = false
 		case <-updates.C:
 			if dirty {
-				n.refresh(time.Now())
 				n.publishSnapshot()
 				dirty = false
 			}

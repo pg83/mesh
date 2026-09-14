@@ -52,7 +52,15 @@ func (c *ChannelIO) runWriter(n *Node) {
 		for {
 			select {
 			case packet := <-c.queue.out:
-				c.write(c.ctx, packet)
+				err := try(func() { c.write(c.ctx, packet) })
+
+				if err != nil {
+					if c.transport() != "udp" {
+						throw(err)
+					}
+
+					n.log.Debug("datagram write failed", "err", err)
+				}
 			case <-c.ctx.Done():
 				return
 			}
