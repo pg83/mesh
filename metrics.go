@@ -14,7 +14,7 @@ import (
 
 var (
 	packetKinds   = [...]string{"data", "graph", "registry", "other"}
-	rejectReasons = [...]string{"short", "header", "auth", "source"}
+	rejectReasons = [...]string{"short", "header", "auth", "source", "replay"}
 )
 
 const (
@@ -29,6 +29,7 @@ const (
 	rejectHeader
 	rejectAuth
 	rejectSource
+	rejectReplay
 )
 
 type Metrics struct {

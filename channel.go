@@ -49,6 +49,7 @@ type Channel struct {
 	view         *Snapshot
 	session      *Session
 	packetID     uint64
+	replay       Replay
 	seen         time.Time
 	nextRegistry time.Time
 	io           *ChannelIO
@@ -177,6 +178,12 @@ func (a *Channel) receive(r Received) {
 
 	if source.hash() != a.edge.From || (r.io != nil && r.io != a.io) {
 		a.node.metrics.rejected[rejectSource].Add(1)
+
+		return
+	}
+
+	if !a.replay.accept(binary.LittleEndian.Uint64(r.packet[3:])) {
+		a.node.metrics.rejected[rejectReplay].Add(1)
 
 		return
 	}

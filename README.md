@@ -348,7 +348,11 @@ of graph updates. Closing a channel discards its pending queue.
 Status exposes `channels` with directed `from`, `to`, `transport`, `outgoing` and
 attachment `id`, plus the number of pending dials. It exposes no connections.
 Crypto keys are shared across a peer's channels and survive local link expiry.
-Transport duplicate detection is not implemented.
+Every incoming channel keeps a 2048-packet window of accepted packet IDs
+below the highest one, so a replayed packet is dropped and cannot refresh a
+link or reach the TUN twice, while a packet reordered within the window
+still arrives. The window lives with the channel: after a link expires, a
+replayed packet can open the channel again for one more expiry period.
 
 ## Development
 

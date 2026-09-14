@@ -41,7 +41,7 @@ def test():
         assert not probe.send(op='read', read=True)['closed'], 'rejected frames closed the channel'
         assert any(c['from'] == lib.endpoint_hash(a) and not c['outgoing'] for c in lab.status('b')['channels'])
         rejected = [line for line in lab.http('b', '/metrics')[2].decode().splitlines() if line.startswith('mesh_packets_rejected_total')]
-        assert [line.rsplit(' ', 1)[1] for line in rejected] == ['1', '2', '1', '1'], rejected
+        assert [line.rsplit(' ', 1)[1] for line in rejected] == ['1', '2', '1', '1', '0'], rejected
         probe.send(op='raw', hex='00', text=True)
         lab.wait(lambda: not any(c['from'] == lib.endpoint_hash(a) and not c['outgoing']
                                 for c in lab.status('b')['channels']), 'only incoming channel closed')
