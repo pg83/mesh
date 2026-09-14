@@ -28,8 +28,11 @@ def test():
         def transports(source, target):
             return [hop['to' if not hop['from']['endpoint'] else 'from']['proto']
                     for hop in lab.endpoint_route(source, target)]
-        assert transports('a', 'b') == ['udp', 'ws']
-        assert transports('b', 'a') == ['ws', 'udp']
+        # r and b also link over their implicit UDP sockets on 10.2.0.x, and that
+        # link can come up before r's WebSocket connection; the WebSocket hop
+        # wins the tie-break once both exist.
+        lab.wait(lambda: transports('a', 'b') == ['udp', 'ws'], 'a -> b over UDP then WebSocket')
+        lab.wait(lambda: transports('b', 'a') == ['ws', 'udp'], 'b -> a over WebSocket then UDP')
         for name in ['a', 'b']:
             workload.udp_server(lab, name)
         for source, target in [('a', 'b'), ('b', 'a')]:
