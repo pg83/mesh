@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"slices"
+	"time"
 )
 
 type RecordVertex struct {
@@ -17,6 +18,7 @@ type GraphRecord struct {
 	Vertices []RecordVertex `json:"vertices"`
 	Links    []Edge         `json:"links"`
 	packet   []byte
+	applied  time.Time
 }
 
 func (n *Node) publishRecord() {
@@ -75,6 +77,7 @@ func (n *Node) publishRecord() {
 
 	record.Version = n.nextPacketID()
 	record.packet = encodeRecord(n.cfg.Index, record.Version, body)
+	record.applied = time.Now()
 
 	n.records[n.cfg.Index] = record
 }
@@ -87,6 +90,7 @@ func (n *Node) handleRecord(record *GraphRecord) {
 	}
 
 	n.metrics.recordsApplied.Add(1)
+	record.applied = time.Now()
 	n.records[record.Owner] = record
 }
 

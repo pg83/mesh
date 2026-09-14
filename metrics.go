@@ -220,10 +220,10 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 		}
 	}
 
-	w.family("mesh_record_age_seconds", "gauge", "Time since the peer's graph record last changed.")
+	w.family("mesh_record_age_seconds", "gauge", "Time since a newer graph record of the peer was applied.")
 
 	for _, record := range foreign {
-		w.value("mesh_record_age_seconds", [][2]string{{"peer", names[record.Owner]}}, now.Sub(time.Unix(0, int64(record.Version))).Seconds())
+		w.value("mesh_record_age_seconds", [][2]string{{"peer", names[record.Owner]}}, now.Sub(record.applied).Seconds())
 	}
 
 	w.family("mesh_record_vertices", "gauge", "Vertices in the peer's graph record.")
