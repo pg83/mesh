@@ -141,8 +141,15 @@ def status():
 def attached(address):
     state = status()
     endpoints = state.get('addresses', {})
-    return any(e['alive'] and endpoints[str(e['from'])]['addr'] == '10.77.0.1'
-               and endpoints[str(e['to'])]['addr'] == address for e in state.get('graph', []))
+    return any(e['alive'] and endpoints[str(e['from'])]['addr'] == address
+               and endpoints[str(e['from'])]['proto'] == 'udp'
+               and endpoints[str(e['to'])]['addr'] == '10.77.0.1' for e in state.get('graph', []))
+
+
+def can_send(address):
+    state = status()
+    return any(c['outgoing'] and state['addresses'][str(c['from'])]['addr'] == address
+               for c in state.get('channels', []))
 
 
 # Alias the runner's physical interface: loopback interfaces are intentionally
@@ -192,7 +199,10 @@ with software_checksums(), ipv6_addresses(iface, [old, peer_addr]) as aliases, t
             wait_for(lambda: not attached(old), 'Darwin address removal notification', timeout=3)
             run('/sbin/ifconfig', iface, 'inet6', new, 'prefixlen', '64', 'alias')
             aliases.append(new)
+            # Listener attachment checks the OS event, independently of IPv6
+            # duplicate-address detection delaying a new outgoing channel.
             wait_for(lambda: attached(new), 'Darwin address addition notification', timeout=3)
+            wait_for(lambda: can_send(new), 'new IPv6 source channel after address validation')
             wait_for(lambda: status().get('routes', {}).get('10.77.0.2:0'), 'IPv6 route after roaming')
             result = run('/sbin/ping', '-n', '-c', '4', '-W', '1000', '10.77.0.2')
             assert ' 0.0% packet loss' in result, result
