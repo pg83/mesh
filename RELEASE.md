@@ -1,5 +1,3 @@
-The control server gains `GET /metrics` in Prometheus text format: packet, byte, rejection, record, forwarding, TUN, link and dial counters kept inside the node, plus a snapshot of graph, channel and per-peer gauges such as reachability, route length, incoming links and record age. Scrape the control address directly.
-
-Unreachable guards were removed and the test suite now covers frame checks on established WebSocket channels, channel replacement, malformed routes and concrete UDP listeners following their address.
+Record age on `/metrics` is now measured from the moment a record was applied instead of from the owner's packet counter, which only told when the owner had started. Vertices from registry addresses and channels are trusted without an empty-hash check, the Linux netlink subscription no longer parses messages it already filtered by group, and the test suite covers a WebSocket upgrade refused because two public endpoints share one bind, host and path.
 
 This release uses mesh/13 and the release 18 graph format. Update peers together with releases before 18.
