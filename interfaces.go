@@ -85,7 +85,9 @@ func (n *Node) watchInterfaces() {
 			if err != nil {
 				n.log.Warn("interface notification lost", "err", err)
 				time.Sleep(time.Second)
-			} else if !interfaceEvent(buf[:size]) {
+			}
+
+			if err == nil && !interfaceEvent(buf[:size]) {
 				continue
 			}
 

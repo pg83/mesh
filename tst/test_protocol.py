@@ -67,6 +67,8 @@ def test():
         # Datagrams to a link-local address are not from any advertised listener.
         lab.run('b', ['ip', 'addr', 'add', '169.254.1.2/16', 'dev', 's1'])
         lab.run('a', ['ip', 'addr', 'add', '169.254.1.1/16', 'dev', 's1'])
+        with lab.lock:
+            lab.ports[(1, socket.inet_aton('169.254.1.2'))] = lab.ports[(1, socket.inet_aton('10.1.0.2'))]
         lab.run('a', [sys.executable, '-c',
                      "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind(('169.254.1.1', 0)); s.sendto(bytes([3, 2, 0]) + b'\\0' * 40, ('169.254.1.2', 7000))"])
         mesh_b = lib.endpoint(lib.intip(2), 0)

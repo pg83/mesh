@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -16,19 +15,6 @@ func openInterfaceEvents() *os.File {
 	return interfaceFile(fd)
 }
 
-func interfaceEvent(data []byte) bool {
-	messages, err := syscall.ParseNetlinkMessage(data)
-
-	if err != nil {
-		return true
-	}
-
-	for _, msg := range messages {
-		switch msg.Header.Type {
-		case unix.RTM_NEWLINK, unix.RTM_DELLINK, unix.RTM_NEWADDR, unix.RTM_DELADDR, unix.NLMSG_OVERRUN:
-			return true
-		}
-	}
-
-	return false
+func interfaceEvent([]byte) bool {
+	return true
 }

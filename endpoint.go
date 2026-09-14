@@ -140,10 +140,6 @@ func (n *Node) remember(e Vertex) uint64 {
 
 	id := e.hash()
 
-	if id == 0 {
-		return 0
-	}
-
 	if old, ok := n.addresses[id]; ok && old.identity() != e.identity() {
 		throwFmt("endpoint hash collision")
 	}

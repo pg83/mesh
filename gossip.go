@@ -84,9 +84,7 @@ func (n *Node) candidates(peer *Peer) []uint64 {
 	addrs := []uint64{}
 
 	for _, ep := range peer.addresses {
-		if id := n.remember(ep.vertex()); id != 0 {
-			addrs = append(addrs, id)
-		}
+		addrs = append(addrs, n.remember(ep.vertex()))
 	}
 
 	for id, index := range n.owners {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"net"
@@ -40,10 +41,6 @@ type Metrics struct {
 }
 
 func packetKind(inner []byte) int {
-	if len(inner) == 0 {
-		return kindOther
-	}
-
 	switch inner[0] {
 	case innerData:
 		return kindData
@@ -95,11 +92,7 @@ func (w *MetricsWriter) gauge(name, help string, value float64) {
 }
 
 func peerName(peer PeerConfig) string {
-	if peer.Name != "" {
-		return peer.Name
-	}
-
-	return strconv.Itoa(int(peer.Index))
+	return cmp.Or(peer.Name, strconv.Itoa(int(peer.Index)))
 }
 
 func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Time) {
@@ -164,11 +157,8 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 	}
 
 	owners := map[uint64]uint16{}
-	records := map[uint16]*GraphRecord{}
 
 	for _, record := range st.Records {
-		records[record.Owner] = record
-
 		for _, v := range record.Vertices {
 			owners[v.hash()] = record.Owner
 		}
@@ -215,28 +205,36 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 		w.value("mesh_peer_links", [][2]string{{"peer", peerName(peer)}}, float64(incoming[peer.Index]))
 	}
 
-	w.family("mesh_record_age_seconds", "gauge", "Time since the peer's graph record last changed.")
+	names := map[uint16]string{}
 
 	for _, peer := range peers {
-		if record := records[peer.Index]; record != nil {
-			w.value("mesh_record_age_seconds", [][2]string{{"peer", peerName(peer)}}, now.Sub(time.Unix(0, int64(record.Version))).Seconds())
+		names[peer.Index] = peerName(peer)
+	}
+
+	foreign := []*GraphRecord{}
+
+	for _, record := range st.Records {
+		if record.Owner != st.Index {
+			foreign = append(foreign, record)
 		}
+	}
+
+	w.family("mesh_record_age_seconds", "gauge", "Time since the peer's graph record last changed.")
+
+	for _, record := range foreign {
+		w.value("mesh_record_age_seconds", [][2]string{{"peer", names[record.Owner]}}, now.Sub(time.Unix(0, int64(record.Version))).Seconds())
 	}
 
 	w.family("mesh_record_vertices", "gauge", "Vertices in the peer's graph record.")
 
-	for _, peer := range peers {
-		if record := records[peer.Index]; record != nil {
-			w.value("mesh_record_vertices", [][2]string{{"peer", peerName(peer)}}, float64(len(record.Vertices)))
-		}
+	for _, record := range foreign {
+		w.value("mesh_record_vertices", [][2]string{{"peer", names[record.Owner]}}, float64(len(record.Vertices)))
 	}
 
 	w.family("mesh_record_links", "gauge", "Links in the peer's graph record.")
 
-	for _, peer := range peers {
-		if record := records[peer.Index]; record != nil {
-			w.value("mesh_record_links", [][2]string{{"peer", peerName(peer)}}, float64(len(record.Links)))
-		}
+	for _, record := range foreign {
+		w.value("mesh_record_links", [][2]string{{"peer", names[record.Owner]}}, float64(len(record.Links)))
 	}
 }
 
