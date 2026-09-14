@@ -149,15 +149,8 @@ func (v Vertex) isEndpoint() bool {
 	return v.Endpoint
 }
 
-func socketVertex(address net.Addr) Vertex {
-	v := Vertex{}
-
-	switch addr := address.(type) {
-	case *net.UDPAddr:
-		v = udpVertex(addr.IP, addr.Port)
-	case *net.TCPAddr:
-		v = Vertex{Proto: "tcp", Addr: addr.IP.String(), Port: uint16(addr.Port)}
-	}
+func socketVertex(address *net.TCPAddr) Vertex {
+	v := Vertex{Proto: "tcp", Addr: address.IP.String(), Port: uint16(address.Port)}
 
 	v.Endpoint = false
 

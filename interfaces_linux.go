@@ -15,6 +15,8 @@ func openInterfaceEvents() *os.File {
 	return interfaceFile(fd)
 }
 
-func interfaceEvent([]byte) bool {
-	return true
+func readInterfaceEvent(socket *os.File, buf []byte) error {
+	_, err := socket.Read(buf)
+
+	return err
 }

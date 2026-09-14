@@ -11,6 +11,16 @@ func openInterfaceEvents() *os.File {
 	return interfaceFile(throw2(unix.Socket(unix.AF_ROUTE, unix.SOCK_RAW, unix.AF_UNSPEC)))
 }
 
+func readInterfaceEvent(socket *os.File, buf []byte) error {
+	for {
+		size, err := socket.Read(buf)
+
+		if err != nil || interfaceEvent(buf[:size]) {
+			return err
+		}
+	}
+}
+
 func interfaceEvent(data []byte) bool {
 	messages, err := route.ParseRIB(0, data)
 

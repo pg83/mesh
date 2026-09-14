@@ -82,15 +82,9 @@ func (n *Node) watchInterfaces() {
 		buf := make([]byte, 65536)
 
 		for {
-			size, err := socket.Read(buf)
-
-			if err != nil {
+			if err := readInterfaceEvent(socket, buf); err != nil {
 				n.log.Warn("interface notification lost", "err", err)
 				time.Sleep(time.Second)
-			}
-
-			if err == nil && !interfaceEvent(buf[:size]) {
-				continue
 			}
 
 			select {

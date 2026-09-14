@@ -115,11 +115,14 @@ def test():
         record = next(r for r in lab.status('b')['records'] if r['owner'] == 1)
         assert [v['id'] for v in record['vertices']] == ids
         assert record['observed'] == [dict(zip(['from', 'seen'], [b_source, observed[0][1]]))]
+        # A link from a vertex that its owner does not publish is not an edge, and its observation is ignored.
+        ghost = lib.vertex_id(2, 2100)
         newer = lib.record(1, ident + 2, [(ep, True, False, 201 + i) for i, ep in enumerate(listeners)] + [(ep, False, True, 205 + i) for i, ep in enumerate(sockets)],
-                           [(b_source, listeners[0])], observed)
+                           [(b_source, listeners[0]), (ghost, listeners[0])], observed + [(ghost, lib.endpoint('203.0.113.6', 40124))])
         probe.send(op='graph', body=newer)
         lab.wait(lambda: version() == ident + 2, 'Go writer record accepted')
         assert all(present(edge) for edge in edges), 'Go writer lost UDP, WS or WSS endpoints'
+        assert [e['from'] for e in lab.status('b')['graph'] if e['to'] == listeners[0]] == [b_socket]
         withdrawn, _ = encode_record(1, ident + 3, [], [])
         send(withdrawn)
         lab.wait(lambda: not any(present(edge) for edge in edges), 'binary withdrawal applied')
