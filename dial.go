@@ -10,12 +10,16 @@ import (
 type DialKey struct {
 	source InterfaceAddress
 	target uint64
+	wire   SocketAddress
 }
 
 type DialAttempt struct {
 	key      DialKey
 	local    *LocalAddress
 	target   Vertex
+	wire     SocketAddress
+	source   Vertex
+	socket   *UDPSocket
 	session  *Session
 	channels []*ChannelIO
 	pending  bool
@@ -43,15 +47,21 @@ func (n *Node) syncDials() {
 			continue
 		}
 
-		for _, dst := range n.candidates(peer) {
+		for _, candidate := range n.candidates(peer) {
+			dst, wire := candidate.id, candidate.wire
 			target := n.addresses[dst]
+			remote := target
+
+			if target.Proto == "udp" {
+				remote = wire.vertex()
+			}
 
 			for _, src := range n.interfaces {
-				if src.ip.IsLoopback() || (target.ip() != nil && src.ip.Is6() != target.ipv6()) || n.excludesDial(Vertex{Addr: src.ip.String()}, target) {
+				if src.ip.IsLoopback() || (remote.ip() != nil && src.ip.Is6() != remote.ipv6()) || n.excludesDial(Vertex{Addr: src.ip.String()}, remote) {
 					continue
 				}
 
-				key := DialKey{source: src, target: dst}
+				key := DialKey{source: src, target: dst, wire: wire}
 
 				desired[key] = true
 
@@ -66,7 +76,7 @@ func (n *Node) syncDials() {
 				}
 
 				if attempt == nil {
-					attempt = &DialAttempt{key: key, target: target, session: peer.session, local: &LocalAddress{address: socketAddress(net.IP(src.ip.AsSlice()), 0), iface: src.iface}}
+					attempt = &DialAttempt{key: key, target: target, wire: wire, session: peer.session, local: &LocalAddress{address: socketAddress(net.IP(src.ip.AsSlice()), 0), iface: src.iface}}
 					n.dials[key] = attempt
 				}
 
@@ -77,6 +87,16 @@ func (n *Node) syncDials() {
 				}
 
 				if !alive && !attempt.pending && !now.Before(attempt.next) {
+					if target.Proto == "udp" {
+						source := n.udpSource(src)
+
+						if source == nil {
+							continue
+						}
+
+						attempt.socket, attempt.source, attempt.local = source.socket, source.vertex, source.local
+					}
+
 					attempt.pending = true
 					attempt.next = now.Add(time.Second)
 					go n.dialChannel(attempt)
@@ -111,7 +131,7 @@ func (n *Node) dialChannel(attempt *DialAttempt) {
 		id := n.transportID.Add(1)
 
 		if attempt.target.Proto == "udp" {
-			result.channels = []*ChannelIO{newUDPChannel(attempt.session, attempt.local, attempt.target, id)}
+			result.channels = []*ChannelIO{newUDPChannel(attempt.socket, attempt.session, attempt.source, attempt.local, attempt.target, attempt.wire, id)}
 
 			return
 		}

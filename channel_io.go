@@ -12,6 +12,7 @@ type ChannelIO struct {
 	peer           uint16
 	outgoing       bool
 	dialed         bool
+	wire           SocketAddress
 	origin, id     uint64
 	queue          *Mailbox[[]byte]
 	ctx            context.Context

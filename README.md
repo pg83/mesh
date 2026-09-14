@@ -160,10 +160,31 @@ The example above uses two different addresses and two different ports:
 
 The router forwards inbound UDP to `192.168.1.20:7001` and translates
 replies from that pair to `203.0.113.10:17001`. Configure that
-mapping on the router separately; mesh does not configure NAT. Outgoing channels use ordinary dynamic NAT mappings and ephemeral ports.
+mapping on the router separately; mesh does not configure NAT.
 The graph uses the public endpoint for the receiving side; its private pair is
 used to receive the forwarded datagrams. To use the LAN
 address directly too, keep the separate port-7000 entry shown above.
+
+Outgoing UDP channels send from the node's listener socket on their
+interface, so every peer sees the same source socket and the same dynamic
+NAT mapping. An interface address without a configured UDP listener gets an
+implicit socket bound to that address on a kernel-chosen port; it listens
+like a configured one and is advertised as an endpoint. A node with no UDP
+listeners at all is still reachable on its implicit sockets: directly on a
+LAN, and through its NAT mapping once another node has observed it.
+
+Every node reports, next to each incoming UDP link in its graph record, the
+wire address the packets actually arrive from when it differs from the
+address the source socket describes itself with: that is the mapping the
+sender's NAT chose. A node dialing a private UDP vertex that is not on one
+of its own networks sends to the smallest such observed address instead of
+the private one; nothing else changes. Two nodes behind NAT therefore learn
+each other's mappings from any common peer, dial each other at the same
+time, and the first packet of each opens its own mapping so the other's
+next packet passes. Symmetric NAT gives every observer a different mapping,
+the chosen one only works for that observer, and the route keeps going
+through a relay. There is no STUN, no coordination message and no state
+before data: the packets that open the mappings are ordinary gossip.
 
 WS/WSS uses the same endpoint shape. Each connection backs two independent directed channels.
 For native TLS, set `tls_cert` and `tls_key` on the local endpoint. The client
@@ -247,11 +268,14 @@ observes into them. One record travels in one packet; every outgoing channel
 sends every known record once per second.
 
 Inner graph records start with the owner registry index (2), version (8),
-vertex count (2), the vertices, link count (2), and the links. Each vertex is
+vertex count (2), the vertices, link count (2), the links, observation
+count (2) and the observations. Each vertex is
 one flags byte (bit 0: `vertex -> meshIP`, bit 1: `meshIP -> vertex`, zero is
 invalid) followed by its description. Each link is 10 bytes: the source vertex
 hash (8) of another node's socket or listener and the index (2) of the local
-destination vertex in this record. Endpoint descriptions start with kind (1: UDP/IPv4=1, WS=2, WSS=3,
+destination vertex in this record. Each observation is the source vertex hash
+(8) of one of the record's links followed by the UDP address description its
+packets arrive from. Endpoint descriptions start with kind (1: UDP/IPv4=1, WS=2, WSS=3,
 UDP/IPv6=4, TCP/IPv4=5, TCP/IPv6=6) and port (2). The high bit of kind is
 the `endpoint` flag; the low seven bits identify the transport/address format.
 UDP/TCP then carry four IPv4 or sixteen IPv6 octets.
@@ -260,7 +284,8 @@ as two strings, each prefixed by its byte length (2). Strings use UTF-8.
 
 Counts and lengths are checked against the remaining packet before allocating
 or reading. Truncated packets, unknown protocol codes, invalid flags, link
-indexes outside the record, self-links, and trailing bytes reject the record as
+indexes outside the record, self-links, observations of a source that is not
+a link, non-UDP observations, and trailing bytes reject the record as
 a whole. A record with an unknown owner, the receiver's own index, or a version
 not above the stored one is ignored. Lost or reordered records are repaired by
 the next periodic publication. Other nodes can use vertices with
@@ -326,8 +351,12 @@ Every second each host sends its known graph on outgoing channels only.
 Dial candidates combine local source addresses with remote listening endpoints
 from the registry and learned vertices with the endpoint flag set. Client socket
 vertices are never dial targets.
-Addresses within the mesh subnet are filtered. UDP writes use the selected source
-address and interface through socket control metadata. Establishing a channel
+Addresses within the mesh subnet are filtered. A UDP candidate carries the
+wire address to send to: the vertex's own address, or an observed NAT mapping
+for a private vertex off the local networks; the channel keeps the vertex as
+its graph target either way. UDP writes leave the listener socket of the
+selected source address and interface, with the source set through socket
+control metadata. Establishing a channel
 is independent of graph payload availability and of any reverse channel.
 
 Gossip replaces records whole. Receiving a newer record updates the graph
@@ -444,8 +473,10 @@ merged too. Codecov receives that same profile and requires 95% coverage.
 
 NAT scenarios translate both IPv4 addresses and UDP ports in the test router.
 They exercise two isolated private networks, failure of one forwarded port,
-and the same SSH and QUIC connections migrating from LAN to a public endpoint
-and then to a second forwarded port. These tests do not verify a physical Xiaomi router.
+the same SSH and QUIC connections migrating from LAN to a public endpoint
+and then to a second forwarded port, and two nodes without forwarded ports
+behind address-restricted NAT that learn their mappings from a public peer,
+connect directly and keep the link after that peer stops. These tests do not verify a physical Xiaomi router.
 
 WS tests force simultaneous TCP SYNs, count established kernel sockets,
 verify bidirectional traffic through an accepted connection, distinguish paths

@@ -42,7 +42,7 @@ def test():
         assert m['mesh_peer_route_edges{peer="r"}'] == 3 and m['mesh_peer_route_edges{peer="b"}'] == 6
         assert m['mesh_peer_links{peer="r"}'] == 1 and m['mesh_peer_links{peer="b"}'] == 0
         assert 0 <= m['mesh_record_age_seconds{peer="b"}'] < 600, m
-        assert m['mesh_record_vertices{peer="r"}'] >= 3 and m['mesh_record_links{peer="r"}'] == 2
+        assert m['mesh_record_vertices{peer="r"}'] >= 2 and m['mesh_record_links{peer="r"}'] == 2
         assert m['mesh_packets_received_total{kind="graph"}'] > 0
         assert m['mesh_packets_sent_total{kind="graph"}'] > 0
         assert m['mesh_packets_received_total{kind="data"}'] >= 5

@@ -13,14 +13,12 @@ type UDPWriter struct {
 	remote *net.UDPAddr
 }
 
-func newUDPChannel(session *Session, local *LocalAddress, target Vertex, id uint64) *ChannelIO {
-	config := net.ListenConfig{Control: udpControl(local.iface)}
-	conn := throw2(config.ListenPacket(context.Background(), local.address.socketKey().network("udp"), net.JoinHostPort(local.address.ip().String(), "0"))).(*net.UDPConn)
-	source := socketVertex(conn.LocalAddr())
-	writer := &UDPWriter{conn: conn, local: local, remote: target.addr()}
+func newUDPChannel(socket *UDPSocket, session *Session, source Vertex, local *LocalAddress, target Vertex, wire SocketAddress, id uint64) *ChannelIO {
+	writer := &UDPWriter{conn: socket.conn, local: local, remote: wire.udpAddr()}
 	c := newChannelIO(session, source, target, true, source.hash(), id)
 
-	c.local = &LocalAddress{address: socketAddress(source.ip(), int(source.Port)), iface: local.iface}
+	c.local = local
+	c.wire = wire
 
 	c.write = func(ctx context.Context, p []byte) {
 		deadline, ok := ctx.Deadline()
@@ -29,11 +27,9 @@ func newUDPChannel(session *Session, local *LocalAddress, target Vertex, id uint
 			deadline = time.Now().Add(time.Second)
 		}
 
-		throw(conn.SetWriteDeadline(deadline))
+		throw(socket.conn.SetWriteDeadline(deadline))
 		writer.writePacket(p)
 	}
-
-	go func() { <-c.ctx.Done(); conn.Close() }()
 
 	return c
 }
@@ -104,6 +100,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 			c := newChannelIO(session, source, view.addresses[id], false, source.hash(), packetID(buf))
 
 			c.local = view.local[id]
+			c.wire = key.remote
 
 			ready := make(chan chan any, 1)
 

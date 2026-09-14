@@ -11,6 +11,13 @@ class Lab(lib.Lab):
             if mixed:
                 endpoints.append(dict(proto='udp', addr='0.0.0.0', port=7000))
             self.configs[name] = dict(endpoint=endpoints)
+        if not mixed:
+            # Nodes always carry implicit UDP sockets; a WS-only lab is one whose
+            # network does not pass UDP.
+            for src in names:
+                for dst in names:
+                    if src != dst:
+                        self.intercept(src, dst, 'drop', proto=17, count=-1)
 
     def registry(self):
         registry = super().registry()
@@ -24,7 +31,8 @@ class Lab(lib.Lab):
     def channels(self, name):
         state = self.status(name)
         assert 'connections' not in state
-        return state['channels']
+        # Dials to the peers' implicit UDP sockets exist even where UDP does not pass.
+        return [c for c in state['channels'] if self.mixed or c['transport'] != 'udp']
 
     def shared_channels(self):
         a, b = self.channels('a'), self.channels('b')

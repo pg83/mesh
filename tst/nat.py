@@ -1,4 +1,5 @@
 """Port-forwarded UDP endpoints used by the NAT application scenarios."""
+import collections
 import lib
 import socket
 import struct
@@ -46,4 +47,54 @@ class Lab(lib.Lab):
             if local not in self.forwards.values():
                 public = socket.inet_aton(f'198.51.100.{self.nodes[source].index}')
                 self.forwards[(public, port)] = local
+        return super().route_packet(source, seg, packet)
+
+
+class PunchLab(lib.Lab):
+    """Two nodes behind address-restricted NAT without forwarded ports, and a third
+    node with one forwarded port. Dynamic mappings keep the private port; a
+    packet enters a dynamic mapping only from an address its socket has sent to."""
+
+    def __init__(self):
+        super().__init__(['a', 'b', 'r'], {1: ['a'], 2: ['b'], 3: ['r']}, statics=[])
+        self.configs = {name: dict(endpoint=[]) for name in self.nodes}
+        self.sent = collections.defaultdict(set)
+        self.static = set()
+        self.filtered = 0
+
+    def public(self, name):
+        return f'198.51.100.{self.nodes[name].index}'
+
+    def registry(self):
+        registry = super().registry()
+        for entry, name in zip(registry, self.nodes):
+            if name == 'r':
+                entry['endpoint'] = [dict(proto='udp', addr=self.public('r'), port=18003,
+                                          bind_addr=self.nodes['r'].addresses[3], bind_port=8003)]
+        return registry
+
+    def add_wire(self, node, seg):
+        super().add_wire(node, seg)
+        self.nsenter(node, 'ip', 'route', 'add', '198.51.100.0/24', 'dev', f's{seg}', check=True)
+
+    def start_node(self, name):
+        if name == 'r':
+            self.forward('r', 3, self.public('r'), 18003, 8003)
+            self.static.add((socket.inet_aton(self.public('r')), 18003))
+        super().start_node(name)
+
+    def route_packet(self, source, seg, packet):
+        if packet[0] >> 4 == 4 and packet[9] == 17 and packet[16:19] == bytes([198, 51, 100]):
+            head = (packet[0] & 15) * 4
+            source_port, target_port = struct.unpack_from('!HH', packet, head)
+            local = (source, seg, packet[12:16], source_port)
+            public = socket.inet_aton(self.public(source))
+            with self.lock:
+                if local not in self.forwards.values():
+                    self.forwards[(public, source_port)] = local
+                self.sent[local].add(packet[16:20])
+                target = self.forwards.get((packet[16:20], target_port))
+                if target is not None and (packet[16:20], target_port) not in self.static and public not in self.sent[target]:
+                    self.filtered += 1
+                    return None, packet
         return super().route_packet(source, seg, packet)
