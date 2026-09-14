@@ -165,10 +165,12 @@ func readWS(ctx context.Context, conn *websocket.Conn) []byte {
 }
 
 func (n *Node) dialWebSocket(ctx context.Context, local *LocalAddress, target Endpoint) (*websocket.Conn, *net.TCPAddr) {
+	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: local.address.ip()}, Control: tcpControl(local.iface)}
+
 	var address *net.TCPAddr
 
 	transport := &http.Transport{DialContext: func(ctx context.Context, network, remote string) (net.Conn, error) {
-		conn, err := n.socketPool.tcp(ctx, local, remote)
+		conn, err := dialer.DialContext(ctx, network, remote)
 
 		if err == nil {
 			address = conn.LocalAddr().(*net.TCPAddr)

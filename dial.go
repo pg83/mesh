@@ -105,7 +105,7 @@ func (n *Node) dialChannel(attempt *DialAttempt) {
 		id := uint64(time.Now().UnixNano())
 
 		if attempt.target.Proto == "udp" {
-			result.channels = []*ChannelIO{newUDPChannel(&n.socketPool, attempt.session, attempt.local, attempt.target, id)}
+			result.channels = []*ChannelIO{newUDPChannel(attempt.session, attempt.local, attempt.target, id)}
 
 			return
 		}

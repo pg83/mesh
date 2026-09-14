@@ -213,7 +213,6 @@ and the receiver's public key. There is no handshake or forward secrecy.
 | edge transport | `4`, the same remaining header and encryption |
 | registry transport | `5`, the same remaining header and encryption |
 | vertex transport | `6`, the same remaining header and encryption |
-| multicast transport | `7`, the same remaining header and encryption |
 
 The header is authenticated as associated data. Every packet gets a fresh
 random nonce, including after a process restart. The encrypted plaintext is
@@ -261,37 +260,6 @@ also updates the flag of an already known address.
 The authenticated sender may transmit any part of the graph, including records learned
 from other members. An omitted pair is unchanged; a newer record replaces
 an older one. Gossip remains periodic, once per second.
-
-Inner multicast starts with `6`, origin node index (2), message ID (8),
-remaining hops (1), then a typed body. Deletion bodies start with `1`,
-vertex count (2), followed by vertex hashes (8 each). A complete inner
-multicast is at most 1000 bytes. A node processes each `(origin, ID)` once
-and forwards it over its outgoing channels with one fewer hop. Forwarding
-preserves the origin and ID. New messages start with 16 hops; recently seen
-IDs are retained for one minute. There are no multicast acknowledgements.
-
-When a node receives a local attachment to a socket it no longer owns, it
-forgets that vertex and every incident edge, including dead records. This
-check also applies to old or repeated edge records. A separate multicast
-actor coalesces the deleted IDs for 100 ms from the first entry and sends
-as many packets as needed. Further entries do not postpone the timer.
-A missed deletion is retried with a new multicast ID when stale gossip
-reaches the owner again. Cleanup requires the owner to be reachable.
-The socket pool's quarantine also identifies retired local source vertices
-in received network edges, even if a delayed packet arrives after the
-original attachment has already been forgotten.
-Deletion does not remove registry entries or close active channels. Real
-local sockets remain authoritative, and later gossip may restore a vertex.
-
-Outgoing UDP and TCP sockets bind explicit random source ports from
-49152–65535. A shared pool serializes allocation and release with a mutex,
-keeps active ports reserved, and quarantines released ports for one minute.
-The pool is keyed by transport, local IP, and port and lives for the daemon's
-lifetime. Bind conflicts try another port; pool exhaustion fails the dial
-until a port becomes available. TCP connect, TLS, WebSocket upgrade, and
-packet I/O run outside the pool lock. A WebSocket's TCP port is released
-when both channels have closed the underlying socket. Configured listeners
-continue to use their specified ports.
 
 A WebSocket binary message contains one mesh transport packet with its source
 address inside the authenticated ciphertext. The client side is the real TCP

@@ -14,8 +14,9 @@ type UDPWriter struct {
 	remote *net.UDPAddr
 }
 
-func newUDPChannel(pool *SocketPool, session *Session, local *LocalAddress, target Vertex, id uint64) *ChannelIO {
-	conn, socket := pool.udp(local)
+func newUDPChannel(session *Session, local *LocalAddress, target Vertex, id uint64) *ChannelIO {
+	config := net.ListenConfig{Control: udpControl(local.iface)}
+	conn := throw2(config.ListenPacket(context.Background(), local.address.socketKey().network("udp"), net.JoinHostPort(local.address.ip().String(), "0"))).(*net.UDPConn)
 	source := socketVertex(conn.LocalAddr())
 	writer := &UDPWriter{conn: conn, local: local, remote: target.addr()}
 	c := newChannelIO(session, source, target, true, source.hash(), id)
@@ -33,7 +34,7 @@ func newUDPChannel(pool *SocketPool, session *Session, local *LocalAddress, targ
 		writer.writePacket(p)
 	}
 
-	go func() { <-c.ctx.Done(); pool.release(socket, conn.Close) }()
+	go func() { <-c.ctx.Done(); conn.Close() }()
 
 	return c
 }
