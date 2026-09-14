@@ -18,12 +18,6 @@ func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalAddress {
 	for _, addr := range addresses {
 		ip := net.IP(addr.ip.AsSlice())
 
-		if !ip.IsLoopback() {
-			id := n.remember(sourceVertex(n.cfg.Index, ip))
-
-			local[id] = &LocalAddress{address: socketAddress(ip, 0), iface: addr.iface}
-		}
-
 		for _, config := range n.endpoints {
 			if ip.IsLoopback() && !config.bind.ip().IsLoopback() {
 				continue
@@ -65,6 +59,8 @@ func (n *Node) scanLocal(addresses InterfaceState) map[uint64]*LocalAddress {
 }
 
 func (n *Node) refresh(now time.Time) {
+	n.syncLocal()
+
 	desired := map[Edge]bool{}
 	me := n.reg.byIndex[n.cfg.Index].vertex().hash()
 

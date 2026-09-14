@@ -8,13 +8,6 @@ import (
 const gossipEdgeSize = 25
 
 func appendVertex(out []byte, ep Vertex) []byte {
-	if ep.Proto == "source" {
-		out = append(out, 5)
-		out = binary.LittleEndian.AppendUint16(out, ep.Node)
-
-		return append(out, ep.ip().To16()...)
-	}
-
 	var kind byte
 
 	switch ep.Proto {
@@ -24,6 +17,12 @@ func appendVertex(out []byte, ep Vertex) []byte {
 		if ep.ipv6() {
 			kind = 4
 		}
+	case "tcp":
+		kind = 5
+
+		if ep.ipv6() {
+			kind = 6
+		}
 	case "ws":
 		kind = 2
 	case "wss":
@@ -32,13 +31,19 @@ func appendVertex(out []byte, ep Vertex) []byte {
 		throwFmt("bad endpoint protocol %q", ep.Proto)
 	}
 
-	out = append(out, kind)
+	flag := kind
+
+	if ep.Endpoint {
+		flag |= 128
+	}
+
+	out = append(out, flag)
 	out = binary.LittleEndian.AppendUint16(out, ep.Port)
 
-	if kind == 1 || kind == 4 {
+	if kind == 1 || kind == 4 || kind == 5 || kind == 6 {
 		ip := ep.ip().To16()
 
-		if kind == 1 {
+		if kind == 1 || kind == 5 {
 			ip = ip.To4()
 		}
 
@@ -66,31 +71,33 @@ func decodeVertex(data []byte) (Vertex, []byte, bool) {
 		return Vertex{}, nil, false
 	}
 
-	if data[0] == 5 {
-		if len(data) < 19 {
-			return Vertex{}, nil, false
-		}
-
-		return Vertex{Proto: "source", Node: binary.LittleEndian.Uint16(data[1:3]), Addr: net.IP(data[3:19]).String()}, data[19:], true
-	}
-
-	ep := Vertex{Port: binary.LittleEndian.Uint16(data[1:3])}
-	kind := data[0]
+	ep := Vertex{Port: binary.LittleEndian.Uint16(data[1:3]), Endpoint: data[0]&128 != 0}
+	kind := data[0] & 127
 
 	data = data[3:]
 
 	switch kind {
-	case 1:
+	case 1, 5:
 		ep.Proto = "udp"
+
+		if kind == 5 {
+			ep.Proto = "tcp"
+		}
+
 		ep.Addr = net.IP(data[:4]).String()
 
 		return ep, data[4:], true
-	case 4:
+	case 4, 6:
 		if len(data) < 16 {
 			return Vertex{}, nil, false
 		}
 
 		ep.Proto = "udp"
+
+		if kind == 6 {
+			ep.Proto = "tcp"
+		}
+
 		ep.Addr = net.IP(data[:16]).String()
 
 		return ep, data[16:], true

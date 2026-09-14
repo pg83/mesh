@@ -42,7 +42,7 @@ func newSession(local, peer *Peer, private []byte) *Session {
 	}
 }
 
-func (s *Session) seal(inner []byte, id uint64) []byte {
+func (s *Session) seal(source Vertex, inner []byte, id uint64) []byte {
 	out := make([]byte, headerTransport, headerTransport+len(inner)+s.send.Overhead())
 
 	out[0] = packetTransport
@@ -63,19 +63,23 @@ func (s *Session) seal(inner []byte, id uint64) []byte {
 	binary.LittleEndian.PutUint64(out[3:], id)
 	throw2(rand.Read(out[11:headerTransport]))
 
-	return s.send.Seal(out, out[11:headerTransport], inner, out[:headerTransport])
+	body := append(appendVertex(nil, source), inner...)
+
+	return s.send.Seal(out, out[11:headerTransport], body, out[:headerTransport])
 }
 
-func (s *Session) open(packet []byte) ([]byte, bool) {
+func (s *Session) open(packet []byte) (Vertex, []byte, bool) {
 	if len(packet) < headerTransport+s.recv.Overhead() {
-		return nil, false
+		return Vertex{}, nil, false
 	}
 
 	inner, err := s.recv.Open(nil, packet[11:headerTransport], packet[headerTransport:], packet[:headerTransport])
 
 	if err != nil {
-		return nil, false
+		return Vertex{}, nil, false
 	}
 
-	return inner, true
+	source, body, ok := decodeVertex(inner)
+
+	return source, body, ok && source.valid() && !source.isHost() && len(body) != 0
 }

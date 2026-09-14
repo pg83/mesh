@@ -273,7 +273,9 @@ class Probe:
             [os.environ['MESH_TEST_PROBE'], lab.dir / (source + '.json'),
              lab.nodes[target].addresses[seg] + ':7000', str(lab.nodes[target].index)],
             'probe-' + source, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
-        assert self.read()['ready']
+        ready = self.read()
+        assert ready['ready']
+        self.source = ready['source']
 
     def read(self):
         assert select.select([self.proc.stdout], [], [], 10)[0], 'probe timed out'
@@ -285,6 +287,8 @@ class Probe:
             self.send(op='vertices', body=ad['vertices'])
             self.send(op='edges', body=ad['edges'])
             return
+        if command.get('op') == 'vertices':
+            command['body'] = [lib.vertex(v) for v in command['body']]
         self.proc.stdin.write(json.dumps(command).encode() + b'\n')
         assert self.read()['sent']
 

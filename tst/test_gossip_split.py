@@ -13,15 +13,16 @@ def decode_vertices(data):
     count, = struct.unpack_from('<H', data, 1)
     offset = 3
     for _ in range(count):
-        kind, port = struct.unpack_from('<BH', data, offset)
+        flag, port = struct.unpack_from('<BH', data, offset)
+        kind = flag & 127
         offset += 3
-        if kind in (1, 4, 5):
-            size = 4 if kind == 1 else 16
+        if kind in (1, 4, 5, 6):
+            size = 4 if kind in (1, 5) else 16
             address = ipaddress.ip_address(data[offset:offset+size])
             if address.version == 6 and address.ipv4_mapped:
                 address = address.ipv4_mapped
             offset += size
-            ep = lib.source(str(address), port) if kind == 5 else lib.endpoint(str(address), port)
+            ep = dict(proto='tcp' if kind in (5, 6) else 'udp', addr=str(address), port=port, endpoint=bool(flag & 128))
         else:
             assert kind in (2, 3)
             values = []
@@ -98,7 +99,7 @@ def test():
         # Enough unique descriptions to need multiple vertex packets. A common
         # destination must still appear only once in an entire publication.
         vertices = [lib.endpoint('192.0.2.100', 10000+i) for i in range(160)]
-        vertices += [dict(proto=p, addr=p+'.invalid', port=443, path='/'+'x'*300) for p in ('ws', 'wss')]
+        vertices += [dict(proto=p, addr=p+'.invalid', port=443, path='/'+'x'*300, endpoint=True) for p in ('ws', 'wss')]
         updates = [lib.edge(v, x, ident) for v in vertices]
         probe.send(op='ad', body=dict(edges=updates))
         lab.wait(lambda: all(present(edge) for edge in updates), 'large graph installed')

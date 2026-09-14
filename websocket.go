@@ -99,17 +99,21 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 			host = h
 		}
 
-		destinations := map[uint64]bool{}
+		var target Vertex
 
 		for id, local := range view.local {
 			ep := view.addresses[id]
 
 			if ep.isEndpoint() && ep.Proto != "udp" && local.address == socketAddress(address.IP, address.Port) && ep.Path == r.URL.RequestURI() && strings.EqualFold(ep.Addr, host) {
-				destinations[id] = true
+				if target.hash() != 0 {
+					throwFmt("ambiguous websocket listener")
+				}
+
+				target = ep
 			}
 		}
 
-		if len(destinations) == 0 {
+		if target.hash() == 0 {
 			http.NotFound(w, r)
 
 			return
@@ -122,17 +126,26 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 		socket.SetReadLimit(maxPacket)
 
 		packet := readWS(ctx, socket)
-		session, binding, ok := n.readBinding(packet, view)
+		session, source, _, ok := n.readPacket(packet, view)
 
-		if !ok || binding.Reply || !destinations[binding.To.hash()] {
+		if !ok || source.Proto != "tcp" {
 			return
 		}
 
-		response := bindingReply(session, binding.To, binding.From, uint64(time.Now().UnixNano()))
+		c := newWSConnection(socket, session, target, source, source.hash(), binary.LittleEndian.Uint64(packet[3:]))
 
-		throw(socket.Write(ctx, websocket.MessageBinary, response))
+		c.send.local, c.receive.local = view.local[target.hash()], view.local[target.hash()]
 
-		c := newWSConnection(socket, session, binding.To, binding.From, binding.From.hash(), binary.LittleEndian.Uint64(packet[3:]))
+		read := c.receive.read
+
+		c.receive.read = func(input chan any) {
+			select {
+			case input <- Received{packet: packet, at: time.Now(), io: c.receive}:
+			case <-c.receive.ctx.Done():
+			}
+
+			read(input)
+		}
 
 		post(n.events.in, any(c.send))
 		post(n.events.in, any(c.receive))
@@ -151,9 +164,20 @@ func readWS(ctx context.Context, conn *websocket.Conn) []byte {
 	return packet
 }
 
-func (n *Node) dialWebSocket(ctx context.Context, local *LocalAddress, target Endpoint) *websocket.Conn {
+func (n *Node) dialWebSocket(ctx context.Context, local *LocalAddress, target Endpoint) (*websocket.Conn, *net.TCPAddr) {
 	dialer := &net.Dialer{LocalAddr: &net.TCPAddr{IP: local.address.ip()}, Control: tcpControl(local.iface)}
-	transport := &http.Transport{DialContext: dialer.DialContext, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
+
+	var address *net.TCPAddr
+
+	transport := &http.Transport{DialContext: func(ctx context.Context, network, remote string) (net.Conn, error) {
+		conn, err := dialer.DialContext(ctx, network, remote)
+
+		if err == nil {
+			address = conn.LocalAddr().(*net.TCPAddr)
+		}
+
+		return conn, err
+	}, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
 
 	defer transport.CloseIdleConnections()
 
@@ -171,5 +195,5 @@ func (n *Node) dialWebSocket(ctx context.Context, local *LocalAddress, target En
 
 	socket.SetReadLimit(maxPacket)
 
-	return socket
+	return socket, address
 }

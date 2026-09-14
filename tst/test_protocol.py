@@ -20,7 +20,8 @@ def test():
         def response():
             assert select.select([probe.stdout], [], [], 10)[0], 'probe timed out'
             return json.loads(probe.stdout.readline())
-        assert response()['ready']
+        ready = response()
+        assert ready['ready']
         def send(op, **fields):
             if op == 'ad':
                 ad = lib.wire_ad(fields['body'])
@@ -35,7 +36,7 @@ def test():
         def data(path, cursor=0, payload=b''):
             return bytes([1, len(path), cursor]) + b''.join(struct.pack('<Q', lib.endpoint_hash(ep))
                      for edge in path for ep in edge) + payload
-        a = lib.source('10.1.0.1', 1)
+        a = ready['source']
         b, c = [lib.endpoint(f'10.1.0.{i}') for i in (2, 3)]
         for packet in [b'', b'\xff', b'\x01', b'\x01\0\0', b'\x01\x11\0',
                        data([(a,b)], cursor=1), data([(a,c)]), data([(a,b),(b,lib.endpoint('10.1.0.99'))]),
@@ -49,7 +50,7 @@ def test():
         ident = time.time_ns() + 1_000_000_000
         mesh_a = lib.endpoint(lib.intip(1), 0)
         a_listener = lib.endpoint('10.1.0.1')
-        records = [lib.edge(mesh_a, a, ident), lib.edge(a_listener, mesh_a, ident), lib.edge(lib.source('10.1.0.2', 2), a_listener, ident)]
+        records = [lib.edge(mesh_a, a, ident), lib.edge(a_listener, mesh_a, ident), lib.edge(lab.channel_source('b', '10.1.0.2', '10.1.0.1'), a_listener, ident)]
         body = dict(edges=records)
         send('ad', body=body)
         lab.wait_route('b', 'a', ['a'])
@@ -94,7 +95,7 @@ def test():
         probe.stdin.close()
         assert probe.wait(timeout=10) == 0
         lab.wait_links('b', ['c'])
-        attempt = lab.intercept('b', 'a', 'copy', kind=3)
+        attempt = lab.intercept('b', 'a', 'copy', kind=4)
         lab.wait(lambda: attempt['hits'] == 1, 'gossip after local link timeout')
 
 

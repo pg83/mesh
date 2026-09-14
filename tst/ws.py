@@ -96,7 +96,9 @@ class Probe:
         self.proc = lab.spawn('a', [os.environ['MESH_TEST_PROBE'], config or lab.dir / 'a.json',
                                    'ws://10.1.0.2:7100/mesh', '2'], 'ws-probe',
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
-        assert self.read()['ready']
+        ready = self.read()
+        assert ready['ready']
+        self.source = ready['source']
 
     def read(self):
         import select

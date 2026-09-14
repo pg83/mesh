@@ -23,6 +23,7 @@ inside the nodes' network namespaces.
 | 15 | endpoint_fanout | Working endpoint after 32 unreachable candidates |
 | 16 | packet_header_auth | Changing the transport ID invalidates authentication |
 | 17 | packet_binding | Reflection and cross-peer ciphertext injection |
+| — | ws_source | Every first message type carries the actual client socket, works without a reply, and preserves endpoint metadata |
 | 18 | packet_endpoint_binding | A packet must arrive on the endpoint pair in its source route |
 | 19 | quic_noise | SSH and QUIC survive a bounded stream of invalid UDP packets |
 | 20 | route_limit | Full-size data at 16 hops; no route at 17 hops |

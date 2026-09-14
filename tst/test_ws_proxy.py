@@ -10,7 +10,7 @@ def test():
     with lab:
         lab.wait_ping('a', 'b')
         route = lab.endpoint_route('a', 'b')
-        assert route[0]['to'] == dict(proto='wss', addr='10.1.0.99', port=7443, path='/mesh')
+        assert route[0]['to'] == dict(proto='wss', addr='10.1.0.99', port=7443, path='/mesh', endpoint=True)
         for name in ['a', 'b']:
             workload.udp_server(lab, name)
         for source, target in [('a', 'b'), ('b', 'a')]:

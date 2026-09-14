@@ -20,7 +20,7 @@ def test():
         captured = lab.intercept('r', 'a', 'hold', kind=4)
         probe.send(op='ad', body=dict(edges=[xy]))
         lab.wait(lambda: len(captured['held']) == 1, 'unsigned gossip captured')
-        assert len(captured['held'][0][1]) == 20 + 8 + 35 + 16 + 3 + 25
+        assert len(captured['held'][0][1]) == 20 + 8 + 35 + 16 + 7 + 3 + 25
         lab.clear(captured)
         lab.replay(captured, transform=lambda packet: packet[:-1] + bytes([packet[-1] ^ 1]))
         probe.send(op='ad', body=dict(edges=[yz]))

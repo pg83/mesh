@@ -32,7 +32,7 @@ def test():
             assert links
             for edge in links:
                 for side in ['from', 'to']:
-                    if edge[side]['proto'] != 'source':
+                    if edge[side]['endpoint'] or edge[side]['port'] == 0:
                         assert lib.endpoint_address(edge[side]).startswith('198.51.100.')
         lab.clear(captured)
         selected = int(lab.selected_endpoint('a', 'b').split(':')[1])

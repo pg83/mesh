@@ -19,7 +19,7 @@ def encode(records):
         data += struct.pack('<H', len(p['endpoint']))
         for ep in p['endpoint']:
             kind = 4 if ep['proto'] == 'udp' and ':' in ep['addr'] else {'udp': 1, 'ws': 2, 'wss': 3}[ep['proto']]
-            data += struct.pack('<BH', kind, ep['port'])
+            data += struct.pack('<BH', kind | 128, ep['port'])
             data += lib.ipbytes(ep['addr']) if ep['proto'] == 'udp' else string(ep['addr']) + string(ep['path'])
     return bytes(data)
 
@@ -39,6 +39,7 @@ def test():
                     intip=lib.intip(40), endpoint=[lib.endpoint('2001:db8::40'),
                         dict(proto='ws', addr='edge.invalid', port=80, path='/mesh/λ'),
                         dict(proto='wss', addr='edge.invalid', port=443, path='/mesh')])
+        peer['endpoint'] = [{k: v for k, v in ep.items() if k != 'endpoint'} for ep in peer['endpoint']]
         packet = encode([peer])
         for end in range(len(packet)):
             send(packet[:end])

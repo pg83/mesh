@@ -52,7 +52,8 @@ type Node struct {
 	channels      map[Edge]*Channel
 	snapshot      *Snapshot
 	channelStatus map[Edge]ChannelStatus
-	dialing       map[Edge]bool
+	dials         map[DialKey]*DialAttempt
+	interfaces    InterfaceState
 	packetID      uint64
 	graph         map[Edge]State
 	owned         map[Edge]bool
@@ -80,7 +81,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		owners:   map[uint64]uint16{},
 		routes:   map[uint64][]Edge{},
 		packetID: uint64(time.Now().UnixNano()), addresses: map[uint64]Vertex{},
-		channelStatus: map[Edge]ChannelStatus{}, dialing: map[Edge]bool{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
+		channelStatus: map[Edge]ChannelStatus{}, dials: map[DialKey]*DialAttempt{}, listeners: map[string]*WSListener{}, tlsCA: map[uint64]string{},
 		noDial: map[DialPair]bool{},
 	}
 

@@ -11,11 +11,11 @@ import (
 )
 
 type Vertex struct {
-	Proto string `json:"proto"`
-	Addr  string `json:"addr"`
-	Port  uint16 `json:"port"`
-	Path  string `json:"path,omitempty"`
-	Node  uint16 `json:"node,omitempty"`
+	Proto    string `json:"proto"`
+	Addr     string `json:"addr"`
+	Port     uint16 `json:"port"`
+	Path     string `json:"path,omitempty"`
+	Endpoint bool   `json:"endpoint"`
 }
 
 type Edge struct {
@@ -28,7 +28,7 @@ func udpVertex(ip net.IP, port int) Vertex {
 		return Vertex{}
 	}
 
-	return Vertex{Proto: "udp", Addr: ip.String(), Port: uint16(port)}
+	return Vertex{Proto: "udp", Addr: ip.String(), Port: uint16(port), Endpoint: port != 0}
 }
 
 func (e Vertex) ipv6() bool {
@@ -60,19 +60,11 @@ func (e Vertex) valid() bool {
 		return false
 	}
 
-	if e.Proto == "source" {
-		return e.Node != 0 && e.Port == 0 && e.Path == "" && e.ip() != nil
+	if e.Proto == "udp" || e.Proto == "tcp" {
+		return e.ip() != nil && !e.ip().IsLinkLocalUnicast() && e.Path == "" && (e.Port != 0 || (e.Proto == "udp" && !e.Endpoint)) && (e.Proto != "tcp" || !e.Endpoint)
 	}
 
-	if e.Node != 0 {
-		return false
-	}
-
-	if e.Proto == "udp" {
-		return e.ip() != nil && !e.ip().IsLinkLocalUnicast() && e.Path == ""
-	}
-
-	return (e.Proto == "ws" || e.Proto == "wss") && e.Port != 0 && strings.HasPrefix(e.Path, "/")
+	return (e.Proto == "ws" || e.Proto == "wss") && e.Endpoint && e.Port != 0 && strings.HasPrefix(e.Path, "/")
 }
 
 func (e Vertex) hash() uint64 {
@@ -80,13 +72,7 @@ func (e Vertex) hash() uint64 {
 		return 0
 	}
 
-	prefix := ""
-
-	if e.Proto == "source" {
-		prefix = strconv.Itoa(int(e.Node)) + "\x00"
-	}
-
-	sum := sha256.Sum256([]byte(prefix + e.Proto + "\x00" + e.Addr + "\x00" + strconv.Itoa(int(e.Port)) + "\x00" + e.Path))
+	sum := sha256.Sum256([]byte(e.Proto + "\x00" + e.Addr + "\x00" + strconv.Itoa(int(e.Port)) + "\x00" + e.Path))
 
 	return binary.LittleEndian.Uint64(sum[:8])
 }
@@ -100,13 +86,9 @@ func (e Vertex) addr() *net.UDPAddr {
 }
 
 func (e Vertex) string() string {
-	if e.Proto == "source" {
-		return "source:" + strconv.Itoa(int(e.Node)) + ":" + e.Addr
-	}
-
 	address := net.JoinHostPort(e.Addr, strconv.Itoa(int(e.Port)))
 
-	if e.Proto == "udp" {
+	if e.Proto == "udp" || e.Proto == "tcp" {
 		return address
 	}
 
@@ -166,7 +148,7 @@ func (n *Node) remember(e Vertex) uint64 {
 		return 0
 	}
 
-	if old, ok := n.addresses[id]; ok && old != e {
+	if old, ok := n.addresses[id]; ok && old.identity() != e.identity() {
 		throwFmt("endpoint hash collision")
 	}
 
@@ -180,11 +162,28 @@ func (v Vertex) isHost() bool {
 }
 
 func (v Vertex) isEndpoint() bool {
-	return v.Proto != "source" && !v.isHost()
+	return v.Endpoint
 }
 
-func sourceVertex(node uint16, ip net.IP) Vertex {
-	return Vertex{Proto: "source", Node: node, Addr: ip.String()}
+func (v Vertex) identity() Vertex {
+	v.Endpoint = false
+
+	return v
+}
+
+func socketVertex(address net.Addr) Vertex {
+	v := Vertex{}
+
+	switch addr := address.(type) {
+	case *net.UDPAddr:
+		v = udpVertex(addr.IP, addr.Port)
+	case *net.TCPAddr:
+		v = Vertex{Proto: "tcp", Addr: addr.IP.String(), Port: uint16(addr.Port)}
+	}
+
+	v.Endpoint = false
+
+	return v
 }
 
 func (v Vertex) endpoint() Endpoint {
@@ -199,7 +198,7 @@ type Endpoint struct {
 }
 
 func (e Endpoint) vertex() Vertex {
-	return Vertex{Proto: e.Proto, Addr: e.Addr, Port: e.Port, Path: e.Path}
+	return Vertex{Proto: e.Proto, Addr: e.Addr, Port: e.Port, Path: e.Path, Endpoint: true}
 }
 
 func (e Endpoint) valid() bool {

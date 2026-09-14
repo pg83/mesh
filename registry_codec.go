@@ -6,7 +6,7 @@ import (
 	"net"
 )
 
-const registryPayloadSize = 1200 - headerTransport - 16
+const registryPayloadSize = 1200 - headerTransport - 16 - (1 + 2 + net.IPv6len)
 
 type RegistryRecord struct {
 	PeerConfig

@@ -55,11 +55,15 @@ def intip(index):
 
 
 def endpoint(address, port=PORT):
-    return dict(proto='udp', addr=address, port=port)
+    return dict(proto='udp', addr=address, port=port, endpoint=port != 0)
 
 
-def source(address, node):
-    return dict(proto="source", node=node, addr=address, port=0)
+def socket_vertex(address, port, proto='udp'):
+    return dict(proto=proto, addr=address, port=port, endpoint=False)
+
+
+def vertex(value):
+    return dict(value, endpoint=value.get('endpoint', value['port'] != 0 and value['proto'] != 'tcp'))
 
 
 def endpoint_address(ep):
@@ -70,8 +74,6 @@ def endpoint_hash(ep):
     if ep['addr'] in ('', '0.0.0.0', '::'):
         return 0
     value = '\0'.join([ep['proto'], ep['addr'].lower(), str(ep['port']), ep.get('path', '')])
-    if ep['proto'] == 'source':
-        value = str(ep['node']) + '\0' + value
     return int.from_bytes(hashlib.sha256(value.encode()).digest()[:8], 'little')
 
 
@@ -191,7 +193,7 @@ class Lab:
         # A full periodic graph fanout can exceed the default 500-packet TUN
         # queue before the userspace switch is scheduled. Faults are injected
         # by the switch; leave room for a publication in the 18-node topology.
-        self.nsenter(node, "ip", "link", "set", name, "txqueuelen", "4096", "up", check=True)
+        self.nsenter(node, "ip", "link", "set", name, "txqueuelen", "16384", "up", check=True)
         self.tuns[fd] = (seg, node)
         self.ports[(seg, ipbytes(addr))] = fd
 
@@ -707,6 +709,16 @@ class Lab:
         def host(ep):
             return ep['proto'] == 'udp' and ep['port'] == 0
         return [edge for edge in path if not host(edge['from']) and not host(edge['to'])]
+
+    def channel_source(self, name, address, target=None, proto='udp'):
+        state = self.status(name)
+        for channel in state['channels']:
+            if not channel['outgoing']:
+                continue
+            src, dst = [state['addresses'][str(channel[key])] for key in ['from', 'to']]
+            if src['addr'] == address and src['proto'] == proto and (target is None or dst['addr'] == target):
+                return src
+        return None
 
     def selected_endpoint(self, src, dst):
         path = self.endpoint_route(src, dst)

@@ -41,7 +41,12 @@ func (n *Node) status() *Status {
 	}
 
 	st.Channels = []ChannelStatus{}
-	st.Dialing = len(n.dialing)
+
+	for _, attempt := range n.dials {
+		if attempt.pending {
+			st.Dialing++
+		}
+	}
 
 	for _, c := range n.channelStatus {
 		st.Channels = append(st.Channels, c)

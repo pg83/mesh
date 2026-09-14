@@ -19,12 +19,13 @@ import (
 )
 
 type ProbeCommand struct {
-	Op   string          `json:"op"`
-	Hex  string          `json:"hex"`
-	Body json.RawMessage `json:"body"`
-	Read bool            `json:"read"`
-	Text bool            `json:"text"`
-	ID   uint64          `json:"id"`
+	Op     string          `json:"op"`
+	Hex    string          `json:"hex"`
+	Body   json.RawMessage `json:"body"`
+	Read   bool            `json:"read"`
+	Text   bool            `json:"text"`
+	ID     uint64          `json:"id"`
+	Source *Vertex         `json:"source,omitempty"`
 }
 
 func main() {
@@ -50,12 +51,28 @@ func main() {
 	packetID := uint64(time.Now().UnixNano())
 
 	var sendPacket func([]byte, bool)
+	var source, target Vertex
 	var ws *websocket.Conn
 	var halves *WSConnection
 	var received *Mailbox[any]
 
 	if strings.HasPrefix(os.Args[2], "ws") {
-		ws, _ = throw3(websocket.Dial(context.Background(), os.Args[2], nil))
+		transport := &http.Transport{DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
+
+			if err == nil {
+				source = socketVertex(conn.LocalAddr())
+			}
+
+			return conn, err
+		}}
+
+		ws, _ = throw3(websocket.Dial(context.Background(), os.Args[2], &websocket.DialOptions{HTTPClient: &http.Client{Transport: transport}}))
+
+		uri := throw2(url.Parse(os.Args[2]))
+		port := throw2(json.Number(uri.Port()).Int64())
+
+		target = Vertex{Proto: uri.Scheme, Addr: uri.Hostname(), Port: uint16(port), Path: uri.RequestURI(), Endpoint: true}
 
 		defer ws.CloseNow()
 
@@ -74,17 +91,14 @@ func main() {
 
 		defer conn.Close()
 
-		source := sourceVertex(cfg.Index, conn.LocalAddr().(*net.UDPAddr).IP)
-		first := bindingPacket(session, source, udpVertex(remote.IP, remote.Port), packetID)
-
-		throw2(conn.Write(first))
-
+		source = socketVertex(conn.LocalAddr())
+		target = udpVertex(remote.IP, remote.Port)
 		sendPacket = func(packet []byte, text bool) { throw2(conn.Write(packet)) }
 	}
 
 	encoder := json.NewEncoder(os.Stdout)
 
-	throw(encoder.Encode(map[string]any{"ready": true}))
+	throw(encoder.Encode(map[string]any{"ready": true, "source": source}))
 
 	scanner := bufio.NewScanner(os.Stdin)
 
@@ -101,11 +115,15 @@ func main() {
 
 		var out []byte
 
+		from := source
+
+		if command.Source != nil {
+			from = *command.Source
+		}
+
 		switch command.Op {
 		case "wrap":
-			var binding Binding
-			throw(json.Unmarshal(command.Body, &binding))
-			halves = newWSConnection(ws, session, binding.From, binding.To, binding.From.hash(), packetID)
+			halves = newWSConnection(ws, session, source, target, source.hash(), packetID)
 			received = newMailbox[any](halves.done)
 			go halves.receive.read(received.in)
 			sendPacket = func(packet []byte, text bool) {
@@ -134,32 +152,30 @@ func main() {
 		case "read":
 		case "raw":
 			out = throw2(hex.DecodeString(command.Hex))
-		case "binding":
-			out = session.seal(append([]byte{innerBinding}, command.Body...), packetID)
 		case "inner":
-			out = session.seal(throw2(hex.DecodeString(command.Hex)), packetID)
+			out = session.seal(from, throw2(hex.DecodeString(command.Hex)), packetID)
 		case "short-transport":
 			out = binary.LittleEndian.AppendUint16([]byte{packetTransport}, cfg.Index)
 			out = binary.LittleEndian.AppendUint64(out, packetID)
 		case "short-tag":
-			out = session.seal(nil, packetID)
+			out = session.seal(from, nil, packetID)
 			out = out[:len(out)-1]
 		case "edges":
 			var edges EdgeRecords
 
 			throw(json.Unmarshal(command.Body, &edges))
 
-			out = session.seal(encodeEdges(edges), packetID)
+			out = session.seal(from, encodeEdges(edges), packetID)
 		case "vertices":
 			var vertices VertexRecords
 
 			throw(json.Unmarshal(command.Body, &vertices))
 
-			out = session.seal(encodeVertices(vertices), packetID)
+			out = session.seal(from, encodeVertices(vertices), packetID)
 		case "open":
-			inner, ok := session.open(throw2(hex.DecodeString(command.Hex)))
+			origin, inner, ok := session.open(throw2(hex.DecodeString(command.Hex)))
 
-			throw(encoder.Encode(map[string]any{"opened": ok, "hex": hex.EncodeToString(inner)}))
+			throw(encoder.Encode(map[string]any{"opened": ok, "hex": hex.EncodeToString(inner), "source": origin}))
 
 			continue
 		default:

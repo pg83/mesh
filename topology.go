@@ -3,87 +3,105 @@ package main
 import (
 	"context"
 	"maps"
-	"net/netip"
 	"time"
 )
 
-func (n *Node) channel(edge Edge, peer uint16, outgoing bool) *Channel {
-	actor := n.channels[edge]
-
-	if actor == nil {
-		actor = &Channel{node: n, edge: edge, peer: peer, outgoing: outgoing, inbox: newMailbox[any](nil),
-			session: n.session(peer), packetID: uint64(time.Now().UnixNano())}
-		n.channels[edge] = actor
-		go n.loop("channel", actor.run)
+func (n *Node) sourceAvailable(local *LocalAddress) bool {
+	for _, addr := range n.interfaces {
+		if addr.ip == local.address.Addr && addr.iface == local.iface {
+			return true
+		}
 	}
 
-	return actor
+	return false
 }
 
-func (n *Node) excludesDial(from, to Vertex) bool {
-	if len(n.noDial) == 0 || from.Proto != "source" || from.Node != n.cfg.Index || !to.isEndpoint() {
-		return false
+func (n *Node) installChannel(c *ChannelIO) {
+	local := c.target
+
+	if c.outgoing {
+		local = c.source
 	}
 
-	src, _ := netip.ParseAddr(from.Addr)
-	dst, _ := netip.ParseAddr(to.Addr)
+	if c.ctx.Err() != nil || n.session(c.peer) != c.session || (local.isEndpoint() && n.local[local.hash()] == nil) || (!local.isEndpoint() && (c.local == nil || !n.sourceAvailable(c.local))) {
+		c.stop()
 
-	return n.noDial[DialPair{From: src.Unmap(), To: dst.Unmap()}]
+		return
+	}
+
+	old := n.channels[c.edge]
+
+	if old != nil {
+		previous := old.io
+
+		if previous.ctx.Err() == nil && (previous.origin < c.origin || (previous.origin == c.origin && previous.id >= c.id)) {
+			c.stop()
+
+			return
+		}
+
+		previous.stop()
+	}
+
+	n.remember(c.source)
+	n.remember(c.target)
+
+	if !local.isEndpoint() {
+		n.local[local.hash()] = c.local
+	}
+
+	actor := &Channel{node: n, edge: c.edge, peer: c.peer, outgoing: c.outgoing, inbox: newMailbox[any](c.ctx.Done()), session: c.session, packetID: c.id - 1, io: c}
+
+	n.channels[c.edge] = actor
+	n.channelStatus[c.edge] = ChannelStatus{Transport: c.transport(), Edge: c.edge, Outgoing: c.outgoing, ID: c.id}
+	go n.loop("channel", actor.run)
+}
+
+func (n *Node) syncLocal() {
+	n.local = n.scanLocal(n.interfaces)
+
+	for _, actor := range n.channels {
+		c := actor.io
+		local := c.target
+
+		if c.outgoing {
+			local = c.source
+		}
+
+		if local.isEndpoint() {
+			if n.local[local.hash()] == nil {
+				c.stop()
+			}
+		} else if c.ctx.Err() == nil && n.sourceAvailable(c.local) {
+			n.local[local.hash()] = c.local
+		} else {
+			c.stop()
+		}
+	}
 }
 
 func (n *Node) publishSnapshot() {
 	n.recompute()
 
-	enabled := map[Edge]bool{}
+	n.syncDials()
 
-	for index, peer := range n.reg.byIndex {
-		if index == n.cfg.Index {
-			continue
-		}
-
-		for _, dst := range n.candidates(peer) {
-			for src := range n.local {
-				if n.addresses[src].Proto != "source" {
-					continue
-				}
-
-				if ip := n.addresses[dst].ip(); ip != nil && n.local[src].address.ipv6() != (ip.To4() == nil) {
-					continue
-				}
-
-				if n.excludesDial(n.addresses[src], n.addresses[dst]) {
-					continue
-				}
-
-				edge := Edge{From: src, To: dst}
-
-				n.channel(edge, index, true)
-				enabled[edge] = true
-			}
-		}
-	}
-
-	channels := map[Edge]chan any{}
-
-	for edge, actor := range n.channels {
-		channels[edge] = actor.inbox.in
-	}
+	channels := maps.Clone(n.channels)
 
 	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local), owners: maps.Clone(n.owners),
-		routes: n.routes, channels: channels, enabled: enabled}
+		routes: n.routes, channels: channels}
 
 	view.gossip = n.advertisements()
 	n.snapshot = view
 
 	for _, actor := range n.channels {
-		post(actor.inbox.in, any(view))
+		actor.post(view)
 	}
 
 	post(n.tunInbox.in, any(view))
 }
 
 func (n *Node) observe(r ChannelReport) {
-	if r.session != n.session(r.peer) {
+	if n.channels[r.edge] != r.actor || r.session != n.session(r.peer) {
 		return
 	}
 
@@ -108,14 +126,9 @@ func (n *Node) observe(r ChannelReport) {
 
 	if r.status == nil {
 		delete(n.channelStatus, r.edge)
+		delete(n.channels, r.edge)
 	} else {
 		n.channelStatus[r.edge] = *r.status
-	}
-
-	if r.dialing {
-		n.dialing[r.edge] = true
-	} else {
-		delete(n.dialing, r.edge)
 	}
 }
 
@@ -135,7 +148,8 @@ func (n *Node) graphLoop() {
 			switch v := event.(type) {
 			case InterfaceState:
 				n.syncListeners(v)
-				n.local = n.scanLocal(v)
+				n.interfaces = v
+				n.syncLocal()
 				n.refresh(time.Now())
 				n.publishSnapshot()
 				dirty = false
@@ -156,26 +170,29 @@ func (n *Node) graphLoop() {
 			case ChannelReport:
 				n.observe(v)
 				dirty = true
-			case *ChannelIO:
-				local := v.edge.To
-
-				if v.outgoing {
-					local = v.edge.From
-				}
-
-				if n.local[local] == nil || n.session(v.peer) != v.session {
-					v.stop()
+			case DialResult:
+				if n.dials[v.attempt.key] != v.attempt {
+					for _, c := range v.channels {
+						c.stop()
+					}
 
 					continue
 				}
 
-				n.remember(v.source)
-				n.remember(v.target)
+				v.attempt.pending = false
+				v.attempt.channels = v.channels
 
-				actor := n.channel(v.edge, v.peer, v.outgoing)
+				for _, c := range v.channels {
+					n.installChannel(c)
+				}
 
+				n.refresh(time.Now())
 				n.publishSnapshot()
-				post(actor.inbox.in, any(v))
+			case *ChannelIO:
+				n.installChannel(v)
+				n.refresh(time.Now())
+				n.publishSnapshot()
+
 			case chan *Snapshot:
 				post(v, n.snapshot)
 			case chan *Status:
@@ -188,6 +205,7 @@ func (n *Node) graphLoop() {
 			dirty = false
 		case <-updates.C:
 			if dirty {
+				n.refresh(time.Now())
 				n.publishSnapshot()
 				dirty = false
 			}

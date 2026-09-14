@@ -29,6 +29,7 @@ def test():
         assert route[-1]['to'] == lib.endpoint(lib.intip(3), 0)
         assert all(a['to'] == b['from'] for a, b in zip(route, route[1:]))
         origin = workload.Probe(lab, 'a', 'r')
+        route[0]['to'] = route[1]['from'] = origin.source
         destination = 'fd77::3'
         lab.run('b', ['ip', '-6', 'addr', 'add', destination+'/128', 'dev', 'lo', 'nodad'])
         log = lab.dir/'ipv6-receive.log'

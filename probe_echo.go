@@ -4,7 +4,6 @@ package main
 
 import (
 	"encoding/binary"
-	"encoding/json"
 	"net"
 	"time"
 )
@@ -17,7 +16,7 @@ func echoProbe(path, destination string, index uint16) {
 	session := newSession(me, peer, key.private)
 	conn := throw2(net.ListenUDP(cfg.Endpoint[0].description().socketKey().network("udp"), cfg.Endpoint[0].binding()))
 	mine := cfg.Endpoint[0].description().vertex()
-	source := sourceVertex(cfg.Index, conn.LocalAddr().(*net.UDPAddr).IP)
+	source := mine
 	target := parseUDPAddr(destination)
 	targetPort := target.Port
 	destinations := map[uint64]*net.UDPAddr{udpVertex(target.IP, target.Port).hash(): target}
@@ -28,7 +27,7 @@ func echoProbe(path, destination string, index uint16) {
 
 	send := func(target *net.UDPAddr, inner []byte) {
 		id++
-		throw2(conn.WriteToUDP(session.seal(inner, id), target))
+		throw2(conn.WriteToUDP(session.seal(source, inner, id), target))
 	}
 
 	for {
@@ -48,7 +47,6 @@ func echoProbe(path, destination string, index uint16) {
 			}
 
 			for _, target := range destinations {
-				send(target, bindingInner(Binding{From: source, To: udpVertex(target.IP, target.Port)}))
 				send(target, encodeVertices(vertices))
 				send(target, encodeEdges(updates))
 			}
@@ -64,25 +62,17 @@ func echoProbe(path, destination string, index uint16) {
 			continue
 		}
 
-		inner, ok := session.open(buf[:size])
+		origin, inner, ok := session.open(buf[:size])
 
 		if !ok || len(inner) == 0 {
 			continue
 		}
 
-		if inner[0] == innerBinding {
-			var binding Binding
+		clients[socketAddress(remote.IP, remote.Port)] = origin
 
-			if json.Unmarshal(inner[1:], &binding) == nil && !binding.Reply && binding.To.hash() == mine.hash() && binding.From.Node == peer.index {
-				clients[socketAddress(remote.IP, remote.Port)] = binding.From
+		destination := &net.UDPAddr{IP: origin.ip(), Port: targetPort}
 
-				destination := &net.UDPAddr{IP: binding.From.ip(), Port: targetPort}
-
-				destinations[udpVertex(destination.IP, destination.Port).hash()] = destination
-			}
-
-			continue
-		}
+		destinations[udpVertex(destination.IP, destination.Port).hash()] = destination
 
 		_, known := clients[socketAddress(remote.IP, remote.Port)]
 
@@ -110,7 +100,7 @@ func echoProbe(path, destination string, index uint16) {
 		binary.BigEndian.PutUint16(packet[10:12], internetChecksum(packet[:head]))
 		binary.BigEndian.PutUint16(packet[head+2:head+4], internetChecksum(packet[head:]))
 
-		destination := &net.UDPAddr{IP: remote.IP, Port: targetPort}
+		destination = &net.UDPAddr{IP: remote.IP, Port: targetPort}
 
 		send(destination, encodeData(&Data{path: []Edge{{From: me.vertex().hash(), To: source.hash()}, {From: source.hash(), To: udpVertex(destination.IP, destination.Port).hash()}, {From: udpVertex(destination.IP, destination.Port).hash(), To: peer.vertex().hash()}}, cursor: 1, payload: packet}))
 	}

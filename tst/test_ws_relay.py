@@ -26,7 +26,7 @@ def test():
         lab.wait_route('a', 'b', ['r', 'b'])
         lab.wait_route('b', 'a', ['r', 'a'])
         def transports(source, target):
-            return [hop['to' if hop['from']['proto'] == 'source' else 'from']['proto']
+            return [hop['to' if not hop['from']['endpoint'] else 'from']['proto']
                     for hop in lab.endpoint_route(source, target)]
         assert transports('a', 'b') == ['udp', 'ws']
         assert transports('b', 'a') == ['ws', 'udp']

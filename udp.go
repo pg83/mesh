@@ -14,11 +14,14 @@ type UDPWriter struct {
 	remote *net.UDPAddr
 }
 
-func newUDPChannel(session *Session, local *LocalAddress, source, target Vertex, id uint64) *ChannelIO {
+func newUDPChannel(session *Session, local *LocalAddress, target Vertex, id uint64) *ChannelIO {
 	config := net.ListenConfig{Control: udpControl(local.iface)}
 	conn := throw2(config.ListenPacket(context.Background(), local.address.socketKey().network("udp"), net.JoinHostPort(local.address.ip().String(), "0"))).(*net.UDPConn)
+	source := socketVertex(conn.LocalAddr())
 	writer := &UDPWriter{conn: conn, local: local, remote: target.addr()}
 	c := newChannelIO(session, source, target, true, source.hash(), id)
+
+	c.local = &LocalAddress{address: socketAddress(source.ip(), int(source.Port)), iface: local.iface}
 
 	c.write = func(ctx context.Context, p []byte) {
 		deadline, ok := ctx.Deadline()
@@ -74,16 +77,35 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 		input, known := inputs[key]
 		now := time.Now()
 
-		if !known || input.channel.ctx.Err() != nil {
-			view := n.currentSnapshot(context.Background())
-			id := n.incomingID(view, key.local)
-			session, binding, ok := n.readBinding(buf[:size], view)
+		var source Vertex
+		var inner []byte
 
-			if !ok || binding.Reply || id == 0 || binding.To.hash() != id {
+		if known && input.channel.ctx.Err() == nil {
+			var ok bool
+			source, inner, ok = input.channel.session.open(buf[:size])
+
+			if !ok {
 				continue
 			}
 
-			c := newChannelIO(session, binding.From, binding.To, false, binding.From.hash(), binary.LittleEndian.Uint64(buf[3:]))
+			known = source.hash() == input.channel.source.hash()
+		}
+
+		if !known || input.channel.ctx.Err() != nil {
+			view := n.currentSnapshot(context.Background())
+			id := n.incomingID(view, key.local)
+			session, from, body, ok := n.readPacket(buf[:size], view)
+
+			source, inner = from, body
+
+			if !ok || id == 0 || source.Proto != "udp" {
+				continue
+			}
+
+			c := newChannelIO(session, source, view.addresses[id], false, source.hash(), binary.LittleEndian.Uint64(buf[3:]))
+
+			c.local = view.local[id]
+
 			ready := make(chan chan any, 1)
 
 			c.read = func(in chan any) { ready <- in }
@@ -109,7 +131,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 		inputs[key] = input
 
 		select {
-		case input.input <- Received{packet: append([]byte(nil), buf[:size]...), at: now, io: input.channel}:
+		case input.input <- Received{packet: append([]byte(nil), buf[:headerTransport]...), source: source, inner: inner, at: now, io: input.channel}:
 		case <-input.channel.ctx.Done():
 		}
 	}

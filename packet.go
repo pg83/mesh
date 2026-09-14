@@ -9,7 +9,6 @@ const (
 	packetVertices  = 6
 	innerData       = 1
 	innerEdges      = 2
-	innerBinding    = 3
 	innerRegistry   = 4
 	innerVertices   = 5
 	nonceSize       = 24

@@ -21,6 +21,7 @@ def encode_vertices(endpoints):
     for ep in endpoints:
         offsets.append(len(packet))
         kind = 4 if ep['proto'] == 'udp' and ':' in ep['addr'] else {'udp': 1, 'ws': 2, 'wss': 3}[ep['proto']]
+        kind |= 128 if ep.get('endpoint', ep['port'] != 0) else 0
         packet += struct.pack('<BH', kind, ep['port'])
         if ep['proto'] == 'udp':
             packet += lib.ipbytes(ep['addr'])
@@ -36,8 +37,8 @@ def test():
         lab.wait_ping('a', 'b')
         probe = workload.Probe(lab, 'a', 'b')
         endpoints = [lib.endpoint('192.0.2.10', 0), lib.endpoint('192.0.2.11', 9000),
-                     dict(proto='ws', addr='edge.example.invalid', port=80, path='/mesh/λ'),
-                     dict(proto='wss', addr='secure.example.invalid', port=443, path='/' + 'x' * 300),
+                     dict(proto='ws', addr='edge.example.invalid', port=80, path='/mesh/λ', endpoint=True),
+                     dict(proto='wss', addr='secure.example.invalid', port=443, path='/' + 'x' * 300, endpoint=True),
                      lib.endpoint('2001:db8::1234', 9000)]
         ident = time.time_ns()
         edges = [lib.edge(a, b, ident) for a, b in zip(endpoints, endpoints[1:])]
@@ -70,9 +71,8 @@ def test():
         send(struct.pack('<BHBHH', 5, 1, 2, 80, 4) + b'host')
         # The first endpoint consumes the bytes reserved for a second one.
         send(struct.pack('<BHBHH', 5, 2, 2, 80, 8) + b'hostname' + b'\0\0')
-        # Source vertices have an owner and a full 16-byte address; reject
-        # every truncation before accepting the following independent record.
-        source = struct.pack('<BH', 5, 1) + socket.inet_pton(socket.AF_INET6, '::ffff:192.0.2.40')
+        # IPv6 TCP socket addresses are independent vertices, including their port.
+        source = struct.pack('<BH', 6, 49152) + socket.inet_pton(socket.AF_INET6, '::ffff:192.0.2.40')
         for end in range(len(source)):
             send(struct.pack('<BH', 5, 1) + source[:end])
 

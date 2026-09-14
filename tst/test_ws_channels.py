@@ -11,21 +11,20 @@ def test():
         lab.wait_ping('a', 'b')
         lab.stop_node('a')
         lab.wait(lambda: not lab.channels('b'), 'old channels closed')
-        source = lib.source('10.1.0.1', 1)
-        endpoint = dict(proto='ws', addr='10.1.0.2', port=7100, path='/mesh')
+        endpoint = dict(proto='ws', addr='10.1.0.2', port=7100, path='/mesh', endpoint=True)
         internal = lib.endpoint(lib.intip(2), 0)
 
         def local_edge(src, dst):
             return any(e['from'] == src and e['to'] == dst for e in lab.status('b')['graph'])
 
-        def connect(src=source):
+        def connect():
             probe = ws.Probe(lab)
-            assert not probe.send(op='binding', body={'from': src, 'to': endpoint}, read=True)['closed']
+            assert not probe.send(op='vertices', body=[], read=True)['closed']
             return probe
 
         for first in ['stop-send', 'stop-receive']:
             probe = connect()
-            assert probe.send(op='wrap', body={'from': source, 'to': endpoint})['wrapped']
+            assert probe.send(op='wrap')['wrapped']
             assert not probe.send(op=first)['closed']
             if first == 'stop-send':
                 assert not probe.send(op='read', read=True)['closed']
@@ -39,7 +38,8 @@ def test():
             probe.finish()
             lab.wait(lambda: not lab.channels('b'), 'socket closes after both halves')
 
-        one, two = connect(), connect(lib.source('10.1.0.99', 1))
+        one, two = connect(), connect()
+        assert one.source != two.source and one.source['addr'] == two.source['addr']
         lab.wait(lambda: len(lab.channels('b')) == 4, 'four independent channels')
         lab.wait(lambda: local_edge(internal, endpoint), 'outgoing local direction added')
         assert local_edge(endpoint, internal), 'listener lost its incoming direction'

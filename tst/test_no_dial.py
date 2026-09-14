@@ -76,7 +76,7 @@ def test():
         for connection in status['channels']:
             vertices = [status['addresses'][str(connection[k])] for k in ['from', 'to']]
             for source, target in [vertices, vertices[::-1]]:
-                if source['proto'] == 'source' and source.get('node') == 1:
+                if not source['endpoint'] and source['port'] != 0:
                     assert (source['addr'], target['addr']) not in [
                         ('10.1.0.1', '10.1.0.2'), ('2001:db8:3::1', '2001:db8:3::2')]
 

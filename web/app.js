@@ -4,8 +4,8 @@ const dark = true;
 const $ = id => document.getElementById(id), byID = new Map(t.vertices.map(v => [v.id,v]));
 const peer = i => t.peers.find(p => p.index === Number(i));
 const isHost = v => v?.proto === 'udp' && v.port === 0;
-const label = v => v?.proto === 'source' ? '↑ '+v.addr : v ? `${v.port && v.addr.includes(':') ? '['+v.addr+']' : v.addr}${v.port ? ':'+v.port : ''}` : '—';
-const epFor = index => t.vertices.filter(v => v.owner === index && v.port);
+const label = v => v ? `${v.port && v.addr.includes(':') ? '['+v.addr+']' : v.addr}${v.port ? ':'+v.port : ''}` : '—';
+const epFor = index => t.vertices.filter(v => v.owner === index && v.endpoint);
 const ipVertex = index => t.vertices.find(v => isHost(v) && v.addr === peer(index)?.intip);
 const active = p => !!ipVertex(p.index);
 const colors = dark ? ['#93c4a4','#9aaed0','#c0b48c','#7cb9bf'] : ['#6484eb','#8e7ed0','#55a5a1','#c89a65'];
@@ -18,7 +18,7 @@ const cy = cytoscape({container:$('graph'), minZoom:.1,maxZoom:3,wheelSensitivit
  {selector:'node.offline',style:{'background-color':dark?'#18252c':'#f7f9fc','border-color':dark?'#33404d':'#d6ddea','border-style':'dashed','color':dark?'#596c7c':'#a4afbe'}},
  {selector:'edge',style:{'curve-style':'bezier',width:1,'target-arrow-shape':'triangle','arrow-scale':.6,'line-color':dark?'#657e6e':'#bac6dc','target-arrow-color':dark?'#7b9a83':'#acbad0',opacity:.28}},
  {selector:'edge.aggregate',style:{width:1.5,opacity:.65,'curve-style':'bezier','control-point-step-size':35,'label':'data(count)','font-size':9,'color':dark?'#89a794':'#8a9dbd','text-background-color':dark?'#111b25':'#fff','text-background-opacity':1,'text-background-padding':3,'text-rotation':'autorotate'}},
- {selector:'edge.attachment',style:{'line-style':'dotted',opacity:.35,'target-arrow-shape':'none'}},
+ {selector:'edge.attachment',style:{'line-style':'dotted',opacity:.35}},
  {selector:'.dim',style:{opacity:.09}},
  {selector:'edge.focus',style:{opacity:1,width:2.3,'line-color':dark?'#b8d4a1':'#6684e9','target-arrow-color':dark?'#b8d4a1':'#6684e9','z-index':10}},
  {selector:'node.focus',style:{'border-color':dark?'#d0e7a9':'#6788ff','border-width':3}},
@@ -50,7 +50,7 @@ function buildGraph(preserve = false) {
   for(const e of t.edges) {const a=byID.get(e.source)?.owner,b=byID.get(e.target)?.owner;if(a && b && a!==b){const id=`n${a}:n${b}`;const old=pairs.get(id);if(old) old.data.count++;else pairs.set(id,{data:{id,source:'n'+a,target:'n'+b,count:1},classes:'aggregate'});}}
   elements.push(...pairs.values());
  } else {
-  for(const v of t.vertices) elements.push({data:{id:v.id,owner:v.owner,vertex:v,label:!isHost(v)?label(v):`${peer(v.owner)?.name || 'unregistered'}\n${v.addr}`,color:nodeColor(v.owner)},classes:isHost(v)?'ip':v.proto==='source'?'source':''});
+  for(const v of t.vertices) elements.push({data:{id:v.id,owner:v.owner,vertex:v,label:!isHost(v)?label(v):`${peer(v.owner)?.name || 'unregistered'}\n${v.addr}`,color:nodeColor(v.owner)},classes:isHost(v)?'ip':''});
   for(const p of t.peers) if(!active(p)) elements.push({data:{id:'n'+p.index,owner:p.index,label:`${p.name}\n${p.intip}`,color:nodeColor(p.index)},classes:'host offline'});
   for(const e of t.edges) elements.push({data:{id:e.source+':'+e.target,source:e.source,target:e.target},classes:isHost(byID.get(e.source)) || isHost(byID.get(e.target))?'attachment':''});
  }

@@ -70,8 +70,10 @@ its own advertised addresses let others dial it back later. `tun` (default
 it defaults to `1`. Set a higher version in the authoritative configuration
 when changing its registry. Versions are not derived from startup or send time.
 Every five seconds each outgoing edge sends a separate registry message with
-a random selection of known records fitting in one encrypted packet of at most
-1200 bytes. Learned records retain their versions and are retransmitted too.
+a random selection of known records fitting in one encrypted message. The
+record budget reserves the full IPv6 source header and keeps UDP messages
+within 1200 bytes; WS messages include their variable-length source endpoint.
+Learned records retain their versions and are retransmitted too.
 An unknown index is added; an existing record changes only for a strictly higher
 version. There are no deletions, expiry, whole-registry replacement or fragments.
 Records too large for one packet are rejected at startup.
@@ -121,23 +123,27 @@ Overlapping UDP wildcard and explicit binds share one socket per address family 
 
 Outgoing channels are created for eligible interface addresses and known remote
 endpoints. The OS assigns their local UDP/TCP port. UDP never reuses a configured
-listener's port for outgoing traffic. The graph distinguishes ingress endpoints,
-host vertices, and source vertices identified by node index and local IP.
-Source vertices are not dial targets and remain stable when ephemeral ports change.
+listener's port for outgoing traffic. The graph uses the actual local socket
+address and port, not an interface placeholder. A new port on reconnect creates
+a new vertex; closing the old channels withdraws their edges. A vertex's
+`endpoint` flag explicitly says whether it accepts new channels. Client socket
+vertices and mesh-IP:0 vertices have this flag cleared.
 
 All transport traffic goes through a directed `Channel` with its own protocol actor.
 UDP has no connection abstraction: an outgoing channel writes datagrams from an
 unconnected socket; a listening socket dispatches datagrams to receiving channels.
-The first authenticated binding names the source vertex and destination endpoint.
-Bindings repeat with periodic gossip to recover lost initial packets. The receiver
-sends no binding reply, gossip, registry or data back through that channel.
+Every authenticated message includes its full source vertex. The receiving
+socket supplies the destination endpoint. Any ordinary data, vertex, edge or
+registry message can be the first one; there is no preliminary message or reply.
+The receiver sends no gossip, registry or data back through that UDP channel.
 Return traffic requires an independently created outgoing channel to a known listener,
 or another route through the mesh. UDP-only nodes need a reachable advertised listener
 for return traffic; WS/WSS clients can receive through an outgoing connection without one.
 
 Each Channel has a goroutine and an unbounded FIFO mailbox. Channel actors
 handle authentication, gossip and forwarding directly to the next channel;
-inactive candidates remain available for rediscovery. One graph goroutine merges
+connection attempts are tracked separately from graph edges and channels.
+Channel actors and their mailboxes exit when their I/O closes. One graph goroutine merges
 observations and advertisements and periodically publishes a shared immutable
 snapshot, including routes, to the actors and TUN. Each mailbox has a channel-driven
 queue that accepts messages independently of its consumer. Packets and snapshots
@@ -194,11 +200,11 @@ there is no separate advertisement signature or signing key.
 
 All multibyte integers in the mesh protocol use little-endian order.
 Encapsulated IP packets retain their standard network format. The key
-context is `mesh/12`; upgrade all peers together. Releases through 13 use earlier channel semantics or wire formats and cannot exchange traffic with this
+context is `mesh/13`; upgrade all peers together. Releases through 14 use earlier channel semantics or wire formats and cannot exchange traffic with this
 version. Update peers together.
 
 Each registered pair derives a shared secret with X25519 and directional
-keys with HKDF-SHA256. The context contains `mesh/12`, the sender's public key
+keys with HKDF-SHA256. The context contains `mesh/13`, the sender's public key
 and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
@@ -209,7 +215,11 @@ and the receiver's public key. There is no handshake or forward secrecy.
 | vertex transport | `6`, the same remaining header and encryption |
 
 The header is authenticated as associated data. Every packet gets a fresh
-random nonce, including after a process restart.
+random nonce, including after a process restart. The encrypted plaintext is
+`source vertex description || inner message`. Every transport packet contains
+its complete source address, including the real port. A relay wraps the inner
+message with its outgoing channel source; it preserves the route and payload
+and advances the route cursor.
 
 Inner data starts with `1`, edge count (1), cursor (1), then the route. Each
 edge is a pair of vertices: source vertex hash (8), destination vertex hash (8). The opaque payload follows. The complete route includes the source and destination
@@ -230,7 +240,9 @@ Inner edges start with `2`, edge count (2), followed by the edges. Each edge is 
 source hash (8), destination hash (8), record ID (8), and alive (1, either 0
 or 1). Inner vertices start with `5`, vertex count (2), followed by the
 vertex descriptions. Endpoint descriptions start with kind (1: UDP/IPv4=1, WS=2, WSS=3,
-UDP/IPv6=4, source=5) and port (2). UDP then carries four IPv4 or sixteen IPv6 octets.
+UDP/IPv6=4, TCP/IPv4=5, TCP/IPv6=6) and port (2). The high bit of kind is
+the `endpoint` flag; the low seven bits identify the transport/address format.
+UDP/TCP then carry four IPv4 or sixteen IPv6 octets.
 WS/WSS carry the address and path
 as two strings, each prefixed by its byte length (2). Strings use UTF-8.
 
@@ -238,25 +250,25 @@ Counts and lengths are checked against the remaining packet before allocating
 or reading. Truncated packets, unknown protocol codes, invalid alive values,
 and trailing bytes are rejected as a whole. Descriptions appear once per
 publication, independently of the edge packets.
-A source description is kind 5, node index (2), and a 16-byte IP address
-(IPv4 uses its mapped IPv6 representation). It is not an endpoint.
 Edges split at eight records; vertex packets target at most 1000 inner bytes.
 A single large vertex record can exceed that target. Lost or reordered
 descriptions are repaired by the next periodic publication. Other nodes can
-use these descriptions to open new direct connections.
+use descriptions with `endpoint: true` to open new direct channels. The flag
+is metadata and does not change the address hash; an updated vertex publication
+also updates the flag of an already known address.
 
 The authenticated sender may transmit any part of the graph, including records learned
 from other members. An omitted pair is unchanged; a newer record replaces
 an older one. Gossip remains periodic, once per second.
 
-A WebSocket binary message contains one mesh transport packet. The first
-packet on a connection contains inner type `3` followed by a JSON binding
-with source and destination vertex descriptions. The WS handshake response has `reply: true`. UDP does not send a reply.
-The source must name the authenticated sender; the destination must be an
-explicit local listener. The same binding is used for UDP. Both ends validate
-this binding with the existing derived keys; no new session keys are negotiated.
-Subsequent messages carry the existing data and gossip packets. The receiving
-endpoint comes from this authenticated binding, not the proxy's TCP address.
+A WebSocket binary message contains one mesh transport packet with its source
+address inside the authenticated ciphertext. The client side is the real TCP
+local IP and port; the server side is the configured WS/WSS endpoint, including
+its public hostname and path behind a proxy. The HTTP Upgrade selects that
+endpoint. No mesh negotiation, binding packet or binding reply is sent.
+The first ordinary message is processed immediately and identifies the peer
+and source vertex for the server's two independent channels. A client socket
+can receive through the existing connection without becoming a listener.
 
 The graph owner and each outgoing edge have separate counters initialized
 from Unix nanoseconds. The graph counter versions local records; an edge's
@@ -265,13 +277,13 @@ Forwarding a graph record preserves its ID and alive flag.
 
 ## Map and routing
 
-Endpoints live in `map[uint64]Endpoint`; the graph key is a pair of uint64
+Vertices live in `map[uint64]Vertex`; the graph key is a pair of uint64
 hashes and the value contains only record ID and alive state. Routes carry
 the same hashes. Full addresses are resolved only by the local transport.
 The hash is the first eight SHA-256 bytes interpreted as a little-endian
 uint64, over `proto + NUL + addr + NUL + decimal-port + NUL + path`.
 Hostnames are lowercased, IPs normalized, and an empty WS path becomes `/`.
-UDP path is empty. Local bind and TLS settings are excluded. Conflicting
+UDP/TCP paths are empty. Local bind, TLS settings and the endpoint flag are excluded. Conflicting
 descriptions with the same hash fail explicitly.
 
 The graph remains a map of directed endpoint pairs;
@@ -289,15 +301,16 @@ not evidence of a live network edge.
 
 Receiving an authenticated packet observes precisely its directed channel.
 UDP discovery obtains the local destination from socket packet metadata and
-checks the binding against that listener. Subsequent packets are dispatched by
-sender address, destination address and peer identity, then authenticated by
-the receiving channel. A forwarded listener uses its configured public endpoint
+the configured listener mapping. Packets carry their source address in the
+authenticated envelope and are dispatched to the corresponding channel.
+The sender-provided source stays the same across NAT and reverse proxies. A forwarded listener uses its configured public endpoint
 in the graph. The observed edge expires after five seconds without packets;
 closing its channel withdraws it without inventing the reverse edge.
 
 Every second each host sends its known graph on outgoing channels only.
 Dial candidates combine local source addresses with remote listening endpoints
-from the registry and learned graph. Learned source vertices are never listeners.
+from the registry and learned vertices with the endpoint flag set. Client socket
+vertices are never dial targets.
 Addresses within the mesh subnet are filtered. UDP writes use the selected source
 address and interface through socket control metadata. Establishing a channel
 is independent of graph payload availability and of any reverse channel.
@@ -399,7 +412,7 @@ The stress test runs in all three CI jobs as part of the regular e2e suite.
 Other scenarios transfer and hash files through scp and curl while cutting
 the active path, synchronize trees with rsync, and run iperf3 TCP/UDP streams
 with deterministic loss and delay. UDP probes check packet sizes, reordering
-across busy channels, endpoint binding and ciphertext authentication. Separate tests check
+across busy channels, socket address metadata and ciphertext authentication. Separate tests check
 gossip on every endpoint during UDP traffic, data keeping a link alive
 when gossip is dropped, five-second local link expiry, and a
 20-second RTT carrying UDP traffic without link flaps. Gossip reconnection, unknown
@@ -494,5 +507,6 @@ publishes the release. Development stays on `master`; releases create tags.
 Exported ephemeral configurations include the selected node and peers with static
 endpoints, default registry version 1, and no listeners. Add local endpoints only
 when that node should accept new incoming connections. The status API exposes
-all graph descriptions under `addresses`; source vertices use `proto: "source"`
-and `node`, while ingress descriptors retain `udp`, `ws`, or `wss`.
+all graph descriptions under `addresses`; client sockets contain their actual
+`udp` or `tcp` address and port with `endpoint: false`. Listeners have
+`endpoint: true` and retain `udp`, `ws`, or `wss`.
