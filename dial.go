@@ -121,5 +121,8 @@ func (n *Node) dialChannel(attempt *DialAttempt) {
 
 		ws.send.local, ws.receive.local = local, local
 		result.channels = []*ChannelIO{ws.send, ws.receive}
-	}).catch(func(e *Exception) { n.log.Debug("channel dial failed", "endpoint", attempt.target.string(), "err", e) })
+	}).catch(func(e *Exception) {
+		n.metrics.dialFailed.Add(1)
+		n.log.Debug("channel dial failed", "endpoint", attempt.target.string(), "err", e)
+	})
 }

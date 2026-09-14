@@ -136,6 +136,9 @@ func (a *Channel) send(inner []byte) {
 
 	packet := a.session.seal(a.io.source, inner, a.packetID)
 
+	a.node.metrics.sent[packetKind(inner)].Add(1)
+	a.node.metrics.sentBytes.Add(uint64(len(packet)))
+
 	select {
 	case a.io.queue.in <- packet:
 	case <-a.io.ctx.Done():
@@ -143,11 +146,19 @@ func (a *Channel) send(inner []byte) {
 }
 
 func (a *Channel) receive(r Received) {
-	if a.outgoing || a.view == nil || a.view.local[a.edge.To] == nil || len(r.packet) < headerTransport {
+	if a.outgoing || a.view == nil || a.view.local[a.edge.To] == nil {
+		return
+	}
+
+	if len(r.packet) < headerTransport {
+		a.node.metrics.rejected[rejectShort].Add(1)
+
 		return
 	}
 
 	if binary.LittleEndian.Uint16(r.packet[1:]) != a.peer || !validPacketType(r.packet[0]) {
+		a.node.metrics.rejected[rejectHeader].Add(1)
+
 		return
 	}
 
@@ -158,13 +169,20 @@ func (a *Channel) receive(r Received) {
 		source, inner, ok = a.session.open(r.packet)
 
 		if !ok {
+			a.node.metrics.rejected[rejectAuth].Add(1)
+
 			return
 		}
 	}
 
 	if source.hash() != a.edge.From || (r.io != nil && r.io != a.io) {
+		a.node.metrics.rejected[rejectSource].Add(1)
+
 		return
 	}
+
+	a.node.metrics.received[packetKind(inner)].Add(1)
+	a.node.metrics.receivedBytes.Add(uint64(len(r.packet)))
 
 	first := a.seen.IsZero() || r.at.Sub(a.seen) >= sessionTimeout
 
@@ -192,11 +210,15 @@ func (a *Channel) graph(inner []byte) {
 	owner, version, ok := recordHead(inner)
 
 	if !ok || owner == a.node.cfg.Index || a.view.registry.byIndex[owner] == nil || version <= a.view.records[owner] {
+		a.node.metrics.recordsStale.Add(1)
+
 		return
 	}
 
 	if record, ok := decodeRecord(owner, version, inner); ok {
 		post(a.node.events.in, any(record))
+	} else {
+		a.node.metrics.recordsInvalid.Add(1)
 	}
 }
 
@@ -223,12 +245,16 @@ func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
 
 			if actor := view.channels[edge]; actor != nil {
 				actor.post(Outbound{inner: inner})
+			} else {
+				n.metrics.forwardNoChannel.Add(1)
 			}
 
 			return
 		}
 
 		if !view.graph[edge] {
+			n.metrics.forwardNoEdge.Add(1)
+
 			return
 		}
 
@@ -236,6 +262,7 @@ func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
 	}
 
 	if d.path[len(d.path)-1].To == me {
+		n.metrics.tunDelivered.Add(1)
 		post(n.tunWrites.in, d.payload)
 	}
 }
@@ -262,11 +289,17 @@ func (n *Node) tunLoop() {
 		case TunPacket:
 			path := view.routes[v.destination]
 
-			if len(path) != 0 {
-				d := &Data{path: path, payload: v.payload}
+			n.metrics.tunRead.Add(1)
 
-				n.routeData(view, d, encodeData(d))
+			if len(path) == 0 {
+				n.metrics.tunUnrouted.Add(1)
+
+				continue
 			}
+
+			d := &Data{path: path, payload: v.payload}
+
+			n.routeData(view, d, encodeData(d))
 		}
 	}
 }

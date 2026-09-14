@@ -1,5 +1,5 @@
-Mesh now exchanges the graph as one versioned record per node instead of separate edge and vertex packets. A record holds the node's listener and socket vertices with their attachment directions and the links it observes into them, and travels in one packet. Receivers keep only the newest version of each record, relay it unchanged, and derive the edge set from the records: a vertex dropped from a record disappears with every edge on it, so sockets of a previous incarnation cannot survive as zombies. The edge alive flag and per-edge versions are gone.
+The control server gains `GET /metrics` in Prometheus text format: packet, byte, rejection, record, forwarding, TUN, link and dial counters kept inside the node, plus a snapshot of graph, channel and per-peer gauges such as reachability, route length, incoming links and record age. Scrape the control address directly.
 
-A record's version advances only when its content changes, so an idle network carries no graph updates for the graph actor to process.
+Unreachable guards were removed and the test suite now covers frame checks on established WebSocket channels, channel replacement, malformed routes and concrete UDP listeners following their address.
 
-This release uses mesh/13. Update peers together; releases through 17 use an incompatible graph format.
+This release uses mesh/13 and the release 18 graph format. Update peers together with releases before 18.

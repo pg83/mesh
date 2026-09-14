@@ -454,6 +454,15 @@ The Unix status socket and `status -s` have been removed.
 - `GET /status`: raw node status, including 64-bit endpoint IDs.
 - `GET /topology`: public registry, all live directed graph edges and selected
   routes. Endpoint IDs are decimal strings so browsers preserve every bit.
+- `GET /metrics`: Prometheus text exposition. Counters cover packets by inner
+  kind and bytes in each direction, packets an incoming channel rejected by
+  reason, graph records applied, stale and invalid, data dropped by a relay
+  without a channel or on a local hop outside the graph, TUN packets read,
+  unrouted and delivered, link up and down events and failed dials. Gauges
+  cover graph edges, vertices, addresses, records, links, channels by
+  transport and direction, pending dials, routes, messages queued for the
+  graph actor, and per peer: reachability, route length, incoming links, record
+  age, vertices and links.
 - `GET /config?node=mini`: a bootstrap configuration for an ephemeral registry
   entry. Select by its optional `name` or numeric `index`. Static entries
   cannot be exported as ephemeral nodes. The result includes no private key,

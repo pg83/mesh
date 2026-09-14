@@ -62,6 +62,7 @@ type Node struct {
 	addresses     map[uint64]Vertex
 	owners        map[uint64]uint16
 	routes        map[uint64][]Edge
+	metrics       Metrics
 }
 
 func newNode(cfg *Config, log *slog.Logger) *Node {

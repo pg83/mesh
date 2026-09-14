@@ -81,9 +81,12 @@ func (n *Node) publishRecord() {
 
 func (n *Node) handleRecord(record *GraphRecord) {
 	if previous := n.records[record.Owner]; previous != nil && record.Version <= previous.Version {
+		n.metrics.recordsStale.Add(1)
+
 		return
 	}
 
+	n.metrics.recordsApplied.Add(1)
 	n.records[record.Owner] = record
 }
 

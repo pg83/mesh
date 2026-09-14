@@ -60,6 +60,7 @@ func (n *Node) refresh(now time.Time) {
 	for edge, received := range n.observed {
 		if now.Sub(received) >= sessionTimeout {
 			delete(n.observed, edge)
+			n.metrics.linkDown.Add(1)
 			n.log.Info("link down", "from", n.addresses[edge.From].string(), "to", n.addresses[edge.To].string())
 		}
 	}

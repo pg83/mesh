@@ -1,8 +1,11 @@
 package main
 
+import "sync/atomic"
+
 type Mailbox[T any] struct {
-	in  chan T
-	out chan T
+	in     chan T
+	out    chan T
+	queued atomic.Int64
 }
 
 func newMailbox[T any](done <-chan struct{}) *Mailbox[T] {
@@ -22,8 +25,11 @@ func newMailbox[T any](done <-chan struct{}) *Mailbox[T] {
 			select {
 			case message := <-m.in:
 				queue = append(queue, message)
+				m.queued.Add(1)
 			case output <- first:
 				var zero T
+
+				m.queued.Add(-1)
 
 				queue[0] = zero
 				queue = queue[1:]

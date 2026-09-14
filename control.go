@@ -119,6 +119,13 @@ func (n *Node) controlLoop() {
 	}))
 
 	mux.HandleFunc("GET /config", httpBoundary(n.exportConfig))
+
+	mux.HandleFunc("GET /metrics", httpBoundary(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		w.Header().Set("Cache-Control", "no-store")
+		writeMetrics(w, n.readStatus(), &n.metrics, int(n.events.queued.Load()), time.Now())
+	}))
+
 	serveHTTP(throw2(net.Listen("tcp", address)), mux)
 }
 

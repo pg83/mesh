@@ -110,6 +110,10 @@ func (n *Node) observe(r ChannelReport) {
 	}
 
 	if r.status == nil {
+		if _, exists := n.observed[r.edge]; exists {
+			n.metrics.linkDown.Add(1)
+		}
+
 		delete(n.observed, r.edge)
 	}
 
@@ -119,6 +123,7 @@ func (n *Node) observe(r ChannelReport) {
 		n.observed[r.edge] = r.seen
 
 		if !exists {
+			n.metrics.linkUp.Add(1)
 			n.log.Info("link up", "from", n.addresses[r.edge.From].string(), "to", n.addresses[r.edge.To].string())
 		}
 	}
