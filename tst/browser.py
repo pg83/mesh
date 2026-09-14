@@ -13,6 +13,9 @@ with sync_playwright() as p:
     page.wait_for_function('ready && t.peers.length === 3')
     assert page.get_by_role('tab').count() == 4
     assert page.evaluate('cy.nodes().length') >= 6
+    # Every endpoint circle shown is linked to a vertex of another node; lone attachments are hidden.
+    assert page.evaluate('t.vertices.some(v => !(v.proto === "udp" && v.port === 0) && !cy.getElementById(v.id).length)')
+    assert page.evaluate('cy.nodes().filter(n => !n.hasClass("ip") && !n.hasClass("host")).every(n => n.connectedEdges().connectedNodes().some(m => m.id() !== n.id() && !m.hasClass("ip")))')
     assert page.evaluate('getComputedStyle(document.querySelector(".graph-panel")).borderWidth') == '0px'
     assert page.evaluate('getComputedStyle(document.querySelector(".inspector")).borderWidth') == '0px'
     assert page.evaluate('getComputedStyle(document.querySelector("main")).padding') == '0px'

@@ -50,9 +50,13 @@ function buildGraph(preserve = false) {
   for(const e of t.edges) {const a=byID.get(e.source)?.owner,b=byID.get(e.target)?.owner;if(a && b && a!==b){const id=`n${a}:n${b}`;const old=pairs.get(id);if(old) old.data.count++;else pairs.set(id,{data:{id,source:'n'+a,target:'n'+b,count:1},classes:'aggregate'});}}
   elements.push(...pairs.values());
  } else {
-  for(const v of t.vertices) elements.push({data:{id:v.id,owner:v.owner,vertex:v,label:!isHost(v)?label(v):`${peer(v.owner)?.name || 'unregistered'}\n${v.addr}`,color:nodeColor(v.owner)},classes:isHost(v)?'ip':''});
+  // A vertex attached only to its own host, with no link to or from another node, is left out.
+  const linked = new Set();
+  for(const e of t.edges) if(!isHost(byID.get(e.source)) && !isHost(byID.get(e.target))) {linked.add(e.source);linked.add(e.target);}
+  const shown = new Set(t.vertices.filter(v => isHost(v) || linked.has(v.id)).map(v => v.id));
+  for(const v of t.vertices) if(shown.has(v.id)) elements.push({data:{id:v.id,owner:v.owner,vertex:v,label:!isHost(v)?label(v):`${peer(v.owner)?.name || 'unregistered'}\n${v.addr}`,color:nodeColor(v.owner)},classes:isHost(v)?'ip':''});
   for(const p of t.peers) if(!active(p)) elements.push({data:{id:'n'+p.index,owner:p.index,label:`${p.name}\n${p.intip}`,color:nodeColor(p.index)},classes:'host offline'});
-  for(const e of t.edges) elements.push({data:{id:e.source+':'+e.target,source:e.source,target:e.target},classes:isHost(byID.get(e.source)) || isHost(byID.get(e.target))?'attachment':''});
+  for(const e of t.edges) if(shown.has(e.source) && shown.has(e.target)) elements.push({data:{id:e.source+':'+e.target,source:e.source,target:e.target},classes:isHost(byID.get(e.source)) || isHost(byID.get(e.target))?'attachment':''});
  }
  cy.batch(()=>{cy.elements().remove();cy.add(elements);});
  $('hosts-mode').classList.toggle('active',mode==='hosts');$('endpoints-mode').classList.toggle('active',mode==='endpoints');
