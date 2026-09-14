@@ -375,7 +375,7 @@ func (ss *Shell) wait(cmd *exec.Cmd) {
 	})
 
 	if err != nil {
-		ss.server.node.log.Debug("ssh command failed", "err", err)
+		ss.server.node.log.Info("ssh command failed", "user", ss.user, "err", err)
 	}
 
 	ss.channel.SendRequest("exit-status", false, ssh.Marshal(ExitStatus{Status: status}))
