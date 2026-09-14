@@ -8,7 +8,7 @@ def test():
     lab.configs['b'] = dict(endpoint=[dict(proto='udp', addr='10.1.0.2', port=7000)])
     with lab:
         lab.wait_ping('a', 'b')
-        copied = lab.intercept('a', 'b', 'copy', kind=4, target_port=7000)
+        copied = lab.intercept('a', 'b', 'copy', kind=1, target_port=7000)
         lab.wait(lambda: bool(copied['held']), 'authenticated gossip on configured address')
         lab.replay(copied, seg=2)
         # Replaying the same ciphertext is permitted by the protocol. The

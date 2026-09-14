@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"encoding/binary"
 	"net"
 	"net/http"
 	"os"
@@ -132,7 +131,7 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		c := newWSConnection(socket, session, target, source, source.hash(), binary.LittleEndian.Uint64(packet[3:]))
+		c := newWSConnection(socket, session, target, source, source.hash(), packetID(packet))
 
 		c.send.local, c.receive.local = view.local[target.hash()], view.local[target.hash()]
 

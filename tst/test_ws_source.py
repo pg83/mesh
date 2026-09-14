@@ -51,10 +51,10 @@ def test():
                     value = value.encode()
                     return struct.pack('<H', len(value)) + value
                 record = struct.pack('<HQ', 50, 9) + lib.ipbytes(lib.intip(50)) + string(lab.nodes['a'].keys['pub']) + string('source-first') + b'\0\0'
-                command = dict(op='inner', hex=(b'\4\1\0' + record).hex())
+                command = dict(op='inner', hex=(b'\2\1\0' + record).hex())
                 applied = lambda: any(p['index'] == 50 and p['version'] == 9 for p in lab.status('b')['registry'])
             else:
-                data = bytes([1, 1, 0, lab.nodes['b'].index])
+                data = bytes([0, 0, lab.nodes['b'].index])
                 command = dict(op='inner', hex=(data + udp_payload(b'first-message-is-data')).hex())
                 applied = lambda: b'first-message-is-data'.hex() in log.read_text()
             assert probe.send(**command)['sent']

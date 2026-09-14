@@ -29,18 +29,18 @@ def test():
         def inner(data):
             send('inner', hex=data.hex())
         def data(hops, cursor=0, payload=b''):
-            return bytes([1, len(hops), cursor, *hops]) + payload
+            return bytes([0, (len(hops) - 1) << 4 | cursor, *hops]) + payload
         a = ready['source']
         b, c = [lib.endpoint(f'10.1.0.{i}') for i in (2, 3)]
-        for packet in [b'', b'\xff', b'\x01', b'\x01\0\0', b'\x01\x11\0',
-                       data([2], cursor=1), data([3]), data([2, 0]), data([0]), data(list(range(1, 18))), data([3, 2]),
-                       b'\x06', b'\x06\x01\0' + b'\0' * 8 + b'\xff\xff']:
+        for packet in [b'\x03', b'\0', b'\0\0', b'\0\xf0' + b'\0' * 15,
+                       data([2], cursor=1), data([3]), data([2, 0]), data([0]), data([3, 2]),
+                       b'\x01', b'\x01\x01\0' + b'\0' * 8 + b'\xff\xff']:
             inner(packet)
         send('short-transport')
         send('short-tag')
         # Each incoming UDP channel checks the transport type and sender.
-        send('raw', hex=(b'\xff' + b'\x01\0' + b'\0' * 40).hex())
-        send('raw', hex=(b'\x03' + b'\x03\0' + b'\0' * 40).hex())
+        send('raw', hex=(b'\x03' + b'\0' * 7 + b'\x01' + b'\0' * 40).hex())
+        send('raw', hex=(b'\0' * 8 + b'\x03' + b'\0' * 40).hex())
         ident = time.time_ns() + 1_000_000_000
         mesh_a = lib.endpoint(lib.intip(1), 0)
         a_listener = lib.endpoint('10.1.0.1')
@@ -103,7 +103,7 @@ def test():
         probe.stdin.close()
         assert probe.wait(timeout=10) == 0
         lab.wait_links('b', ['c'])
-        attempt = lab.intercept('b', 'a', 'copy', kind=4)
+        attempt = lab.intercept('b', 'a', 'copy', kind=1)
         lab.wait(lambda: attempt['hits'] == 1, 'gossip after local link timeout')
 
 

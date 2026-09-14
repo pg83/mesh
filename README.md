@@ -79,7 +79,7 @@ version. There are no deletions, expiry, whole-registry replacement or fragments
 Records too large for one packet are rejected at startup.
 
 Registry messages use the existing authenticated peer sessions, with their own
-outer packet type `5` and inner type `4`. They can traverse the mesh by repeated
+outer packet kind `2`. They can traverse the mesh by repeated
 exchange between neighbors. Trusted peers can introduce other peers; there is
 no separate origin signature. Registry changes publish immutable actor snapshots,
 and a public-key change replaces the affected sessions. The running node's own
@@ -209,12 +209,15 @@ and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
 |---|---|
-| data transport | `3`, sender index (2), packet ID (8), ChaCha20-Poly1305 ciphertext and tag (16) |
-| graph transport | `4`, the same remaining header and encryption |
-| registry transport | `5`, the same remaining header and encryption |
+| data transport | header word (8), sender index (1), ChaCha20-Poly1305 ciphertext and tag (16) |
+| graph transport | the same header and encryption |
+| registry transport | the same header and encryption |
 
-The header is authenticated as associated data. The nonce is not sent: it is
-the packet ID padded with zeros. Packet IDs come from one counter per node
+The header word is little-endian: the packet kind in its two low bits (data
+`0`, graph `1`, registry `2`, `3` is invalid) and the packet ID above them.
+Registry indexes are limited to 1..255, so the sender fits one byte. The
+header is authenticated as associated data. The nonce is not sent: it is the
+header word padded with zeros. Packet IDs come from one counter per node
 shared by all its channels, started from the clock at process start, so no
 ID repeats for a sender as long as clocks do not run backwards across
 restarts. The encrypted plaintext is
@@ -223,11 +226,12 @@ its complete source address, including the real port. A relay wraps the inner
 message with its outgoing channel source; it preserves the route and payload
 and advances the route cursor.
 
-Inner data starts with `1`, hop count (1), cursor (1), then the route as a
-list of registry indexes (1 byte each), the nodes the packet must visit in
-order, ending with the destination. The opaque payload follows. Routes allow
-at most 16 hops and only nodes with an index below 256. Zero-length and
-malformed routes are rejected. A relay accepts a packet only when the node
+Inner data starts with one byte holding the hop count minus one in its high
+nibble and the cursor in its low nibble, then the route as a list of
+registry indexes (1 byte each), the nodes the packet must visit in order,
+ending with the destination. The opaque payload follows. Routes allow at
+most 16 hops. Truncated routes, a cursor past the route and zero indexes are
+rejected. A relay accepts a packet only when the node
 at the cursor is itself and the previous node is the channel's peer, advances
 the cursor, and sends through its own channel to the next node: the first
 outgoing socket in canonical order that has a graph edge to a listener of
@@ -242,7 +246,7 @@ client socket vertices, each with its attachment directions, and the links it
 observes into them. One record travels in one packet; every outgoing channel
 sends every known record once per second.
 
-Inner graph records start with `6`, owner registry index (2), version (8),
+Inner graph records start with the owner registry index (2), version (8),
 vertex count (2), the vertices, link count (2), and the links. Each vertex is
 one flags byte (bit 0: `vertex -> meshIP`, bit 1: `meshIP -> vertex`, zero is
 invalid) followed by its description. Each link is 10 bytes: the source vertex

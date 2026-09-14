@@ -12,7 +12,7 @@ def string(value):
 
 
 def encode(records):
-    data = bytearray(struct.pack('<BH', 4, len(records)))
+    data = bytearray(struct.pack('<BH', 2, len(records)))
     for p in records:
         data += struct.pack('<HQ', p['index'], p['version']) + lib.ipbytes(p['intip'])
         data += string(p['pub']) + string(p.get('name', ''))
@@ -41,14 +41,14 @@ def test():
                         dict(proto='wss', addr='edge.invalid', port=443, path='/mesh')])
         peer['endpoint'] = [{k: v for k, v in ep.items() if k != 'endpoint'} for ep in peer['endpoint']]
         packet = encode([peer])
-        for end in range(len(packet)):
+        for end in range(1, len(packet)):
             send(packet[:end])
         send(packet + b'\0')
         bad = bytearray(packet)
         bad[3 + 14 + 2 + len(peer['pub']) + 2 + len(peer['name']) + 2] = 0
         send(bad)
-        send(b'\4\xff\xff')
-        send(b'\4' + b'\0' * 1200)
+        send(b'\2\xff\xff')
+        send(b'\2' + b'\0' * 1200)
         for change in (dict(index=0), dict(version=0), dict(pub='bad'),
                        dict(pub='A' * 43 + '='), dict(endpoint=[lib.endpoint('::', 0)]),
                        dict(endpoint=[dict(proto='ws', addr='edge.invalid', port=80, path='bad')])):
@@ -74,7 +74,7 @@ def test():
 
         # Populate beyond one packet. Every relay send is bounded, while random
         # independent batches eventually cover the whole local database.
-        oversized = lab.intercept('b', 'c', 'observe', kind=5, min_size=1201, count=-1)
+        oversized = lab.intercept('b', 'c', 'observe', kind=2, min_size=1201, count=-1)
         for index in range(50, 66):
             send(encode([peer | dict(index=index, intip=lib.intip(index),
                                     name='entry-' + str(index) + '-' * 120, endpoint=[])]))

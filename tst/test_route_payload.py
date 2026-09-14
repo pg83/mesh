@@ -9,7 +9,7 @@ import workload
 
 
 def encode(hops, payload, cursor=0):
-    return bytes([1, len(hops), cursor, *hops]) + payload
+    return bytes([(len(hops) - 1) << 4 | cursor, *hops]) + payload
 
 
 def checksum(data):
@@ -42,15 +42,15 @@ def test():
         pseudo = src+dst+struct.pack('!I3xB', len(udp), 17)
         struct.pack_into('!H', udp, 6, checksum(pseudo+udp))
         packet = struct.pack('!IHBB', 6 << 28, len(udp), 17, 64)+src+dst+udp
-        origin.send(op='inner', hex=encode(hops, packet).hex())
+        origin.send(op='inner', hex=(b'\0' + encode(hops, packet)).hex())
         lab.wait(lambda: body.hex() in log.read_text(), 'IPv6 traversed relay and reached TUN by full route')
 
         # Authenticate/decode as the destination without interpreting its payload.
         receiver = workload.Probe(lab, 'b', 'r', seg=2)
-        copied = lab.intercept('r', 'b', 'copy', target_port=7000, kind=3, count=-1)
+        copied = lab.intercept('r', 'b', 'copy', target_port=7000, kind=0, count=-1)
         offset = 0
         for payload in [b'\0opaque\xff', b'\x60not-an-IP-header', b'', bytes(range(256))*4]:
-            origin.send(op='inner', hex=encode(hops, payload).hex())
+            origin.send(op='inner', hex=(b'\0' + encode(hops, payload)).hex())
             def arrived():
                 nonlocal offset
                 packets = list(copied['held'])
@@ -62,7 +62,7 @@ def test():
                     report = receiver.read()
                     assert report['opened']
                     data = bytes.fromhex(report['hex'])
-                    if data[:1] == b'\1':
+                    if report['kind'] == 0:
                         assert data == encode(hops, payload, cursor=1), 'route or opaque payload changed in transit'
                         return True
                 return False

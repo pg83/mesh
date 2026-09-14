@@ -21,7 +21,7 @@ def test():
             route = lab.endpoint_route('a', 'b')
             return route and route[0]['from']['addr'] == '10.1.0.101'
         lab.wait(alternative, 'route uses the working source endpoint', timeout=10)
-        transmitted = lab.intercept('a', 'b', 'copy', kind=3, source_ip='10.1.0.101', count=-1)
+        transmitted = lab.intercept('a', 'b', 'copy', kind=0, source_ip='10.1.0.101', count=-1)
         stream.progress()
         stream.progress()
         assert transmitted['hits'] > 0

@@ -13,8 +13,8 @@ def test():
         lab.wait_ping('b', 'd')
         workload.udp_server(lab, 'd')
         udp = workload.UdpClient(lab, 'b', 'd')
-        duplicated = lab.intercept('a', 'c', 'duplicate', kind=4, every=2, count=-1)
-        delayed = lab.intercept('c', 'e', 'delay', kind=4, delay=.1, count=-1)
+        duplicated = lab.intercept('a', 'c', 'duplicate', kind=1, every=2, count=-1)
+        delayed = lab.intercept('c', 'e', 'delay', kind=1, delay=.1, count=-1)
         def sent():
             return sum(v for key, v in lab.counts.items() if key[-1] == 'sent')
         before, started = sent(), time.monotonic()

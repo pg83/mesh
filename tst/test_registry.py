@@ -8,7 +8,7 @@ class SparseLab(lib.Lab):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if 'leaf' in self.nodes:
-            self.registry_block = self.intercept('relay', 'leaf', 'drop', kind=5, count=-1)
+            self.registry_block = self.intercept('relay', 'leaf', 'drop', kind=2, count=-1)
 
     def write_config(self, node):
         path = super().write_config(node)

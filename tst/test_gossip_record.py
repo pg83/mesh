@@ -49,15 +49,15 @@ def test():
                 packet = packets[cursor][1]
                 cursor += 1
                 raw = packet[(packet[0] & 15) * 4 + 8:]
-                if raw[0] != 4:
+                if raw[0] & 3 != 1:
                     continue
                 probe.proc.stdin.write(json.dumps(dict(op='open', hex=raw.hex())).encode() + b'\n')
                 report = probe.read()
                 assert report['opened']
                 inner = bytes.fromhex(report['hex'])
                 assert len(inner) <= 1000
-                assert inner[0] == 6
-                owner, version = struct.unpack_from('<HQ', inner, 1)
+                assert report['kind'] == 1
+                owner, version = struct.unpack_from('<HQ', inner)
                 seen.append((owner, version))
             return all(sum(1 for owner, _ in seen if owner == index) >= 3 for index in (1, 2, 3))
 

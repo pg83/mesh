@@ -1,13 +1,11 @@
 package main
 
-import "encoding/binary"
-
 func (n *Node) readPacket(packet []byte, view *Snapshot) (*Session, Vertex, []byte, bool) {
-	if len(packet) < headerTransport || !validPacketType(packet[0]) {
+	if len(packet) < headerTransport || !validPacketType(packetKind(packet)) {
 		return nil, Vertex{}, nil, false
 	}
 
-	peer := binary.LittleEndian.Uint16(packet[1:])
+	peer := packetSender(packet)
 
 	if peer == n.cfg.Index || view.registry.byIndex[peer] == nil {
 		return nil, Vertex{}, nil, false

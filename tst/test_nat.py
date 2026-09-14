@@ -15,7 +15,7 @@ def test():
         for name in ['a', 'b']:
             workload.udp_server(lab, name)
         clients = [workload.UdpClient(lab, 'a', 'b'), workload.UdpClient(lab, 'b', 'a')]
-        captured = lab.intercept('a', 'b', 'copy', kind=3, count=-1)
+        captured = lab.intercept('a', 'b', 'copy', kind=0, count=-1)
         for i, client in enumerate(clients):
             payload = bytes([i + 1]) * 1100
             client.send(payload)

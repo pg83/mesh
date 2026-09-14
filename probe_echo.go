@@ -25,9 +25,9 @@ func echoProbe(path, destination string, index uint16) {
 	next := time.Time{}
 	id := uint64(time.Now().UnixNano())
 
-	send := func(target *net.UDPAddr, inner []byte) {
+	send := func(target *net.UDPAddr, kind byte, inner []byte) {
 		id++
-		throw2(conn.WriteToUDP(session.seal(source, inner, id), target))
+		throw2(conn.WriteToUDP(session.seal(source, kind, inner, id), target))
 	}
 
 	for {
@@ -43,7 +43,7 @@ func echoProbe(path, destination string, index uint16) {
 			packet := encodeRecord(cfg.Index, id, encodeRecordBody(record))
 
 			for _, target := range destinations {
-				send(target, packet)
+				send(target, kindGraph, packet)
 			}
 
 			next = time.Now().Add(200 * time.Millisecond)
@@ -71,7 +71,7 @@ func echoProbe(path, destination string, index uint16) {
 
 		_, known := clients[socketAddress(remote.IP, remote.Port)]
 
-		if inner[0] != innerData || !known {
+		if packetKind(buf) != kindData || !known {
 			continue
 		}
 
@@ -97,7 +97,7 @@ func echoProbe(path, destination string, index uint16) {
 
 		destination = &net.UDPAddr{IP: remote.IP, Port: targetPort}
 
-		send(destination, encodeData(&Data{hops: []uint16{peer.index}, payload: packet}))
+		send(destination, kindData, encodeData(&Data{hops: []uint16{peer.index}, payload: packet}))
 	}
 }
 

@@ -27,8 +27,8 @@ def test():
         lab.wait_route('n0', 'n17', None)
         lab.wait_ping('n0', 'n16', timeout=60)
         workload.udp_server(lab, 'n16')
-        observers = [lab.intercept(names[i], names[i + 1], 'observe', kind=3, count=-1) for i in range(16)]
-        replies = [lab.intercept(names[i + 1], names[i], 'observe', kind=3, count=-1) for i in range(16)]
+        observers = [lab.intercept(names[i], names[i + 1], 'observe', kind=0, count=-1) for i in range(16)]
+        replies = [lab.intercept(names[i + 1], names[i], 'observe', kind=0, count=-1) for i in range(16)]
         udp = workload.UdpClient(lab, 'n0', 'n16')
         for size in (1, 1200, 1352):
             payload = b'x' * size

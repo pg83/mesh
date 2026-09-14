@@ -12,7 +12,7 @@ def test():
         lab.wait_links('c', ['a', 'b'])
         lab.stop_node('c')
         lab.keygen(lab.nodes['c'])
-        attempt = lab.intercept('c', 'b', 'copy', kind=4)
+        attempt = lab.intercept('c', 'b', 'copy', kind=1)
         lab.start_node('c')
         lab.wait(lambda: attempt['hits'] == 1, 'unknown key packet actually sent')
         lab.wait_links('b', ['a'], timeout=30)

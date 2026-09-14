@@ -8,7 +8,7 @@ def test():
         lab.wait_ping('a', 'b')
         log = workload.udp_server(lab, 'b')
         udp = workload.UdpClient(lab, 'a', 'b')
-        held = lab.intercept('a', 'b', 'hold', kind=3, min_size=900)
+        held = lab.intercept('a', 'b', 'hold', kind=0, min_size=900)
         payload = b'valid-after-forged-counter'.ljust(900, b'.')
         udp.send(payload)
         lab.wait(lambda: held['hits'] == 1, 'valid packet captured before delivery')

@@ -9,7 +9,7 @@ func (a *Channel) exchangeRegistry(now time.Time) {
 		return
 	}
 
-	a.send(a.view.registry.packet())
+	a.send(kindRegistry, a.view.registry.packet())
 	a.nextRegistry = now.Add(registryInterval)
 }
 

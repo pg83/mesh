@@ -21,7 +21,7 @@ def encode_vertex(ep):
 
 
 def encode_record(owner, version, vertices, links):
-    packet = bytearray(struct.pack('<BHQH', 6, owner, version, len(vertices)))
+    packet = bytearray(struct.pack('<BHQH', 1, owner, version, len(vertices)))
     offsets = []
     for flags, ep in vertices:
         offsets.append(len(packet))
@@ -58,7 +58,7 @@ def test():
         def version():
             return next((r['version'] for r in lab.status('b')['records'] if r['owner'] == 1), None)
 
-        for end in range(len(packet)):
+        for end in range(1, len(packet)):
             send(packet[:end])
         send(packet + b'\0')
         send(packet[:11] + b'\xff\xff' + packet[13:])
@@ -73,13 +73,13 @@ def test():
             bad[offset:offset + len(value)] = value
             send(bad)
         # A WS address consumes the remaining bytes, leaving no path length.
-        send(struct.pack('<BHQHBBHH', 6, 1, ident + 1, 1, 1, 2, 80, 4) + b'host')
+        send(struct.pack('<BHQHBBHH', 1, 1, ident + 1, 1, 1, 2, 80, 4) + b'host')
         # The first vertex consumes the bytes reserved for a second one.
-        send(struct.pack('<BHQHBBHH', 6, 1, ident + 1, 2, 1, 2, 80, 8) + b'hostname' + b'\0\0')
+        send(struct.pack('<BHQHBBHH', 1, 1, ident + 1, 2, 1, 2, 80, 8) + b'hostname' + b'\0\0')
         # IPv6 TCP socket addresses are independent vertices, including their port.
         source = struct.pack('<BBH', 2, 6, 49152) + socket.inet_pton(socket.AF_INET6, '::ffff:192.0.2.40')
         for end in range(len(source)):
-            send(struct.pack('<BHQH', 6, 1, ident + 1, 1) + source[:end])
+            send(struct.pack('<BHQH', 1, 1, ident + 1, 1) + source[:end])
 
         marker = lib.endpoint('192.0.2.20', 8000)
         probe.send(op='graph', body=lib.record(1, ident, [(marker, True, False)]))

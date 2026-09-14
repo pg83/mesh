@@ -15,7 +15,7 @@ def test():
         lab.wait(present, 'incoming B to R edge reaches A')
         log = workload.udp_server(lab, 'a')
         udp = workload.UdpClient(lab, 'r', 'a')
-        held = lab.intercept('r', 'a', 'hold', kind=4, count=-1)
+        held = lab.intercept('r', 'a', 'hold', kind=1, count=-1)
         lab.block('r', 'b')
         deadline = time.monotonic() + 7
         sent = []

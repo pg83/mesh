@@ -12,7 +12,7 @@ def test():
         lab.stop_node('a')
         b, c = [dict(proto='ws', addr=f'10.1.0.{i}', port=7100, path='/mesh', endpoint=True) for i in (2, 3)]
         cases = [dict(op='raw', hex='00'), dict(op='raw', hex='03' + '00' * 50),
-                 dict(op='raw', hex='030100' + '00' * 32), dict(op='inner', hex=''),
+                 dict(op='raw', hex='00' * 8 + '01' + '00' * 32), dict(op='inner', hex='00'),
                  dict(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.endpoint('10.1.0.1')),
                  dict(op='graph', body=lib.record(1, time.time_ns(), []), source=c),
                  dict(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.socket_vertex('0.0.0.0', 1234, 'tcp')),
@@ -34,8 +34,8 @@ def test():
         assert not probe.send(op='graph', body=lib.record(1, time.time_ns(), []), read=True)['closed']
         a = probe.source
         # Frames on an established channel are checked like the first one.
-        header = '03' + '0100' + '00' * 8
-        for frame in ['00', 'ff' + header[2:] + '00' * 16, '03' + '0300' + header[6:] + '00' * 16, header + 'ff' * 32]:
+        header = '00' * 8 + '01'
+        for frame in ['00', '03' + header[2:] + '00' * 16, header[:16] + '03' + '00' * 16, header + 'ff' * 32]:
             probe.send(op='raw', hex=frame)
         probe.send(op='graph', body=lib.record(1, time.time_ns(), []), source=lib.socket_vertex('10.1.0.1', 1234, 'tcp'))
         assert not probe.send(op='read', read=True)['closed'], 'rejected frames closed the channel'

@@ -15,7 +15,7 @@ def test():
     with ManyEndpoints(['a', 'b'], {1: ['a', 'b']}, statics=['b']) as lab:
         lab.wait_ping('a', 'b', timeout=4)
         stream = workload.SshServer(lab, 'b').stream('a')
-        probes = lab.intercept('b', 'a', 'observe', kind=4, count=-1)
+        probes = lab.intercept('b', 'a', 'observe', kind=1, count=-1)
         # The working endpoint continues receiving periodic graph updates.
         for _ in range(4):
             time.sleep(1)

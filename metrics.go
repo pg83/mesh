@@ -13,15 +13,8 @@ import (
 )
 
 var (
-	packetKinds   = [...]string{"data", "graph", "registry", "other"}
+	packetKinds   = [...]string{"data", "graph", "registry"}
 	rejectReasons = [...]string{"short", "header", "auth", "source", "replay"}
-)
-
-const (
-	kindData = iota
-	kindGraph
-	kindRegistry
-	kindOther
 )
 
 const (
@@ -40,19 +33,6 @@ type Metrics struct {
 	forwardNoChannel                             atomic.Uint64
 	tunRead, tunUnrouted, tunDelivered           atomic.Uint64
 	linkUp, linkDown, dialFailed                 atomic.Uint64
-}
-
-func packetKind(inner []byte) int {
-	switch inner[0] {
-	case innerData:
-		return kindData
-	case innerGraph:
-		return kindGraph
-	case innerRegistry:
-		return kindRegistry
-	}
-
-	return kindOther
 }
 
 type MetricsWriter struct {

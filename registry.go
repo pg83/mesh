@@ -49,8 +49,8 @@ func decodeKey(s string) []byte {
 }
 
 func newPeer(pc PeerConfig, version uint64) *Peer {
-	if pc.Index == 0 {
-		throwFmt("index 0 is reserved")
+	if pc.Index == 0 || pc.Index > 255 {
+		throwFmt("index %d is outside 1..255", pc.Index)
 	}
 
 	if version == 0 {

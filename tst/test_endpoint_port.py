@@ -12,7 +12,7 @@ def test():
         lab.configs['b'] = dict(endpoint=[dict(proto="udp", addr="0.0.0.0", port=7001)])
         lab.start_node('b')
         lab.wait(lambda: lab.selected_endpoint('a', 'b') == '10.1.0.2:7001', 'new destination port')
-        sent = lab.intercept('a', 'b', 'copy', kind=3, count=-1, target_port=7001)
+        sent = lab.intercept('a', 'b', 'copy', kind=0, count=-1, target_port=7001)
         stream.progress()
         stream.progress()
         assert sent['held']

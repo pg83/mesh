@@ -153,12 +153,14 @@ func main() {
 		case "raw":
 			out = throw2(hex.DecodeString(command.Hex))
 		case "inner":
-			out = session.seal(from, throw2(hex.DecodeString(command.Hex)), packetID)
+			raw := throw2(hex.DecodeString(command.Hex))
+
+			out = session.seal(from, raw[0], raw[1:], packetID)
 		case "short-transport":
-			out = binary.LittleEndian.AppendUint16([]byte{packetTransport}, cfg.Index)
-			out = binary.LittleEndian.AppendUint64(out, packetID)
+			out = binary.LittleEndian.AppendUint64(nil, headerWord(kindData, packetID))
+			out = append(out, byte(cfg.Index))
 		case "short-tag":
-			out = session.seal(from, nil, packetID)
+			out = session.seal(from, kindData, nil, packetID)
 			out = out[:len(out)-1]
 		case "graph":
 			var record GraphRecord
@@ -169,11 +171,11 @@ func main() {
 				record.Vertices[i].Vertex = record.Vertices[i].canonical()
 			}
 
-			out = session.seal(from, encodeRecord(record.Owner, record.Version, encodeRecordBody(&record)), packetID)
+			out = session.seal(from, kindGraph, encodeRecord(record.Owner, record.Version, encodeRecordBody(&record)), packetID)
 		case "open":
 			origin, inner, ok := session.open(throw2(hex.DecodeString(command.Hex)))
 
-			throw(encoder.Encode(map[string]any{"opened": ok, "hex": hex.EncodeToString(inner), "source": origin}))
+			throw(encoder.Encode(map[string]any{"opened": ok, "hex": hex.EncodeToString(inner), "source": origin, "kind": packetKind(throw2(hex.DecodeString(command.Hex)))}))
 
 			continue
 		default:

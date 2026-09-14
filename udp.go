@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"net"
 	"time"
@@ -73,7 +72,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 		}
 
 		remote := addr.(*net.UDPAddr)
-		key := UDPInputKey{remote: socketAddress(remote.IP, remote.Port), local: socketAddress(dst, int(socket.port)), peer: binary.LittleEndian.Uint16(buf[1:])}
+		key := UDPInputKey{remote: socketAddress(remote.IP, remote.Port), local: socketAddress(dst, int(socket.port)), peer: packetSender(buf)}
 		input, known := inputs[key]
 		now := time.Now()
 
@@ -102,7 +101,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 				continue
 			}
 
-			c := newChannelIO(session, source, view.addresses[id], false, source.hash(), binary.LittleEndian.Uint64(buf[3:]))
+			c := newChannelIO(session, source, view.addresses[id], false, source.hash(), packetID(buf))
 
 			c.local = view.local[id]
 

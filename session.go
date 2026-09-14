@@ -41,29 +41,20 @@ func newSession(local, peer *Peer, private []byte) *Session {
 	}
 }
 
-func nonce(id uint64) []byte {
-	return binary.LittleEndian.AppendUint64(make([]byte, 0, chacha20poly1305.NonceSize), id)[:chacha20poly1305.NonceSize]
+func nonce(packet []byte) []byte {
+	return append(make([]byte, 0, chacha20poly1305.NonceSize), packet[:8]...)[:chacha20poly1305.NonceSize]
 }
 
-func (s *Session) seal(source Vertex, inner []byte, id uint64) []byte {
-	out := make([]byte, headerTransport, headerTransport+len(inner)+s.send.Overhead())
+func (s *Session) seal(source Vertex, kind byte, inner []byte, id uint64) []byte {
+	out := make([]byte, headerTransport, headerTransport+7+len(inner)+s.send.Overhead())
 
-	out[0] = packetTransport
+	binary.LittleEndian.PutUint64(out, headerWord(kind, id))
 
-	if len(inner) > 0 && inner[0] == innerGraph {
-		out[0] = packetGraph
-	}
-
-	if len(inner) > 0 && inner[0] == innerRegistry {
-		out[0] = packetRegistry
-	}
-
-	binary.LittleEndian.PutUint16(out[1:], s.local)
-	binary.LittleEndian.PutUint64(out[3:], id)
+	out[8] = byte(s.local)
 
 	body := append(appendVertex(nil, source), inner...)
 
-	return s.send.Seal(out, nonce(id), body, out[:headerTransport])
+	return s.send.Seal(out, nonce(out), body, out[:headerTransport])
 }
 
 func (s *Session) open(packet []byte) (Vertex, []byte, bool) {
@@ -71,7 +62,7 @@ func (s *Session) open(packet []byte) (Vertex, []byte, bool) {
 		return Vertex{}, nil, false
 	}
 
-	inner, err := s.recv.Open(nil, nonce(binary.LittleEndian.Uint64(packet[3:])), packet[headerTransport:], packet[:headerTransport])
+	inner, err := s.recv.Open(nil, nonce(packet), packet[headerTransport:], packet[:headerTransport])
 
 	if err != nil {
 		return Vertex{}, nil, false

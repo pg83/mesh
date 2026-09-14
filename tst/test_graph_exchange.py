@@ -20,10 +20,10 @@ def test():
         def version(name):
             return next((r['version'] for r in lab.status(name)['records'] if r['owner'] == 2), None)
 
-        captured = lab.intercept('r', 'a', 'hold', kind=4)
+        captured = lab.intercept('r', 'a', 'hold', kind=1)
         probe.send(op='graph', body=lib.record(2, ident, [(x, True, False)]))
         lab.wait(lambda: len(captured['held']) == 1, 'unsigned gossip captured')
-        assert len(captured['held'][0][1]) == 20 + 8 + 11 + 16 + 7 + 11 + 2 + 8 + 2
+        assert len(captured['held'][0][1]) == 20 + 8 + 9 + 16 + 7 + 10 + 2 + 8 + 2
         lab.clear(captured)
         lab.replay(captured, transform=lambda packet: packet[:-1] + bytes([packet[-1] ^ 1]))
         probe.send(op='graph', body=lib.record(2, ident + 1, [(x, True, False), (y, False, True)]))
@@ -52,8 +52,8 @@ def test():
 
         burst = [lib.record(2, ident + 10 + i, [(x, True, False), (lib.socket_vertex('10.1.0.2', 41000 + i), False, True)])
                  for i in range(24)]
-        relays = lab.intercept('a', 'c', 'copy', kind=4, count=-1)
-        held = lab.intercept('r', 'a', 'hold', kind=4, count=-1)
+        relays = lab.intercept('a', 'c', 'copy', kind=1, count=-1)
+        held = lab.intercept('r', 'a', 'hold', kind=1, count=-1)
         for update in burst:
             probe.send(op='graph', body=update)
         probe.send(op='graph', body=lib.record(2, ident + 100, [(x, True, False)]))

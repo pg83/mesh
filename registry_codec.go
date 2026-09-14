@@ -49,7 +49,7 @@ func (r *Registry) packet() []byte {
 		peers = append(peers, peer)
 	}
 
-	out := []byte{innerRegistry, 0, 0}
+	out := []byte{0, 0}
 	count := uint16(0)
 
 	for _, i := range rand.Perm(len(peers)) {
@@ -61,7 +61,7 @@ func (r *Registry) packet() []byte {
 		}
 	}
 
-	binary.LittleEndian.PutUint16(out[1:], count)
+	binary.LittleEndian.PutUint16(out, count)
 
 	return out
 }
@@ -95,9 +95,6 @@ func decodeRegistry(inner []byte) (RegistryRecords, bool) {
 		}
 
 		r := &RegistryReader{data: inner}
-
-		r.take(1)
-
 		count := int(r.number())
 
 		for i := 0; i < count; i++ {

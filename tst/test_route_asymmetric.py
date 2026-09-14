@@ -16,7 +16,7 @@ def test():
         stream = workload.SshServer(lab, 'b').stream('a')
         stream.progress()
         path = [('a', 'r1'), ('r1', 'r2'), ('r2', 'b'), ('b', 'r4'), ('r4', 'r3'), ('r3', 'a')]
-        data = [lab.intercept(src, dst, 'observe', kind=3, min_size=900, count=-1) for src, dst in path]
+        data = [lab.intercept(src, dst, 'observe', kind=0, min_size=900, count=-1) for src, dst in path]
         workload.udp_server(lab, 'b')
         udp = workload.UdpClient(lab, 'a', 'b')
         for index in range(20):

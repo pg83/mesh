@@ -378,7 +378,7 @@ class Lab:
                                     or rule['seg'] not in (None, seg)
                                     or len(payload) < rule['min_size']
                                     or (rule['max_size'] is not None and len(payload) > rule['max_size'])
-                                    or (rule['kind'] is not None and payload[:1] != bytes([rule['kind']]))):
+                                    or (rule['kind'] is not None and (not payload or payload[0] & 3 != rule['kind']))):
                                 continue
                             rule['seen'] += 1
                             if rule['seen'] % rule['every']:

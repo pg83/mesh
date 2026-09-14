@@ -13,7 +13,7 @@ def test():
         # without decrypting mesh packets in the switch.
         def payload(label):
             return label.encode().ljust(900, b'.')
-        held = lab.intercept('a', 'b', 'hold', kind=3, min_size=900)
+        held = lab.intercept('a', 'b', 'hold', kind=0, min_size=900)
         older, newer = payload('older'), payload('newer')
         client.send(older)
         lab.wait(lambda: held['hits'] == 1, 'held data packet')
@@ -22,7 +22,7 @@ def test():
         lab.release(held)
         assert client.recv() == older
 
-        delayed = lab.intercept('a', 'b', 'hold', kind=3, min_size=900)
+        delayed = lab.intercept('a', 'b', 'hold', kind=0, min_size=900)
         old = payload('delayed-across-busy-channel')
         client.send(old)
         lab.wait(lambda: delayed['hits'] == 1, 'old data packet')
@@ -34,7 +34,7 @@ def test():
         assert client.recv() == old
         assert old.hex() in log.read_text().splitlines()
 
-        corrupted = lab.intercept('a', 'b', 'corrupt', kind=3, min_size=900)
+        corrupted = lab.intercept('a', 'b', 'corrupt', kind=0, min_size=900)
         bad = payload('corrupted')
         client.send(bad)
         assert client.recv(.3) is None

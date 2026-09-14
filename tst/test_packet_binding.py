@@ -12,7 +12,7 @@ def test():
         lab.wait_links('c', [])
         log = workload.udp_server(lab, 'b')
         udp = workload.UdpClient(lab, 'a', 'b')
-        saved = lab.intercept('a', 'b', 'copy', kind=3, min_size=900)
+        saved = lab.intercept('a', 'b', 'copy', kind=0, min_size=900)
         payload = b'bound-to-a-and-b'.ljust(900, b'.')
         udp.send(payload)
         assert udp.recv() == payload

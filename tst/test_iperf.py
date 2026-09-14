@@ -40,8 +40,8 @@ def test():
             assert end['sum']['lost_percent'] < 10
         # iperf 3.16 sends its four-byte UDP setup request only once. Exercise
         # data loss without randomly losing setup before measurement starts.
-        drop = lab.intercept('a', 'r', 'drop', count=-1, kind=3, every=20, min_size=1000)
-        delay = lab.intercept('r', 'a', 'delay', count=-1, kind=3, delay=.01)
+        drop = lab.intercept('a', 'r', 'drop', count=-1, kind=0, every=20, min_size=1000)
+        delay = lab.intercept('r', 'a', 'delay', count=-1, kind=0, delay=.01)
         assert run('-P', '2')['sum_received']['bytes'] > 0
         end = run('-u', '-b', '1M', '-l', '1200')
         assert 0 < end['sum']['lost_percent'] < 20, end

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"time"
 )
 
@@ -92,7 +91,7 @@ func (a *Channel) run() {
 			case Received:
 				a.receive(v)
 			case Outbound:
-				a.send(v.inner)
+				a.send(kindData, v.inner)
 			}
 		case <-a.io.ctx.Done():
 			return
@@ -111,7 +110,7 @@ func (a *Channel) run() {
 func (a *Channel) gossip() {
 	if a.outgoing && a.view != nil && a.enabled() {
 		for _, inner := range a.view.gossip {
-			a.send(inner)
+			a.send(kindGraph, inner)
 		}
 	}
 }
@@ -130,7 +129,7 @@ func (a *Channel) enabled() bool {
 	return a.view != nil && a.view.local[a.edge.From] != nil && a.io.ctx.Err() == nil
 }
 
-func (a *Channel) send(inner []byte) {
+func (a *Channel) send(kind byte, inner []byte) {
 	if a.view == nil || !a.outgoing || !a.enabled() {
 		return
 	}
@@ -143,9 +142,9 @@ func (a *Channel) send(inner []byte) {
 
 	a.started = true
 
-	packet := a.session.seal(a.io.source, inner, id)
+	packet := a.session.seal(a.io.source, kind, inner, id)
 
-	a.node.metrics.sent[packetKind(inner)].Add(1)
+	a.node.metrics.sent[kind].Add(1)
 	a.node.metrics.sentBytes.Add(uint64(len(packet)))
 
 	select {
@@ -165,7 +164,7 @@ func (a *Channel) receive(r Received) {
 		return
 	}
 
-	if binary.LittleEndian.Uint16(r.packet[1:]) != a.peer || !validPacketType(r.packet[0]) {
+	if packetSender(r.packet) != a.peer || !validPacketType(packetKind(r.packet)) {
 		a.node.metrics.rejected[rejectHeader].Add(1)
 
 		return
@@ -190,13 +189,15 @@ func (a *Channel) receive(r Received) {
 		return
 	}
 
-	if !a.replay.accept(binary.LittleEndian.Uint64(r.packet[3:])) {
+	if !a.replay.accept(packetID(r.packet)) {
 		a.node.metrics.rejected[rejectReplay].Add(1)
 
 		return
 	}
 
-	a.node.metrics.received[packetKind(inner)].Add(1)
+	kind := packetKind(r.packet)
+
+	a.node.metrics.received[kind].Add(1)
 	a.node.metrics.receivedBytes.Add(uint64(len(r.packet)))
 
 	first := a.seen.IsZero() || r.at.Sub(a.seen) >= sessionTimeout
@@ -209,12 +210,12 @@ func (a *Channel) receive(r Received) {
 		a.report()
 	}
 
-	switch inner[0] {
-	case innerGraph:
+	switch kind {
+	case kindGraph:
 		a.graph(inner)
-	case innerData:
+	case kindData:
 		a.forward(inner)
-	case innerRegistry:
+	case kindRegistry:
 		if records, ok := decodeRegistry(inner); ok {
 			post(a.node.events.in, any(records))
 		}
