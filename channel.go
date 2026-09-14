@@ -50,8 +50,8 @@ type Channel struct {
 	inbox        *Mailbox[any]
 	view         *Snapshot
 	session      *Session
-	packetID     uint64
 	replay       Replay
+	started      bool
 	seen         time.Time
 	nextRegistry time.Time
 	io           *ChannelIO
@@ -135,9 +135,15 @@ func (a *Channel) send(inner []byte) {
 		return
 	}
 
-	a.packetID++
+	id := a.node.transportID.Add(1)
 
-	packet := a.session.seal(a.io.source, inner, a.packetID)
+	if a.io.dialed && !a.started {
+		id = a.io.id
+	}
+
+	a.started = true
+
+	packet := a.session.seal(a.io.source, inner, id)
 
 	a.node.metrics.sent[packetKind(inner)].Add(1)
 	a.node.metrics.sentBytes.Add(uint64(len(packet)))

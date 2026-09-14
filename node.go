@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -55,6 +56,7 @@ type Node struct {
 	dials         map[DialKey]*DialAttempt
 	interfaces    InterfaceState
 	packetID      uint64
+	transportID   atomic.Uint64
 	graph         map[Edge]bool
 	records       map[uint16]*GraphRecord
 	observed      map[Edge]time.Time
@@ -92,6 +94,8 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	for _, pair := range cfg.NoDial {
 		n.noDial[pair] = true
 	}
+
+	n.transportID.Store(uint64(time.Now().UnixNano()))
 
 	if string(n.key.public) != string(me.pub) {
 		throwFmt("private key does not match registry entry %d", cfg.Index)

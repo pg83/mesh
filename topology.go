@@ -49,7 +49,7 @@ func (n *Node) installChannel(c *ChannelIO) {
 		n.local[local.hash()] = c.local
 	}
 
-	actor := &Channel{node: n, edge: c.edge, peer: c.peer, outgoing: c.outgoing, inbox: newMailbox[any](c.ctx.Done()), session: c.session, packetID: c.id - 1, io: c}
+	actor := &Channel{node: n, edge: c.edge, peer: c.peer, outgoing: c.outgoing, inbox: newMailbox[any](c.ctx.Done()), session: c.session, io: c}
 
 	n.channels[c.edge] = actor
 	n.channelStatus[c.edge] = ChannelStatus{Transport: c.transport(), Edge: c.edge, Outgoing: c.outgoing, ID: c.id}

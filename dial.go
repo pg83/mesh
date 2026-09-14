@@ -99,10 +99,16 @@ func (n *Node) syncDials() {
 func (n *Node) dialChannel(attempt *DialAttempt) {
 	result := DialResult{attempt: attempt}
 
-	defer func() { post(n.events.in, any(result)) }()
+	defer func() {
+		for _, c := range result.channels {
+			c.dialed = true
+		}
+
+		post(n.events.in, any(result))
+	}()
 
 	try(func() {
-		id := uint64(time.Now().UnixNano())
+		id := n.transportID.Add(1)
 
 		if attempt.target.Proto == "udp" {
 			result.channels = []*ChannelIO{newUDPChannel(attempt.session, attempt.local, attempt.target, id)}

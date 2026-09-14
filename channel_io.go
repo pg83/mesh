@@ -11,6 +11,7 @@ type ChannelIO struct {
 	source, target Vertex
 	peer           uint16
 	outgoing       bool
+	dialed         bool
 	origin, id     uint64
 	queue          *Mailbox[[]byte]
 	ctx            context.Context

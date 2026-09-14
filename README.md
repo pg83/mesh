@@ -209,16 +209,15 @@ and the receiver's public key. There is no handshake or forward secrecy.
 
 | Type | Layout |
 |---|---|
-| data transport | `3`, sender index (2), packet ID (8), source tag (4), ChaCha20-Poly1305 ciphertext and tag (16) |
+| data transport | `3`, sender index (2), packet ID (8), ChaCha20-Poly1305 ciphertext and tag (16) |
 | graph transport | `4`, the same remaining header and encryption |
 | registry transport | `5`, the same remaining header and encryption |
 
 The header is authenticated as associated data. The nonce is not sent: it is
-the packet ID followed by the source tag, the low 32 bits of the source
-vertex hash. A socket has one counter that only grows and a new socket is a
-new vertex, so the pair never repeats under one key as long as clocks do not
-run backwards across restarts; the receiver also checks the tag against the
-decrypted source vertex. The encrypted plaintext is
+the packet ID padded with zeros. Packet IDs come from one counter per node
+shared by all its channels, started from the clock at process start, so no
+ID repeats for a sender as long as clocks do not run backwards across
+restarts. The encrypted plaintext is
 `source vertex description || inner message`. Every transport packet contains
 its complete source address, including the real port. A relay wraps the inner
 message with its outgoing channel source; it preserves the route and payload
@@ -277,11 +276,13 @@ The first ordinary message is processed immediately and identifies the peer
 and source vertex for the server's two independent channels. A client socket
 can receive through the existing connection without becoming a listener.
 
-The graph owner and each outgoing edge have separate counters initialized
-from Unix nanoseconds. The graph counter versions the local record, advancing
-only when the record's content changes; an edge's counter identifies its
-outgoing transport packets and WebSocket attempts. Forwarding a record
-preserves its owner and version.
+The graph owner, the transport and each connection attempt have separate
+counters initialized from Unix nanoseconds. The graph counter versions the
+local record, advancing only when the record's content changes; the
+transport counter numbers every outgoing packet of the node and doubles as
+the nonce; a connection attempt takes its ID from the same counter and its
+first packet carries that ID, so both ends order duplicate attempts alike. Forwarding a
+record preserves its owner and version.
 
 ## Map and routing
 

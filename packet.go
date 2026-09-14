@@ -7,8 +7,7 @@ const (
 	innerData       = 1
 	innerRegistry   = 4
 	innerGraph      = 6
-	sourceTagSize   = 4
-	headerTransport = 1 + 2 + 8 + sourceTagSize
+	headerTransport = 1 + 2 + 8
 	maxPacket       = 65535
 	maxHops         = 16
 )
