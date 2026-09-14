@@ -12,6 +12,7 @@ import (
 	"os/user"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 
 	"filippo.io/edwards25519"
@@ -73,9 +74,11 @@ type Shell struct {
 	user    string
 	env     []string
 	pty     *PtyRequest
+	started bool
+
+	mu      sync.Mutex
 	window  *os.File
 	process *os.Process
-	started bool
 }
 
 func newSSHServer(n *Node, cfg *Config, intip [4]byte) *SSHServer {
@@ -264,8 +267,14 @@ func (ss *Shell) run(requests <-chan *ssh.Request) {
 		}
 	}).catch(func(e *Exception) { ss.server.node.log.Debug("ssh session failed", "err", e) })
 
-	if ss.process != nil {
-		syscall.Kill(-ss.process.Pid, syscall.SIGHUP)
+	ss.mu.Lock()
+
+	process := ss.process
+
+	ss.mu.Unlock()
+
+	if process != nil {
+		syscall.Kill(-process.Pid, syscall.SIGHUP)
 	}
 }
 
@@ -287,9 +296,13 @@ func (ss *Shell) handle(request *ssh.Request) {
 	case "window-change":
 		change := WindowChange{}
 
+		ss.mu.Lock()
+
 		if ok = ssh.Unmarshal(request.Payload, &change) == nil && ss.window != nil; ok {
 			throw(pty.Setsize(ss.window, &pty.Winsize{Rows: uint16(change.Rows), Cols: uint16(change.Cols), X: uint16(change.Width), Y: uint16(change.Height)}))
 		}
+
+		ss.mu.Unlock()
 	case "shell":
 		if ok = !ss.started; ok {
 			ss.start(nil)
@@ -346,10 +359,16 @@ func (ss *Shell) wait(cmd *exec.Cmd) {
 		if ss.pty != nil {
 			window := throw2(pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(ss.pty.Rows), Cols: uint16(ss.pty.Cols), X: uint16(ss.pty.Width), Y: uint16(ss.pty.Height)}))
 
-			defer window.Close()
+			defer func() {
+				ss.mu.Lock()
+				ss.window = nil
+				ss.mu.Unlock()
+				window.Close()
+			}()
 
-			ss.window = window
-			ss.process = cmd.Process
+			ss.mu.Lock()
+			ss.window, ss.process = window, cmd.Process
+			ss.mu.Unlock()
 
 			go io.Copy(window, ss.channel)
 
@@ -363,7 +382,9 @@ func (ss *Shell) wait(cmd *exec.Cmd) {
 
 			throw(cmd.Start())
 
+			ss.mu.Lock()
 			ss.process = cmd.Process
+			ss.mu.Unlock()
 
 			go func() { io.Copy(stdin, ss.channel); stdin.Close() }()
 		}
