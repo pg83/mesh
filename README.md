@@ -117,6 +117,7 @@ bind waits while its address is absent, appears when the address is added, and
 closes when the address disappears. Loopback binds are allowed explicitly;
 wildcards do not advertise loopback. Link-local and mesh-subnet addresses are excluded.
 Multiple paths or duplicate declarations can share an explicitly configured listener.
+Overlapping UDP wildcard and explicit binds share one socket per address family and port.
 
 Outgoing channels are created for eligible interface addresses and known remote
 endpoints. The OS assigns their local UDP/TCP port. UDP never reuses a configured

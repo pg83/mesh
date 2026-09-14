@@ -39,6 +39,13 @@ func (n *Node) syncListeners(addresses InterfaceState) {
 
 		if config.public.Proto == "udp" {
 			key := bind.socketKey()
+			wildcard := key
+
+			wildcard.addr = key.wildcard()
+
+			if udp[wildcard] {
+				continue
+			}
 
 			udp[key] = true
 
