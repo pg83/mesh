@@ -354,7 +354,7 @@ func (ss *Shell) wait(cmd *exec.Cmd) {
 			ss.window = window
 			ss.process = cmd.Process
 
-			go func() { io.Copy(window, ss.channel); cmd.Process.Signal(syscall.SIGHUP) }()
+			go io.Copy(window, ss.channel)
 
 			go io.Copy(ss.channel, window)
 		} else {

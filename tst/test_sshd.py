@@ -32,13 +32,14 @@ def test():
                 '-o', f'UserKnownHostsFile={known}', '-o', 'ConnectTimeout=10']
 
         def ssh(command, *options, key='a.ssh', port=2222, target='b', **kwargs):
+            kwargs.setdefault('stdin', subprocess.DEVNULL)
             return lab.run('a', base + ['-i', lab.dir / key, '-p', str(port), *options, 'root@' + lib.intip(lab.nodes[target].index), command],
                            check=False, timeout=30, **kwargs)
 
         result = ssh('echo hello; id -u; echo $HOME')
         assert result.returncode == 0 and result.stdout == 'hello\n0\n' + subprocess.os.environ['HOME'] + '\n', result
         assert ssh('exit 7').returncode == 7
-        result = ssh('cat; echo -n done >&2', input='piped input')
+        result = ssh('cat; echo -n done >&2', input='piped input', stdin=None)
         assert result.stdout == 'piped input' and result.stderr.endswith('done'), result
         result = ssh('tty; echo $TERM', '-tt', env=dict(subprocess.os.environ, TERM='xterm-256color'))
         assert result.returncode == 0, result
