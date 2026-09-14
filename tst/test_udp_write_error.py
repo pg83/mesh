@@ -1,10 +1,13 @@
 """UDP routing failures preserve the socket and cannot grow the advertised graph."""
 import time
 import lib
+import workload
 
 
 def test():
     lab = lib.Lab(['a', 'b'], {1: ['a', 'b']})
+    for name in lab.nodes:
+        lab.configs[name] = dict(mtu=65535)
     with lab:
         lab.wait_ping('a', 'b')
         def source():
@@ -21,6 +24,16 @@ def test():
         lab.wait_ping('a', 'b')
         lab.wait_ping('b', 'a')
         assert source() == initial, 'recovered path must keep the same UDP source port'
+        # The inner packet fits the TUN, but its mesh envelope exceeds UDP's
+        # maximum datagram length. This forces a real EMSGSIZE on sendmsg.
+        workload.udp_server(lab, 'b')
+        client = workload.UdpClient(lab, 'a', 'b')
+        client.send(b'x' * 65500)
+        assert client.recv(.5) is None
+        time.sleep(1)
+        assert source() == initial, 'EMSGSIZE closed the UDP socket'
+        client.send(b'after-failed-datagram')
+        assert client.recv() == b'after-failed-datagram'
 
 
 lib.main(test)
