@@ -105,7 +105,9 @@ The proxy must keep the Host header and path and support WebSocket
 upgrades. Packets are encrypted and authenticated end to end regardless of
 TLS.
 
-Routes prefer UDP links over WebSocket ones and shorter paths over longer.
+A node dials a target only from an interface whose network contains it or
+through which the system routes it. Routes prefer UDP links over WebSocket
+ones and shorter paths over longer.
 
 On Linux the TUN interface persists across restarts; remove it with
 `ip link del <name>` when renaming or uninstalling. On macOS the interface

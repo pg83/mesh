@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"filippo.io/edwards25519"
 	"github.com/creack/pty"
@@ -372,7 +373,16 @@ func (ss *Shell) wait(cmd *exec.Cmd) {
 
 			go io.Copy(window, ss.channel)
 
-			go io.Copy(ss.channel, window)
+			drained := make(chan struct{})
+
+			go func() { io.Copy(ss.channel, window); close(drained) }()
+
+			defer func() {
+				select {
+				case <-drained:
+				case <-time.After(time.Second):
+				}
+			}()
 		} else {
 			stdin := throw2(cmd.StdinPipe())
 

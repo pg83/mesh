@@ -59,7 +59,7 @@ func (n *Node) syncDials() {
 			}
 
 			for _, src := range n.interfaces {
-				if src.ip.IsLoopback() || (remote.ip() != nil && src.ip.Is6() != remote.ipv6()) || n.excludesDial(Vertex{Addr: src.ip.String()}, remote) {
+				if src.ip.IsLoopback() || (remote.ip() != nil && src.ip.Is6() != remote.ipv6()) || n.excludesDial(Vertex{Addr: src.ip.String()}, remote) || !n.reachable(src, remote) {
 					continue
 				}
 

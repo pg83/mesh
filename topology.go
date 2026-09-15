@@ -154,6 +154,7 @@ func (n *Node) graphLoop() {
 			case InterfaceState:
 				n.syncListeners(v)
 				n.interfaces = v
+				clear(n.routeCache)
 				n.syncLocal()
 				n.refresh(time.Now())
 				n.publishSnapshot()
@@ -164,6 +165,8 @@ func (n *Node) graphLoop() {
 			case *Vector:
 				n.handleVector(v)
 				dirty = true
+			case *Route:
+				n.routeCache[v.host] = v
 			case RegistryRecords:
 				if n.handleRegistry(v) {
 					n.publishSnapshot()

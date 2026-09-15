@@ -72,6 +72,9 @@ def test():
         time.sleep(2)
         assert all(rule['hits'] == 0 for rule in udp_back), 'receiving UDP created a return channel'
         lab.wait_ping('a', 'b')
+        # A channel appears with its peer's first packet, its description with the peer's record.
+        lab.wait(lambda: all(str(c[k]) in lab.status('a')['addresses'] for c in lab.status('a')['channels'] for k in ['from', 'to']),
+                 'every channel end described')
         status = lab.status('a')
         for connection in status['channels']:
             vertices = [status['addresses'][str(connection[k])] for k in ['from', 'to']]
