@@ -67,6 +67,10 @@ def test():
         assert result.returncode == 0, result
         lines = result.stdout.replace('\r', '').split()
         assert lines[0].startswith('/dev/pts/') and lines[1] == 'xterm-256color', lines
+        # A background child keeping the pty open does not hold the session past its exit.
+        started = time.monotonic()
+        result = ssh('sleep 20 >/dev/null 2>&1 & echo background', '-tt')
+        assert result.returncode == 0 and 'background' in result.stdout and time.monotonic() - started < 10, result
         result = ssh('echo $MESH_TEST_ENV', '-o', 'SendEnv=MESH_TEST_ENV', env=dict(subprocess.os.environ, MESH_TEST_ENV='forwarded'))
         assert result.stdout == 'forwarded\n', result
         # The default port is 22 and the flag form accepts an extra authorized keys file.

@@ -29,6 +29,7 @@ type Status struct {
 	Graph     []Edge            `json:"graph"`
 	Records   []*GraphRecord    `json:"records"`
 	Vectors   []*Vector         `json:"vectors"`
+	Bundles   int               `json:"bundles"`
 	Vertices  []uint32          `json:"vertices"`
 	Routes    map[string][]Edge `json:"routes"`
 }
@@ -72,6 +73,8 @@ func (n *Node) status() *Status {
 	for _, owner := range slices.Sorted(maps.Keys(n.records)) {
 		st.Records = append(st.Records, n.records[owner])
 	}
+
+	st.Bundles = len(n.bundles())
 
 	for _, owner := range slices.Sorted(maps.Keys(n.vectors)) {
 		st.Vectors = append(st.Vectors, n.vectors[owner])

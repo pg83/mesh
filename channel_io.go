@@ -79,10 +79,6 @@ func (c *ChannelIO) runWriter(n *Node) {
 			}
 		}
 	}).catch(func(e *Exception) {
-		if c.sibling != nil {
-			n.log.Info("connection write failed", "from", c.source.string(), "to", c.target.string(), "err", e)
-		} else {
-			n.log.Debug("channel write failed", "err", e)
-		}
+		n.log.Info("channel write failed", "from", c.source.string(), "to", c.target.string(), "err", e)
 	})
 }

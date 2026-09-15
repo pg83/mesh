@@ -1,5 +1,6 @@
 """Independent binary record writer, strict framing, and UDP/WS/WSS descriptions."""
 import socket
+import random
 import struct
 import time
 
@@ -104,6 +105,26 @@ def test():
         source = struct.pack('<BBH', 2, 6, 49152) + socket.inet_pton(socket.AF_INET6, '::ffff:192.0.2.40')
         for end in range(len(source)):
             send(head + source[:end])
+
+        # Version bundles: a bad frame, no chunks, a short chunk, a zero owner, short
+        # entries, a zero entry owner and trailing bytes are invalid as a whole.
+        chunk = lambda owner, entries, tail=b'': bytes([1, owner]) + struct.pack('<Q', ident + 10) + bytes([len(entries)]) + b''.join(bytes([o]) + struct.pack('<Q', v) for o, v in entries) + tail
+        bad_bundles = [b'\x28\xb5\x2f\xfd' + b'\0' * 8, b'', bytes([1, 2]), chunk(0, [(1, 1)]), bytes([1, 2]) + struct.pack('<Q', 7) + bytes([3]) + b'\0' * 9,
+                       chunk(2, [(0, 1)]), chunk(2, [(1, 1)], b'\0')]
+        for bundle in bad_bundles:
+            send(b'\x03' + bundle, compress=bundle != bad_bundles[0])
+        invalid = lambda: next(float(l.split()[1]) for l in lab.http('b', '/metrics')[2].decode().splitlines() if l.startswith('mesh_vectors_invalid_total'))
+        lab.wait(lambda: invalid() == len(bad_bundles), 'malformed bundles counted')
+        # A vector arrives in two chunks of one version and merges; with 255
+        # entries of random versions it does not compress into one datagram, so
+        # b's own bundle takes several packets.
+        assert lab.status('b')['bundles'] == 1
+        big = [(o, random.getrandbits(64)) for o in range(1, 256)]
+        send(b'\x03' + chunk(1, big[:128]))
+        send(b'\x03' + chunk(1, big[128:]))
+        lab.wait(lambda: len(next((v['records'] for v in lab.status('b')['vectors'] if v['owner'] == 1), [])) == 255, 'big vector stored')
+        assert lab.status('b')['bundles'] >= 2, lab.status('b')['bundles']
+        assert invalid() == len(bad_bundles)
 
         marker = lib.endpoint('192.0.2.20', 8000)
         probe.send(op='graph', body=lib.record(1, ident, [(marker, True, False)]))
