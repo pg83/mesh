@@ -40,7 +40,7 @@ func echoProbe(path, destination string, index uint16) {
 
 			id++
 
-			packet := compress(encodeRecord(cfg.Index, id, encodeRecordBody(record)))
+			packet := compress(encodeRecord(cfg.Index, id, 0, encodeRecordBody(record)))
 
 			for _, target := range destinations {
 				send(target, kindGraph, packet)

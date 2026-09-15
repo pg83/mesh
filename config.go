@@ -33,21 +33,24 @@ type DialPair struct {
 }
 
 type Config struct {
-	RegistryVersion    uint64           `json:"registry_version,omitempty"`
-	Index              uint16           `json:"index"`
-	Key                string           `json:"key,omitempty"`
-	Endpoint           []EndpointConfig `json:"endpoint"`
-	Subnet             string           `json:"subnet"`
-	Tun                string           `json:"tun,omitempty"`
-	Mtu                int              `json:"mtu"`
-	Control            string           `json:"control,omitempty"`
-	Registry           []PeerConfig     `json:"registry"`
-	NoDial             []DialPair       `json:"no_dial,omitempty"`
-	Sshd               bool             `json:"sshd,omitempty"`
-	SshdPort           int              `json:"sshd_port,omitempty"`
-	SshdAuthorizedKeys string           `json:"sshd_authorized_keys,omitempty"`
-	Dns                bool             `json:"dns,omitempty"`
-	DnsPort            int              `json:"dns_port,omitempty"`
+	RegistryVersion    uint64              `json:"registry_version,omitempty"`
+	Index              uint16              `json:"index"`
+	Key                string              `json:"key,omitempty"`
+	Endpoint           []EndpointConfig    `json:"endpoint"`
+	Subnet             string              `json:"subnet"`
+	Tun                string              `json:"tun,omitempty"`
+	Mtu                int                 `json:"mtu"`
+	Control            string              `json:"control,omitempty"`
+	Registry           []PeerConfig        `json:"registry"`
+	NoDial             []DialPair          `json:"no_dial,omitempty"`
+	Sshd               bool                `json:"sshd,omitempty"`
+	SshdPort           int                 `json:"sshd_port,omitempty"`
+	SshdAuthorizedKeys string              `json:"sshd_authorized_keys,omitempty"`
+	Dns                bool                `json:"dns,omitempty"`
+	DnsPort            int                 `json:"dns_port,omitempty"`
+	Exit               bool                `json:"exit,omitempty"`
+	Routes             map[string][]string `json:"routes,omitempty"`
+	exitRoutes         []ExitRoute
 }
 
 func loadConfig(path string) *Config {
@@ -67,6 +70,8 @@ func loadConfig(path string) *Config {
 	if cfg.Mtu == 0 {
 		cfg.Mtu = 1380
 	}
+
+	cfg.exitRoutes = parseRoutes(cfg)
 
 	return cfg
 }

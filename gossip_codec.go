@@ -6,7 +6,8 @@ import (
 )
 
 const (
-	recordHeader     = 10
+	recordHeader     = 11
+	recordExit       = 1
 	recordVertexHead = 4
 	recordLinkSize   = 7
 )
@@ -166,11 +167,12 @@ func encodeRecordBody(record *GraphRecord) []byte {
 	return out
 }
 
-func encodeRecord(owner uint16, version uint64, body []byte) []byte {
+func encodeRecord(owner uint16, version uint64, flags byte, body []byte) []byte {
 	out := make([]byte, 0, recordHeader+len(body))
 
 	out = binary.LittleEndian.AppendUint16(out, owner)
 	out = binary.LittleEndian.AppendUint64(out, version)
+	out = append(out, flags)
 
 	return append(out, body...)
 }
@@ -184,8 +186,13 @@ func recordHead(inner []byte) (uint16, uint64, bool) {
 }
 
 func decodeRecord(owner uint16, version uint64, inner []byte) (*GraphRecord, bool) {
-	record := &GraphRecord{Owner: owner, Version: version, Vertices: []RecordVertex{}, Links: []Edge{}, Observed: []Observation{}, packet: inner}
+	record := &GraphRecord{Owner: owner, Version: version, Exit: inner[10]&recordExit != 0, Vertices: []RecordVertex{}, Links: []Edge{}, Observed: []Observation{}, packet: inner}
 	data := inner[recordHeader:]
+
+	if inner[10]&^recordExit != 0 {
+		return nil, false
+	}
+
 	count := int(binary.LittleEndian.Uint16(data))
 
 	data = data[2:]

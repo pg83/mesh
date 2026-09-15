@@ -144,6 +144,12 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 
 	if cfg.Tun != "" {
 		n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
+
+		for _, route := range cfg.exitRoutes {
+			for _, prefix := range routeHalves(route.prefix) {
+				n.tun.route(prefix)
+			}
+		}
 	}
 
 	n.intip = me.intip

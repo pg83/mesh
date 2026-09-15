@@ -1,11 +1,14 @@
 package main
 
 import (
+	"net"
+	"net/netip"
+	"strconv"
+
+	"github.com/vishvananda/netlink"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 	"golang.org/x/sys/unix"
-	"net"
-	"strconv"
 )
 
 func udpGuard(key SocketKey) net.Listener {
@@ -36,4 +39,20 @@ func socketInterface(fd, iface int, v6 bool) error {
 
 		throw(unix.SetsockoptString(fd, unix.SOL_SOCKET, unix.SO_BINDTODEVICE, device.Name))
 	}).asError()
+}
+
+func routeViable(iface int, ip netip.Addr) bool {
+	routes, err := netlink.RouteList(nil, unix.AF_INET)
+
+	if err != nil {
+		return false
+	}
+
+	for _, route := range routes {
+		if route.LinkIndex == iface && (route.Dst == nil || route.Dst.Contains(ip.AsSlice())) {
+			return true
+		}
+	}
+
+	return false
 }

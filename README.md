@@ -77,6 +77,10 @@ node without a device still relays traffic between peers and answers SSH
 and DNS on its mesh address for them; nothing reaches or leaves its own
 system through the mesh.
 
+A node that stops sending disappears from every route within seconds: a
+node is reachable only while some node observes a link from it, whatever
+its last graph record still claims.
+
 ### Endpoints
 
 Both the local `endpoint` list and registry entries use the same objects.
@@ -138,6 +142,25 @@ Any ring member's Ed25519 key logs in; `sshd_authorized_keys`
 run as the user mesh runs as; when that is root, `user@` selects the
 account. Supported: exec, shell with pty, env, window resize and exit
 status; no SFTP or port forwarding.
+
+### Exit nodes and subnet routes
+
+A node with `exit: true` (or `mesh run -exit`) carries traffic for networks
+beyond the mesh; its system must forward packets from the TUN device and,
+for the internet, NAT them (`ip_forward` and a masquerade rule). A client
+lists which prefixes go to which exits:
+
+```json
+"routes": {"0.0.0.0/0": ["gateway", "backup"], "10.20.0.0/16": ["office"]}
+```
+
+The client routes the prefixes into its TUN device (the default route as
+`0.0.0.0/1` and `128.0.0.0/1`, so it wins whatever the existing default
+route's metric); a packet for a prefix travels to one of the listed nodes
+that advertises itself as an exit and is reachable, chosen by a hash of
+the flow so that a connection keeps its exit, and the most specific prefix
+with a live exit wins. The node's own sockets are bound to their interfaces
+and keep using those interfaces' routes.
 
 ### Names
 

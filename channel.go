@@ -16,6 +16,7 @@ type Snapshot struct {
 	channels  map[Edge]*Channel
 	records   map[uint16]uint64
 	vectors   map[uint16]*Vector
+	exits     map[uint16]bool
 	gossip    []Advertisement
 	bundles   [][]byte
 }
@@ -382,6 +383,8 @@ func (n *Node) tunLoop() {
 
 				if peer := view.registry.byIntip[[4]byte(ip)]; peer != nil {
 					hops = view.hops[hostID(peer.index)]
+				} else if !n.subnet.Contains(ip) {
+					hops = n.exitHops(view, ip, v.payload)
 				}
 			}
 

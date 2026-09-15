@@ -91,6 +91,14 @@ func (n *Node) publishSnapshot() {
 	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local),
 		routes: n.routes, hops: n.hops, next: n.next, channels: channels, records: versions}
 
+	view.exits = map[uint16]bool{}
+
+	for owner, record := range n.records {
+		if record.Exit {
+			view.exits[owner] = true
+		}
+	}
+
 	n.publishVector()
 	view.vectors = maps.Clone(n.vectors)
 	view.gossip = n.advertisements()

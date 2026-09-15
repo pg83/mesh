@@ -27,6 +27,7 @@ type Observation struct {
 type GraphRecord struct {
 	Owner    uint16         `json:"owner"`
 	Version  uint64         `json:"version"`
+	Exit     bool           `json:"exit,omitempty"`
 	Vertices []RecordVertex `json:"vertices"`
 	Links    []Edge         `json:"links"`
 	Observed []Observation  `json:"observed"`
@@ -105,16 +106,26 @@ func (n *Node) publishRecord() {
 	body := encodeRecordBody(record)
 	previous := n.records[n.cfg.Index]
 
-	if previous != nil && bytes.Equal(previous.body, body) {
+	record.Exit = n.cfg.Exit
+
+	if previous != nil && bytes.Equal(previous.body, body) && previous.Exit == record.Exit {
 		return
 	}
 
 	record.Version = n.nextPacketID()
 	record.body = body
-	record.packet = compress(encodeRecord(n.cfg.Index, record.Version, body))
+	record.packet = compress(encodeRecord(n.cfg.Index, record.Version, recordFlags(record), body))
 	record.applied = time.Now()
 
 	n.records[n.cfg.Index] = record
+}
+
+func recordFlags(record *GraphRecord) byte {
+	if record.Exit {
+		return recordExit
+	}
+
+	return 0
 }
 
 func (n *Node) handleRecord(record *GraphRecord) {
@@ -173,9 +184,16 @@ func (n *Node) rebuild() {
 	}
 
 	seen := map[uint32][]SocketAddress{}
+	alive := map[uint16]bool{n.cfg.Index: true}
+
+	for edge := range n.observed {
+		alive[vertexOwner(edge.From)] = true
+	}
 
 	for _, record := range n.records {
 		for _, link := range record.Links {
+			alive[vertexOwner(link.From)] = true
+
 			if present[link.From] && link.From != link.To {
 				graph[link] = true
 			}
@@ -210,6 +228,12 @@ func (n *Node) rebuild() {
 
 		if actor.io.target.valid() {
 			addresses[actor.io.edge.To] = actor.io.target
+		}
+	}
+
+	for edge := range graph {
+		if vertexOwner(edge.From) != vertexOwner(edge.To) && !alive[vertexOwner(edge.To)] {
+			delete(graph, edge)
 		}
 	}
 

@@ -33,7 +33,7 @@ type Metrics struct {
 	vectorsApplied, vectorsStale, vectorsInvalid atomic.Uint64
 	forwardNoChannel                             atomic.Uint64
 	tunRead, tunUnrouted, tunDelivered           atomic.Uint64
-	tunDropped                                   atomic.Uint64
+	tunDropped, tunExit                          atomic.Uint64
 	linkUp, linkDown, dialFailed                 atomic.Uint64
 }
 
@@ -112,6 +112,7 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 	w.counter("mesh_tun_read_total", "IP packets read from the TUN device.", &m.tunRead)
 	w.counter("mesh_tun_unrouted_total", "IP packets from the TUN device without a route.", &m.tunUnrouted)
 	w.counter("mesh_tun_dropped_total", "IP packets for the local system dropped for lack of a TUN device.", &m.tunDropped)
+	w.counter("mesh_tun_exit_total", "IP packets from the TUN device sent to an exit node.", &m.tunExit)
 	w.counter("mesh_tun_delivered_total", "IP packets written to the TUN device.", &m.tunDelivered)
 	w.counter("mesh_link_up_total", "Incoming links observed for the first time.", &m.linkUp)
 	w.counter("mesh_link_down_total", "Incoming links expired or closed.", &m.linkDown)

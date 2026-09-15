@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"net/netip"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -10,7 +11,8 @@ import (
 const defaultTun = "mesh0"
 
 type Tun struct {
-	fd int
+	fd   int
+	link netlink.Link
 }
 
 func openTun(name string, intip [4]byte, subnet string, mtu int) *Tun {
@@ -31,7 +33,11 @@ func openTun(name string, intip [4]byte, subnet string, mtu int) *Tun {
 	throw(netlink.LinkSetUp(link))
 	throw(unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 1))
 
-	return &Tun{fd: fd}
+	return &Tun{fd: fd, link: link}
+}
+
+func (t *Tun) route(prefix netip.Prefix) {
+	throw(netlink.RouteReplace(&netlink.Route{LinkIndex: t.link.Attrs().Index, Dst: prefixNet(prefix), Scope: netlink.SCOPE_LINK}))
 }
 
 func (t *Tun) read(buf []byte) []byte {

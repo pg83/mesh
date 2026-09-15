@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"slices"
 	"time"
 )
 
@@ -12,7 +13,7 @@ const routeTTL = 30 * time.Second
 type Route struct {
 	host    string
 	targets []netip.Addr
-	sources []netip.Addr
+	viable  map[int]bool
 	at      time.Time
 	pending bool
 }
@@ -28,7 +29,13 @@ func (n *Node) reachable(src InterfaceAddress, target Vertex) bool {
 
 		route.pending = true
 
-		go n.resolveRoute(target.Addr)
+		ifaces := []int{}
+
+		for _, iface := range n.interfaces {
+			ifaces = append(ifaces, iface.iface)
+		}
+
+		go n.resolveRoute(target.Addr, slices.Compact(slices.Sorted(slices.Values(ifaces))))
 	}
 
 	if route.at.IsZero() {
@@ -41,17 +48,11 @@ func (n *Node) reachable(src InterfaceAddress, target Vertex) bool {
 		}
 	}
 
-	for _, ip := range route.sources {
-		if ip == src.ip {
-			return true
-		}
-	}
-
-	return false
+	return route.viable[src.iface]
 }
 
-func (n *Node) resolveRoute(host string) {
-	route := &Route{host: host, at: time.Now()}
+func (n *Node) resolveRoute(host string, ifaces []int) {
+	route := &Route{host: host, at: time.Now(), viable: map[int]bool{}}
 
 	if ip, err := netip.ParseAddr(host); err == nil {
 		route.targets = []netip.Addr{ip.Unmap()}
@@ -67,12 +68,11 @@ func (n *Node) resolveRoute(host string) {
 		}
 	}
 
-	for _, ip := range route.targets {
-		if conn, err := net.Dial("udp", net.JoinHostPort(ip.String(), "9")); err == nil {
-			source, _ := netip.AddrFromSlice(conn.LocalAddr().(*net.UDPAddr).IP)
-
-			route.sources = append(route.sources, source.Unmap())
-			conn.Close()
+	for _, iface := range ifaces {
+		for _, ip := range route.targets {
+			if routeViable(iface, ip) {
+				route.viable[iface] = true
+			}
 		}
 	}
 

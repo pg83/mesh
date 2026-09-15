@@ -27,7 +27,7 @@ def counter(value):
 
 def encode_record(owner, version, vertices, links, observed=()):
     """vertices: (counter, flags, vertex); links: (source id, counter); observed: (source id, seen)."""
-    packet = bytearray(struct.pack('<BHQH', 1, owner, version, len(vertices)))
+    packet = bytearray(struct.pack('<BHQBH', 1, owner, version, 0, len(vertices)))
     offsets = []
     for number, flags, ep in vertices:
         offsets.append(len(packet))
@@ -87,8 +87,9 @@ def test():
         send(packet[:tail + 2] + struct.pack('<I', ids[0]) + packet[tail + 6:])
         send(packet[:tail + 6] + encode_vertex(listeners[1]))
         send(packet[:tail + 6] + encode_vertex(lib.endpoint('203.0.113.5', 0)))
-        # Vertex counters must be unique and nonzero; flags and descriptions valid.
-        mutations = [(offsets[0] + 3, b'\x00'), (offsets[0] + 3, b'\x04'), (offsets[0] + 4, b'\x00'), (offsets[1] + 4, b'\xff'),
+        # Record flags beyond exit, vertex counters that repeat or are zero, and bad
+        # vertex flags or descriptions are invalid.
+        mutations = [(11, b'\x02'), (offsets[0] + 3, b'\x00'), (offsets[0] + 3, b'\x04'), (offsets[0] + 4, b'\x00'), (offsets[1] + 4, b'\xff'),
                      (offsets[1] + 7, b'\xff\xff'),
                      (offsets[1] + 9 + len(listeners[1]['addr']), b'\xff\xff'),
                      (offsets[0], b'\x00\x00\x00'), (offsets[1], counter(201)), (offsets[0] + 5, b'\x00\x00\x00\x00\x00\x00')]
@@ -96,11 +97,11 @@ def test():
             bad = bytearray(packet)
             bad[offset:offset + len(value)] = value
             send(bad)
-        head = struct.pack('<BHQH', 1, 1, ident + 1, 1) + counter(7)
+        head = struct.pack('<BHQBH', 1, 1, ident + 1, 0, 1) + counter(7)
         # A WS address consumes the remaining bytes, leaving no path length.
         send(head + struct.pack('<BBHH', 1, 2, 80, 4) + b'host')
         # The first vertex consumes the bytes reserved for a second one.
-        send(struct.pack('<BHQH', 1, 1, ident + 1, 2) + counter(7) + struct.pack('<BBHH', 1, 2, 80, 8) + b'hostname' + b'\0\0')
+        send(struct.pack('<BHQBH', 1, 1, ident + 1, 0, 2) + counter(7) + struct.pack('<BBHH', 1, 2, 80, 8) + b'hostname' + b'\0\0')
         # IPv6 TCP socket addresses are independent vertices, including their port.
         source = struct.pack('<BBH', 2, 6, 49152) + socket.inet_pton(socket.AF_INET6, '::ffff:192.0.2.40')
         for end in range(len(source)):

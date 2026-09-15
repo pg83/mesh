@@ -174,7 +174,7 @@ func main() {
 				record.Vertices[i].Vertex = record.Vertices[i].canonical()
 			}
 
-			out = session.seal(from, kindGraph, compress(encodeRecord(record.Owner, record.Version, encodeRecordBody(&record))), packetID)
+			out = session.seal(from, kindGraph, compress(encodeRecord(record.Owner, record.Version, recordFlags(&record), encodeRecordBody(&record))), packetID)
 		case "open":
 			origin, inner, ok := session.open(throw2(hex.DecodeString(command.Hex)))
 			report := map[string]any{"opened": ok, "hex": hex.EncodeToString(inner), "source": origin, "kind": packetKind(throw2(hex.DecodeString(command.Hex)))}

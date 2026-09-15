@@ -1,11 +1,14 @@
 package main
 
 import (
-	"golang.org/x/sys/unix"
 	"io"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"golang.org/x/sys/unix"
 )
 
 func udpGuard(key SocketKey) io.Closer {
@@ -45,4 +48,15 @@ func socketInterface(fd, iface int, v6 bool) error {
 	}
 
 	return unix.SetsockoptInt(fd, unix.IPPROTO_IP, unix.IP_BOUND_IF, iface)
+}
+
+func routeViable(iface int, ip netip.Addr) bool {
+	dialer := net.Dialer{Control: udpControl(iface)}
+	conn, err := dialer.Dial("udp", net.JoinHostPort(ip.String(), "9"))
+
+	if err == nil {
+		conn.Close()
+	}
+
+	return err == nil
 }

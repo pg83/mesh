@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"strconv"
@@ -15,6 +16,7 @@ const defaultTun = "utun"
 
 type Tun struct {
 	file *os.File
+	name string
 }
 
 func openTun(name string, intip [4]byte, subnet string, mtu int) *Tun {
@@ -45,14 +47,18 @@ func openTun(name string, intip [4]byte, subnet string, mtu int) *Tun {
 	throw(unix.Connect(fd, &unix.SockaddrCtl{ID: info.Id, Unit: uint32(unit)}))
 	throw(unix.SetNonblock(fd, true))
 
-	tun := &Tun{file: os.NewFile(uintptr(fd), "utun")}
 	actual := throw2(unix.GetsockoptString(fd, 2, 2))
+	tun := &Tun{file: os.NewFile(uintptr(fd), "utun"), name: actual}
 	ip := net.IP(intip[:]).String()
 
 	darwinCommand("/sbin/ifconfig", actual, "inet", ip, ip, "netmask", "255.255.255.255", "mtu", strconv.Itoa(mtu), "up")
 	darwinCommand("/sbin/route", "-n", "add", "-net", subnet, "-interface", actual)
 
 	return tun
+}
+
+func (t *Tun) route(prefix netip.Prefix) {
+	darwinCommand("/sbin/route", "-n", "add", "-net", prefix.String(), "-interface", t.name)
 }
 
 func darwinCommand(command string, args ...string) {
