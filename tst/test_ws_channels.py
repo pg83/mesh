@@ -1,4 +1,4 @@
-"""Each WS half survives closure of its sibling; shared local directions remain."""
+"""A withdrawn WS half leaves its sibling; a dead connection closes whole; shared local directions remain."""
 import time
 import lib
 import ws
@@ -47,12 +47,14 @@ def test():
         lab.wait(lambda: len(lab.channels('b')) == 3, 'one input channel withdrawn')
         assert not one.send(op='read', read=True)['closed'], 'sibling send channel closed'
         one.finish()
+        # A client that sends nothing for five seconds is dead; two keeps talking.
+        two.send(op='graph', body=lib.record(1, time.time_ns(), []))
         lab.wait(lambda: len(lab.channels('b')) == 2, 'remaining pair intact')
         assert local_edge(internal, endpoint), 'closing one channel removed a shared local direction'
-        two.finish()
-        lab.wait(lambda: not lab.channels('b'), 'all channels closed')
-        lab.wait(lambda: not local_edge(internal, endpoint), 'last sender removed the outgoing direction')
+        lab.wait(lambda: not lab.channels('b'), 'silent client closed after five seconds', timeout=10)
+        assert not local_edge(internal, endpoint), 'last sender removed the outgoing direction'
         assert local_edge(endpoint, internal), 'listener must remain discoverable without clients'
+        two.finish()
 
 
 lib.main(test)

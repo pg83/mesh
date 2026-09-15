@@ -24,9 +24,10 @@ func newWSConnection(socket *websocket.Conn, session *Session, edge Edge, source
 		done:    make(chan struct{}),
 	}
 
+	c.send.sibling, c.receive.sibling = c.receive, c.send
 	c.send.write = func(_ context.Context, p []byte) { writeWS(ctx, socket, p) }
 	c.receive.read = func(input chan any) {
-		defer c.receive.stop()
+		defer c.receive.closeConnection()
 
 		try(func() {
 			for {

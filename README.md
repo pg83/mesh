@@ -362,6 +362,11 @@ authenticated envelope and are dispatched to the corresponding channel.
 The sender-provided source stays the same across NAT and reverse proxies. A forwarded listener uses its configured public endpoint
 in the graph. The observed link expires after five seconds without packets;
 closing its channel removes it from the record without inventing the reverse link.
+An incoming channel that receives nothing for five seconds closes as well,
+whatever its transport; for a WebSocket connection that closes the whole
+connection, as does a failed read or write, so a connection on a black-holed
+TCP path is redialed after five seconds instead of after the kernel's
+retransmission timeout.
 A link only becomes an edge while its source vertex is in the current record of
 its owner.
 
@@ -401,7 +406,8 @@ Channel identity is a directed id pair. Duplicate WS attachments prefer
 the smaller source id, then the larger initial packet ID, independently for each
 direction. There is at most one pending dial per candidate channel. Accepted WS
 connections stay private to the transport and supply a writer and a reader to
-separate channels. Each channel can stop or be replaced without stopping its sibling.
+separate channels. A replaced or withdrawn channel does not stop its sibling;
+silence, a read error or a write error close the connection as a whole.
 Only after both channels are closed is the shared WS socket released. The reader
 continues draining WS frames when its mesh receive channel is closed, and closing
 one channel does not cancel the shared socket context. Socket failures are handled

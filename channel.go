@@ -51,7 +51,7 @@ type Channel struct {
 	session      *Session
 	replay       Replay
 	started      bool
-	seen         time.Time
+	since, seen  time.Time
 	nextRegistry time.Time
 	io           *ChannelIO
 }
@@ -62,6 +62,8 @@ func (a *Channel) run() {
 	defer ticker.Stop()
 
 	defer func() { a.io.stop(); a.report() }()
+
+	a.since = time.Now()
 
 	for {
 		select {
@@ -96,8 +98,17 @@ func (a *Channel) run() {
 		case <-a.io.ctx.Done():
 			return
 		case now := <-ticker.C:
-			if !a.outgoing && a.io.transport() == "udp" && !a.seen.IsZero() && now.Sub(a.seen) >= sessionTimeout {
-				return
+
+			if last := a.seen; !a.outgoing {
+				if last.IsZero() {
+					last = a.since
+				}
+
+				if now.Sub(last) >= sessionTimeout {
+					a.io.closeConnection()
+
+					return
+				}
 			}
 
 			a.report()

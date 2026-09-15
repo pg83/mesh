@@ -20,6 +20,8 @@ type ChannelIO struct {
 	cancel         context.CancelFunc
 	write          func(context.Context, []byte)
 	read           func(chan any)
+
+	sibling *ChannelIO
 }
 
 func newChannelIO(session *Session, edge Edge, source, target Vertex, outgoing, listener bool, id uint64) *ChannelIO {
@@ -41,6 +43,14 @@ func (c *ChannelIO) stop() {
 	c.cancel()
 }
 
+func (c *ChannelIO) closeConnection() {
+	c.stop()
+
+	if c.sibling != nil {
+		c.sibling.stop()
+	}
+}
+
 func (c *ChannelIO) transport() string {
 	if c.source.isEndpoint() {
 		return c.source.Proto
@@ -57,7 +67,7 @@ func (a *Channel) post(message any) {
 }
 
 func (c *ChannelIO) runWriter(n *Node) {
-	defer c.stop()
+	defer c.closeConnection()
 
 	try(func() {
 		for {
@@ -68,5 +78,11 @@ func (c *ChannelIO) runWriter(n *Node) {
 				return
 			}
 		}
-	}).catch(func(e *Exception) { n.log.Debug("channel write failed", "err", e) })
+	}).catch(func(e *Exception) {
+		if c.sibling != nil {
+			n.log.Info("connection write failed", "from", c.source.string(), "to", c.target.string(), "err", e)
+		} else {
+			n.log.Debug("channel write failed", "err", e)
+		}
+	})
 }
