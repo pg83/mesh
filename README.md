@@ -5,38 +5,26 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/pg83/mesh)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Private overlay network for a closed set of nodes. Nodes exchange their
-public-key registries; UDP and WS/WSS links use keys derived from those keys and carry
-authenticated encrypted packets; a gossip map on each node describes who can reach whom; the
-source picks the whole path and relays only follow it; IP rides on top over a
-TUN device.
-
-This is the first version: registry, links, TUN, gossip, the routing map,
-relaying, and periodic gossip over the full address closure. Link metrics,
-and retransmits come later.
+Private overlay network for a closed set of nodes. Every node has a key and
+a fixed address in the mesh subnet; nodes find each other through a shared
+registry, connect over UDP or WebSocket (plain or TLS), encrypt every packet
+with keys derived from the pair's public keys, and route IP traffic between
+their TUN devices, relaying through other nodes when there is no direct
+path. Nodes behind NAT reach each other through any common peer; no STUN or
+coordination server is involved. There is no handshake: the first packet
+already carries data.
 
 ## Usage
 
 ```
 mesh keygen                 # prints {"pub": ..., "key": ...}
-mesh run -c config.json     # runs a node
+mesh run -c config.json     # runs a node (root, for the TUN device)
 mesh run -c config.json -key-file /path/to/private-key
 mesh status -control 127.0.0.1:8058
 mesh web -control 127.0.0.1:8058 -listen 127.0.0.1:8059
 ```
 
-Config is JSON:
-
-`-key-file` overrides `key` in the config, which may then be omitted. The file
-contains either a base64-encoded 32-byte seed (surrounding whitespace is ignored)
-or an unencrypted OpenSSH Ed25519 private key. An unreadable or invalid file
-fails startup; it does not fall back to the config key. Encrypted SSH keys and
-other SSH key types are not supported.
-
-For an SSH identity, put the complete `ssh-ed25519 AAAA...` public key line in
-the registry's `pub` field. Mesh derives the X25519 public key from the Ed25519
-point. Base64 X25519 `pub` entries can share the same registry. Legacy `sig`
-fields are ignored.
+### Configuration
 
 ```json
 {
@@ -49,590 +37,146 @@ fields are ignored.
   "subnet": "10.77.0.0/24",
   "control": "127.0.0.1:8058",
   "registry": [
-    {"index": 1, "pub": "<x25519>", "intip": "10.77.0.1", "endpoint": [{"proto": "udp", "addr": "203.0.113.10", "port": 17001, "bind_addr": "192.168.1.20", "bind_port": 7001}]},
-    {"index": 2, "pub": "<x25519>", "intip": "10.77.0.2", "endpoint": []}
+    {"index": 1, "name": "gateway", "pub": "<x25519>", "intip": "10.77.0.1", "endpoint": [{"proto": "udp", "addr": "203.0.113.10", "port": 17001, "bind_addr": "192.168.1.20", "bind_port": 7001}]},
+    {"index": 2, "name": "laptop", "pub": "<x25519>", "intip": "10.77.0.2", "endpoint": []}
   ]
 }
 ```
 
-The initial registry contains the local node and its known peers: index,
-public key, internal address, and static endpoints, if any. Only the bootstrap
-hosts need the complete registry; other nodes can start with their own entry
-and those hosts. TUN and discovery start immediately from this local configuration.
-Node indexes must be
-in the range 1–65535; zero is reserved and rejected in the registry.
-A node without static
-endpoints is never dialed by a node that has not heard of it; it dials, and
-its own advertised addresses let others dial it back later. `tun` (default
-`mesh0` on Linux, `utun` on macOS) and `mtu` (default 1380) are optional.
+| Field | Meaning |
+|---|---|
+| `index` | This node's registry index, 1–255 |
+| `key` | Base64 32-byte seed of the node's X25519 key; `-key-file` overrides it |
+| `endpoint` | Listeners this node opens, see below; an empty list is valid |
+| `subnet` | The mesh subnet; every node's `intip` lies in it |
+| `control` | Optional read-only HTTP API on a loopback address |
+| `registry` | Known nodes: `index`, `pub`, `intip`, static `endpoint` list, optional `name` |
+| `registry_version` | Version of the records loaded from this file, default `1`; raise it when changing the registry |
+| `no_dial` | Optional list of `{"from": ip, "to": ip}` pairs this node never dials |
+| `tun`, `mtu` | TUN name (`mesh0` on Linux, `utun` on macOS) and MTU (default 1380) |
+| `sshd`, `sshd_port`, `sshd_authorized_keys` | Embedded SSH server, see below |
 
-`registry_version` sets the version of every record loaded from the config;
-it defaults to `1`. Set a higher version in the authoritative configuration
-when changing its registry. Versions are not derived from startup or send time.
-Every five seconds each outgoing edge sends a separate registry message with
-a random selection of known records fitting in one encrypted message. The
-record budget reserves the full IPv6 source header and keeps UDP messages
-within 1200 bytes; WS messages include their variable-length source endpoint.
-Learned records retain their versions and are retransmitted too.
-An unknown index is added; an existing record changes only for a strictly higher
-version. There are no deletions, expiry, whole-registry replacement or fragments.
-Records too large for one packet are rejected at startup.
+`-key-file` names a file with either the base64 seed or an unencrypted
+OpenSSH Ed25519 private key; for an SSH identity put the full
+`ssh-ed25519 AAAA...` line in the registry's `pub`.
 
-Registry messages use the existing authenticated peer sessions, with their own
-outer packet kind `2`. They can traverse the mesh by repeated
-exchange between neighbors. Trusted peers can introduce other peers; there is
-no separate origin signature. Registry changes publish immutable actor snapshots,
-and a public-key change replaces the affected sessions. The running node's own
-key and mesh IP stay fixed by its local configuration.
+Only bootstrap hosts need the complete registry; other nodes can start with
+their own entry and those hosts and learn the rest from the mesh. Nodes
+introduce each other; a registry record changes only for a strictly higher
+version, there is no removal. A node without static endpoints is never
+dialed first: it dials, and its own addresses let others dial it back.
 
-Both the host and registry use the same flat `endpoint` objects. Endpoints describe incoming listeners only. The node
-opens the union of its host list and its own registry list. An empty list is valid.
-UDP, WS and WSS dialing is always available independently of these listeners. Other nodes
-use only the advertised `addr` and `port` from that registry entry.
-There is no global `port`, separate `static` list, or `forwards` section.
-Old configurations must be converted to this format.
+### Endpoints
 
-`no_dial` is an optional local list of directed IP pairs, for example
-`[{"from":"10.0.0.64","to":"10.0.0.68"}]`. A pair disables initiating
-outgoing channels from that local IP to endpoints with that literal destination IP,
-regardless of port or transport. IPv4 and IPv6 addresses are matched exactly;
-there are no subnets or DNS matching. Incoming channels are allowed. An accepted WS connection can provide a separate
-return channel; receiving UDP never creates one. To stop both nodes initiating, configure each direction
-on its source node. These rules are not exchanged in the registry or included
-in exported configurations.
+Both the local `endpoint` list and registry entries use the same objects.
+Endpoints describe listeners; outgoing connections need none.
 
 | Field | Meaning |
 |---|---|
-| `proto` | Transport: `udp`, `ws`, or `wss` |
+| `proto` | `udp`, `ws` or `wss` |
 | `addr`, `port` | Address and port advertised to peers |
-| `bind_addr`, `bind_port` | Local address and port; omitted values default to `addr` and `port` |
+| `bind_addr`, `bind_port`, `bind_proto` | Local binding when it differs from the advertised one |
 | `path` | WebSocket request path including query, default `/` |
+| `tls_cert`, `tls_key` | Native TLS for a local `wss` listener |
+| `tls_ca` | Private CA bundle a registry `wss` endpoint is checked against |
 
-For UDP, `addr: "0.0.0.0"` expands to eligible IPv4 interface addresses;
-`addr: "::"` expands to global or ULA IPv6 addresses. Include both for dual stack.
-Link-local addresses are excluded because their scope is local to an interface.
-An independent interface actor scans at startup, on OS address/link events
-(Linux netlink, Darwin routing socket), and every 30 seconds as a fallback.
-The graph receives an immutable address list; interface enumeration errors
-do not terminate mesh. Explicit binds listen on exactly that address. A concrete
-bind waits while its address is absent, appears when the address is added, and
-closes when the address disappears. Loopback binds are allowed explicitly;
-wildcards do not advertise loopback. Link-local and mesh-subnet addresses are excluded.
-Multiple paths or duplicate declarations can share an explicitly configured listener.
-Overlapping UDP wildcard and explicit binds share one socket per address family and port.
+For UDP, `addr: "0.0.0.0"` listens on every eligible IPv4 interface address
+and `"::"` on global or ULA IPv6 addresses; include both for dual stack.
+Listeners follow interface changes without a restart. An interface address
+without a configured UDP listener gets an implicit socket on a random port,
+so a node with an empty `endpoint` list still accepts return traffic from
+peers that have seen it.
 
-Outgoing channels are created for eligible interface addresses and known remote
-endpoints. An outgoing UDP channel sends from the node's UDP listener socket on
-its interface: the configured one, or an implicit socket that every interface
-address without a configured UDP listener gets, bound to that address on a
-kernel-chosen port and advertised like a configured listener. The channel's
-graph vertex is a fresh id of the dialing node, described by that listener's
-address, so channels of one socket to different targets, and equal private
-sockets of different nodes, are distinct vertices. A channel vertex only
-sends and a listener only receives, so no path passes through a node without
-visiting its mesh-IP vertex. Reconnecting to the same target reuses the same
-vertex. WS/WSS client connections keep their own TCP socket and its address as
-the vertex description, assigned by the OS. A vertex's `endpoint` flag
-explicitly says whether it accepts new channels. Client socket vertices and
-mesh-IP vertices have this flag cleared.
+A port-forwarded node advertises the public pair and binds the private one:
+`addr`/`port` are what peers dial, `bind_addr`/`bind_port` where the
+forwarded packets arrive. Configure the forwarding on the router; mesh does
+not. Nodes behind NAT without forwarding learn each other's mappings from a
+common peer and connect directly where the NAT allows it.
 
-Every vertex is a 32-bit id: the owner's registry index in the high byte and a
-24-bit counter below it. Counter 0 is the owner's mesh-IP vertex. The
-endpoints of the registry get counters 1.. in registry order, so every node
-derives them without gossip. Runtime vertices, implicit listeners and channel
-sources, are allocated from counter 1024 upwards for the life of the process;
-the counter is never expected to wrap. The description of an id, its
-`proto`, `addr`, `port` and `path`, travels only in the owner's graph record;
-routing, links and packet sources use ids alone.
-
-All transport traffic goes through a directed `Channel` with its own protocol actor.
-UDP has no connection abstraction: an outgoing channel writes datagrams from an
-unconnected socket; a listening socket dispatches datagrams to receiving channels.
-Every authenticated message includes its source vertex id. The receiving
-socket supplies the destination endpoint. Any ordinary data, vertex, edge or
-registry message can be the first one; there is no preliminary message or reply.
-The receiver sends no gossip, registry or data back through that UDP channel.
-Return traffic requires an independently created outgoing channel to a known listener,
-or another route through the mesh. UDP-only nodes need a reachable advertised listener
-for return traffic; WS/WSS clients can receive through an outgoing connection without one.
-
-Each Channel has a goroutine and an unbounded FIFO mailbox. Channel actors
-handle authentication, gossip and forwarding directly to the next channel;
-connection attempts are tracked separately from graph edges and channels.
-Channel actors and their mailboxes exit when their I/O closes. One graph goroutine merges
-observations and advertisements and periodically publishes a shared immutable
-snapshot, including routes, to the actors and TUN. Each mailbox has a channel-driven
-queue that accepts messages independently of its consumer. Packets and snapshots
-share that queue; there is no configured capacity or drop-on-full policy.
-Socket reads run independently of mailbox processing. There is no shared mutex
-around graph updates or packet forwarding.
-
-The example above uses two different addresses and two different ports:
-
-```text
-203.0.113.10:17001  <->  192.168.1.20:7001
-       public                 local
-```
-
-The router forwards inbound UDP to `192.168.1.20:7001` and translates
-replies from that pair to `203.0.113.10:17001`. Configure that
-mapping on the router separately; mesh does not configure NAT.
-The graph uses the public endpoint for the receiving side; its private pair is
-used to receive the forwarded datagrams. To use the LAN
-address directly too, keep the separate port-7000 entry shown above.
-
-Outgoing UDP channels leave the listener socket, so a forwarded listener's
-outgoing traffic uses its forwarded mapping and any other socket gets one
-dynamic mapping shared by all its channels. Every node reports, next to each
-incoming UDP link in its graph record, the wire address the packets actually
-arrive from when it differs from the source vertex's description: that is
-the mapping the sender's NAT chose for that socket, and since the socket is
-the sender's listener, it is where the listener can be reached from outside.
-A node dialing a private UDP listener that is on none of its own networks
-sends to the smallest such observed address instead of the private one; the
-listener stays the channel's graph target and exactly one wire address is
-tried per listener at a time. Two nodes behind NAT therefore learn each
-other's mappings from any common peer, dial each other once a second, and
-the first packet of each opens its own mapping so the other's next packet
-passes. Symmetric NAT gives every observer a different mapping, the chosen
-one only works for that observer, and the route keeps going through a relay.
-There is no STUN, no coordination message and no state before data: the
-packets that open the mappings are ordinary gossip.
-
-WS/WSS uses the same endpoint shape. Each connection backs two independent directed channels.
-For native TLS, set `tls_cert` and `tls_key` on the local endpoint. The client
-checks the certificate and advertised hostname/IP against system trust roots;
-`tls_ca` on a registry endpoint adds a private CA bundle. TLS files are local
-paths and are never advertised through gossip. Multiple paths can share a
-TCP listener; different paths remain different endpoints.
-
-For TLS termination at a reverse proxy, configure the public WSS endpoint
-and explicitly select plaintext WS on the local binding:
+For TLS termination at a reverse proxy, advertise the public WSS endpoint
+and bind plain WS locally:
 
 ```json
-{"proto":"wss","addr":"mesh.example.net","port":443,"path":"/mesh",
- "bind_proto":"ws","bind_addr":"127.0.0.1","bind_port":8080}
+{"proto": "wss", "addr": "mesh.example.net", "port": 443, "path": "/mesh",
+ "bind_proto": "ws", "bind_addr": "127.0.0.1", "bind_port": 8080}
 ```
 
-The proxy must preserve the public HTTP Host and request path and support
-WebSocket upgrades. `bind_proto` defaults to `proto`. UDP and TCP may use the
-same port. WS and native WSS need different TCP ports. Mesh authenticates
-and encrypts its packets even when TLS terminates at a proxy.
+The proxy must keep the Host header and path and support WebSocket
+upgrades. Packets are encrypted and authenticated end to end regardless of
+TLS.
 
-On Linux, the TUN interface persists across daemon exits, so a restart does not remove
-the application's local address and route. The next process reattaches to
-that interface. When changing the configured TUN name or removing mesh,
-remove the old interface explicitly with `ip link del <name>`.
-On macOS, closing the process's utun descriptor removes the interface and route.
+Routes prefer UDP links over WebSocket ones and shorter paths over longer.
 
-`key` is one 32-byte seed from which the X25519 static keypair (`pub`) is
-derived. Every transport packet, including gossip, is authenticated by the
-link cipher. Nodes relay every node's graph record unchanged and keep only
-the newest version; there is no separate advertisement signature or signing key.
+On Linux the TUN interface persists across restarts; remove it with
+`ip link del <name>` when renaming or uninstalling. On macOS the interface
+disappears with the process.
 
-## Wire format
+### Embedded SSH
 
-All multibyte integers in the mesh protocol use little-endian order.
-Encapsulated IP packets retain their standard network format. The key
-context is `mesh/13`; upgrade all peers together. Releases through 14 use earlier channel semantics or wire formats and cannot exchange traffic with this
-version. Update peers together.
+`sshd: true` (or `mesh run -sshd`) serves SSH on the node's mesh address,
+port `sshd_port` (`-sshd-port`, default 22), inside a userspace TCP stack
+fed straight from decrypted mesh packets: the server is unreachable from any
+system interface and needs no system sshd or firewall rule. The host key is
+the node key, so `known_hosts` can hold `<mesh ip> ssh-ed25519 <peer pub>`.
+Any ring member's Ed25519 key logs in; `sshd_authorized_keys`
+(`-sshd-authorized-keys`) adds an OpenSSH `authorized_keys` file. Sessions
+run as the user mesh runs as; when that is root, `user@` selects the
+account. Supported: exec, shell with pty, env, window resize and exit
+status; no SFTP or port forwarding.
 
-Each registered pair derives a shared secret with X25519 and directional
-keys with HKDF-SHA256. The context contains `mesh/13`, the sender's public key
-and the receiver's public key. There is no handshake or forward secrecy.
+### Local control and web
 
-| Type | Layout |
-|---|---|
-| data transport | header word (8), sender index (1), ChaCha20-Poly1305 ciphertext and tag (16) |
-| graph transport | the same header and encryption; the inner record is a zstd frame |
-| registry transport | the same header and encryption |
-| versions transport | the same header and encryption; the inner bundle is a zstd frame |
+`control` enables a read-only HTTP API on a loopback address:
 
-The header word is little-endian: the packet kind in its two low bits (data
-`0`, graph `1`, registry `2`, versions `3`) and the packet ID above them.
-Registry indexes are limited to 1..255, so the sender fits one byte. The
-header is authenticated as associated data. The nonce is not sent: it is the
-header word padded with zeros. Packet IDs come from one counter per node
-shared by all its channels, started from the clock at process start, so no
-ID repeats for a sender as long as clocks do not run backwards across
-restarts. The encrypted plaintext is
-`source vertex id (4, little-endian) || inner message`. The source id must
-belong to the sender and must not be its mesh-IP vertex; a packet whose source
-is unknown to the receiver still authenticates, but only a channel whose
-source it matches accepts it. A relay wraps the inner message with its
-outgoing channel source; it preserves the route and payload and advances the
-route cursor.
+- `GET /status`: node status: registry, channels, links, graph, records,
+  version vectors and routes.
+- `GET /topology`: registry, live graph edges and routes for the web page.
+- `GET /metrics`: Prometheus text: packets and bytes by kind and direction,
+  rejected packets by reason, records and vectors applied, stale and
+  invalid, TUN and relay counters, link and dial events, and per-peer
+  reachability, route length, links and record age.
+- `GET /config?node=laptop`: a bootstrap configuration for a node without
+  static endpoints, selected by `name` or `index`: the node, the peers with
+  static endpoints, no private key.
 
-Inner data starts with one byte holding the hop count minus one in its high
-nibble and the cursor in its low nibble, then the route as a list of
-registry indexes (1 byte each), the nodes the packet must visit in order,
-ending with the destination. The opaque payload follows. Routes allow at
-most 16 hops. Truncated routes, a cursor past the route and zero indexes are
-rejected. A relay accepts a packet only when the node
-at the cursor is itself and the previous node is the channel's peer, advances
-the cursor, and sends through its own channel to the next node: the
-cheapest outgoing channel with a graph edge into that node, then the first
-in canonical order, the same choice the sender's search would make. When the cursor
-passes the last hop the packet is delivered to TUN.
-The transport never reads the payload to find an address or choose a destination.
-The TUN adapter handles IPv4/IPv6 packet framing and destination lookup on ingress;
-node address allocation in the current registry remains IPv4.
+`mesh web` is a separate unprivileged process serving a page over the control
+API: host and endpoint graphs, a spring simulation of the graph, a hop
+matrix with path highlighting, and configuration downloads. It can bind a
+LAN or mesh address while control stays on loopback:
 
-The graph is a set of per-node records. A node's record holds its listener and
-client socket vertices, each with its attachment directions, and the links it
-observes into them. One record travels in one packet, compressed with zstd;
-a frame that inflates past 64 KiB is rejected.
-
-Every second each outgoing channel sends the node's **version bundle** and
-then every record the peer's last known version vector does not show. A
-node's vector lists the version of every record it holds, stamped with the
-node's packet counter when that set last changed, so it changes only when a
-record does. Vectors travel through the mesh like records: a node forwards
-every vector it knows, and a peer's vector arrives directly on a two-way
-channel or through other nodes when the channel carries nothing back. A
-record is sent to a peer until the peer's vector shows its version, so a
-lost packet is sent again on the next tick; a peer whose vector never
-arrived gets every record every second, which is the only option for a
-node that sends to nobody. The bundle is also what keeps a link alive.
-
-A bundle is a zstd frame of: chunk count (1), then per chunk the vector
-owner (1), the vector version (8), entry count (1) and entries of record
-owner (1) and record version (8). The node's own vector comes first, then
-the others by owner. The whole list is compressed; a frame that would not
-fit one 1500-byte datagram is halved and each half packed again, and a
-chunk carries any subset of a vector's entries: a chunk of a version newer
-than the stored one replaces the vector, one of the same version adds its
-entries, an older one is dropped. Bad frames, a zero owner, a short chunk
-and trailing bytes reject the bundle.
-
-Inner graph records, once inflated, start with the owner registry index (2), version (8),
-vertex count (2), the vertices, link count (2), the links, observation
-count (2) and the observations. Each vertex is its counter (3, little-endian;
-the owner byte is the record owner and is not repeated), one flags byte
-(bit 0: `vertex -> meshIP`, bit 1: `meshIP -> vertex`, zero is invalid) and
-its description. Each link is 7 bytes: the full source vertex id (4) of
-another node's socket or listener and the counter (3) of the local
-destination vertex in this record. Each observation is the source vertex id
-(4) of one of the record's links followed by the UDP address description its
-packets arrive from. Endpoint descriptions start with kind (1: UDP/IPv4=1,
-WS=2, WSS=3, UDP/IPv6=4, TCP/IPv4=5, TCP/IPv6=6) and port (2). The high bit
-of kind is the `endpoint` flag; the low seven bits identify the
-transport/address format. UDP/TCP then carry four IPv4 or sixteen IPv6
-octets. WS/WSS carry the address and path as two strings, each prefixed by
-its byte length (2). Strings use UTF-8.
-
-Counts and lengths are checked against the remaining packet before allocating
-or reading. Truncated packets, unknown protocol codes, invalid flags, counter
-0 or duplicate counters, mesh-IP descriptions, links from a mesh-IP vertex or
-to a counter outside the record, self-links, observations of a source that is
-not a link, non-UDP or portless observations, and trailing bytes reject the
-record as a whole. A record with an unknown owner, the receiver's own index,
-or a version not above the stored one is ignored. Lost or reordered records
-are sent again while the peer's vector lacks them. Other nodes can use vertices
-with `endpoint: true` to open new direct channels. The flag is metadata and
-does not change the id.
-
-The authenticated sender relays every record it knows, including those of
-other members, unchanged and still compressed as received. A newer record
-replaces the owner's previous record completely.
-
-A WebSocket binary message contains one mesh transport packet with its source
-id inside the authenticated ciphertext. The client side is a fresh id of the
-client described by the real TCP local IP and port; the server side is the
-configured WS/WSS endpoint, including its public hostname and path behind a
-proxy. The HTTP Upgrade selects that
-endpoint. No mesh negotiation, binding packet or binding reply is sent.
-The first ordinary message is processed immediately and identifies the peer
-and source vertex for the server's two independent channels. A client socket
-can receive through the existing connection without becoming a listener.
-
-The graph owner, the transport and each connection attempt have separate
-counters initialized from Unix nanoseconds. The graph counter versions the
-local record, advancing only when the record's content changes; the
-transport counter numbers every outgoing packet of the node and doubles as
-the nonce; a connection attempt takes its ID from the same counter and its
-first packet carries that ID, so both ends order duplicate attempts alike. Forwarding a
-record preserves its owner and version.
-
-## Map and routing
-
-Descriptions live in `map[uint32]Vertex`, rebuilt from the registry, the
-records and the local channels; the edge set is derived from the records and
-is a set of directed id pairs. Routes carry the same ids. Full addresses are
-resolved only by the local transport. A vertex whose description is not yet
-known still routes; it is shown by id until the owner's record arrives.
-Hostnames are lowercased, IPs normalized, and an empty WS path becomes `/`.
-UDP/TCP paths are empty. Local bind, TLS settings and the endpoint flag are
-not part of the description.
-
-The graph remains a map of directed endpoint pairs;
-registry indexes identify encryption keys and own vertex ids. An internal
-mesh address is the id with counter 0. Local graph edges describe actual input/output directions. An open listener
-advertises `endpoint -> meshIP` before accepting any peer. An outgoing channel
-adds `meshIP -> local source`; an incoming channel adds `local destination -> meshIP`.
-The graph owner takes the union of these capabilities, so closing one channel
-cannot withdraw a direction still provided by another channel or listener.
-A WS return channel can add `meshIP -> listener` on the server and
-`source -> meshIP` on the client. Neither direction is implied by the address or
-transport name. A restarted node publishes a record without its old sockets,
-so their edges disappear everywhere once the record arrives. Static registry
-addresses are discovery candidates, not evidence of a live network edge.
-
-Receiving an authenticated packet observes precisely its directed channel.
-UDP discovery obtains the local destination from socket packet metadata and
-the configured listener mapping. Packets carry their source id in the
-authenticated envelope and are dispatched to the corresponding channel.
-The sender-provided source stays the same across NAT and reverse proxies. A forwarded listener uses its configured public endpoint
-in the graph. The observed link expires after five seconds without packets;
-closing its channel removes it from the record without inventing the reverse link.
-An incoming channel that receives nothing for five seconds closes as well,
-whatever its transport; for a WebSocket connection that closes the whole
-connection, as does a failed read or write, so a connection on a black-holed
-TCP path is redialed after five seconds instead of after the kernel's
-retransmission timeout.
-A link only becomes an edge while its source vertex is in the current record of
-its owner.
-
-Every second each host sends its version bundle, and the records its peer
-lacks, on outgoing channels only.
-Dial candidates combine local source addresses with remote listening endpoints
-from the registry and learned vertices with the endpoint flag set. Client socket
-vertices are never dial targets.
-Addresses within the mesh subnet are filtered. A UDP candidate carries the
-wire address to send to: the listener's own address, or an observed NAT
-mapping for a private listener off the local networks; the listener stays the
-channel's graph target either way and a changed wire address is a new dial.
-UDP writes leave the listener socket of the selected source address and
-interface, with the source set through socket control metadata. Establishing a channel
-is independent of graph payload availability and of any reverse channel.
-
-Gossip replaces records whole. Receiving a newer record updates the graph
-without sending a reply or forwarding it immediately; the next tick carries
-it to every peer whose vector lacks it. Records have no age-based expiry: the last record of a node that
-never returns stays, but its links into other nodes disappear as their channels
-expire. Older versions cannot restore a removed vertex or link.
-
-Dijkstra follows the directed id graph with a cost per link: 3 into a UDP
-listener, 6 for a WebSocket connection in either direction; attachments to a
-host are free. Equal costs prefer fewer node hops, then the path whose
-vertices come first in description and id order, so every node that sees
-the same graph makes the same choice. Costs are fixed for now. Only the sequence of nodes travels in the packet;
-each relay picks its link to the next node from the same graph. The
-return path is computed independently. There is no separate per-host
-endpoint selector. Graph changes and the one-second local observation pass
-rebuild routes.
-
-Status exposes incoming endpoint pairs, the live graph, its vertices, every
-known record with its version, every known version vector, and routes to
-peers keyed by mesh address. The
-graph owner publishes immutable snapshots through the same mailboxes used for
-packets.
-Channel identity is a directed id pair. Duplicate WS attachments prefer
-the smaller source id, then the larger initial packet ID, independently for each
-direction. There is at most one pending dial per candidate channel. Accepted WS
-connections stay private to the transport and supply a writer and a reader to
-separate channels. A replaced or withdrawn channel does not stop its sibling;
-silence, a read error or a write error close the connection as a whole.
-Only after both channels are closed is the shared WS socket released. The reader
-continues draining WS frames when its mesh receive channel is closed, and closing
-one channel does not cancel the shared socket context. Socket failures are handled
-by the affected reader/writer. Writes use an unbounded mailbox and run independently
-of graph updates. Closing a channel discards its pending queue.
-Status exposes `channels` with directed `from`, `to`, `transport`, `outgoing` and
-attachment `id`, plus the number of pending dials. It exposes no connections.
-Crypto keys are shared across a peer's channels and survive local link expiry.
-Every incoming channel keeps a 2048-packet window of accepted packet IDs
-below the highest one, so a replayed packet is dropped and cannot refresh a
-link or reach the TUN twice, while a packet reordered within the window
-still arrives. The window lives with the channel: after a link expires, a
-replayed packet can open the channel again for one more expiry period.
-
-## Development
-
-```
-./build          # .build/bin/mesh, published as ./mesh
-./build test     # e2e topologies in tst/
-./lint.sh        # house style gate, needs a sibling ay checkout
+```sh
+curl -f 'http://gateway.example:8059/api/config?node=laptop' -o config.json
+sudo mesh run -c config.json -key-file /path/to/private-key
 ```
 
-CI runs the same `./build test` on every push and pull request. The lab needs
-unprivileged user namespaces and the tun module, which the workflow enables.
-The separate Race detector job runs the entire suite, including QUIC stress,
-with `./build -j 4 -Drace test`. This builds mesh with `-race` and CGO enabled
-(a C compiler is required). A detected race immediately fails the process;
-CI preserves its report with the test logs. CLI invocations skip the race
-runtime's one-second exit delay.
+### macOS
 
-Coverage comes from the end-to-end suite rather than from unit tests:
-`./build -Dcoverage coverage` builds an instrumented binary, points every test
-node at its own `GOCOVERDIR`, and merges the counters every mesh process wrote
-at exit into `.build/coverage.out`. CI uploads that profile to Codecov.
+Darwin builds use the kernel's `utun` on arm64 and amd64 without any
+extension. Run `mesh run` as root; omit `tun` for an automatic interface or
+set `utunN`. Configuration and protocol are the same as on Linux.
 
-E2E tests run nodes in separate network namespaces wired by a userspace
-switch (`tst/lib.py`); see `CLAUDE.md`.
+## Building
+
+```
+./build                       # .build/bin/mesh
+./build test                  # end-to-end topologies in tst/
+./build -Drace test           # the same under the race detector (needs cgo)
+./build -Dcoverage coverage   # instrumented run, profile in .build/coverage.out
+./lint.sh                     # house style gate, needs a sibling ay checkout
+```
+
+Go 1.26 or newer. The end-to-end tests run nodes in network namespaces wired
+by a userspace switch and need unprivileged user namespaces, the tun module,
+and for some scenarios sshd, iperf3, rsync and a Playwright Chromium; CI runs
+them all on every push, plus native macOS checks.
+
+## Releases
+
+**Actions → Release → Run workflow** on `master`, or locally
+`python3 dev/release.py <tag> --binaries-directory <dir> --artifacts-directory <out> < notes.md`.
+Releases are numbered tags with linux-amd64, darwin-amd64 and darwin-arm64
+binaries, a source archive and checksums.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-## Application and failure tests
-
-The e2e suite requires Linux, Python 3.12+, Go, iproute2, util-linux, OpenSSH
-(client and server), rsync, curl and iperf3. All are required in CI; missing
-programs fail the test. Each application runs in a node's network namespace
-and connects to another node's mesh IP. OpenSSH runs as the invoking user
-inside a nested user namespace, with fresh host/user keys and no PAM.
-
-`Lab.block` / `unblock` cut individual directions or segments without killing
-nodes. `intercept` can drop, delay, hold, duplicate, copy or corrupt selected
-outer packets. Held packets can be released later; delivery counters show
-which path carried traffic. These controls live in the existing userspace
-switch, not in the mesh daemon.
-
-The application scenarios exercise persistent SSH across direct/relay path
-changes, one-way failures, relay exits, total outages, mesh restarts, endpoint
-roaming and fallback between two physical segments. Concurrent SSH clients
-have distinct mesh IPs. The same SSH process exchanges numbered requests
-throughout; tests reject missing/duplicate replies and report its maximum
-pause. Route convergence is bounded by 30 seconds and SSH recovery by 60
-seconds, allowing for gossip propagation and TCP retries after the five-second link timeout.
-
-The QUIC stress test runs one server and four clients in five separate
-namespaces. All clients start together and continuously exchange 64 KiB
-blocks for 30 seconds, verifying every byte. It checks four distinct source
-IPs, one connection per client, matching server/client byte counts, and
-prints each client's throughput. `mesh-quic` uses
-[quic-go](https://github.com/quic-go/quic-go) and is built only with the
-`meshquic` tag; it is absent from the production binary and coverage profile.
-The stress test runs in all three CI jobs as part of the regular e2e suite.
-
-Other scenarios transfer and hash files through scp and curl while cutting
-the active path, synchronize trees with rsync, and run iperf3 TCP/UDP streams
-with deterministic loss and delay. UDP probes check packet sizes, reordering
-across busy channels, socket address metadata and ciphertext authentication. Separate tests check
-gossip on every endpoint during UDP traffic, data keeping a link alive
-when gossip is dropped, five-second local link expiry, and a
-20-second RTT carrying UDP traffic without link flaps. Gossip reconnection, unknown
-keys, CLI errors and malformed packets also have separate tests. `mesh-probe` is built only with the `meshprobe` tag for the
-protocol test; it sends authenticated malformed messages to real mesh nodes.
-It is absent from the production binary and its coverage profile.
-
-`./build -j 4 test` runs the suite. `./build -j 4 -Dcoverage coverage` runs it
-against the instrumented daemon and enforces 95% statement coverage. Each
-individual daemon run has a separate counter directory; shutdown waits for
-all processes and missing daemon counters fail the run. CLI coverage is
-merged too. Codecov receives that same profile and requires 95% coverage.
-
-NAT scenarios translate both IPv4 addresses and UDP ports in the test router.
-They exercise two isolated private networks, failure of one forwarded port,
-the same SSH and QUIC connections migrating from LAN to a public endpoint
-and then to a second forwarded port, and two nodes without forwarded ports
-behind address-restricted NAT that learn their mappings from a public peer,
-connect directly and keep the link after that peer stops. These tests do not verify a physical Xiaomi router.
-
-WS tests force simultaneous TCP SYNs, count established kernel sockets,
-verify bidirectional traffic through an accepted connection, distinguish paths
-on a shared listener, reject unauthenticated or misbound connections, and
-exercise native WSS trust checks and a real TLS reverse proxy. A slow writer
-must not block status or another UDP peer. SSH and QUIC migrate UDP/WSS/UDP
-without reconnecting their application processes.
-
-The additional twenty protocol and application scenarios are listed in
-[tst/SCENARIOS.md](tst/SCENARIOS.md).
-
-On failure the suite prints application/mesh logs and channel counters. Set
-`MESH_TEST_ARTIFACTS` to preserve these along with status snapshots outside
-the build temporary directory; CI uploads them as failure artifacts.
-
-## Embedded SSH
-
-`sshd: true` (or `mesh run -sshd`) serves SSH on the node's mesh address,
-port `sshd_port` (`-sshd-port`, default 22). The listener lives in a
-userspace TCP stack (gVisor netstack) fed straight from decrypted mesh
-packets: nothing reaches the kernel, so the server is unreachable from any
-system interface, needs no system sshd or firewall rule, and works wherever
-mesh runs. TCP to that port on the mesh address never enters the TUN; other
-traffic is unaffected.
-
-The host key is the node key, so a client can verify it against the ring
-(`<mesh ip> ssh-ed25519 <peer pub>` in `known_hosts`). Any ring member's
-Ed25519 key logs in; `sshd_authorized_keys` (`-sshd-authorized-keys`) names an
-OpenSSH `authorized_keys` file with extra keys. Sessions run as the user
-mesh runs as. When mesh runs as root, `user@` selects the account (uid, gid,
-groups, home and login shell from the system). Supported: exec, shell with
-pty, env, window resize and exit status; no SFTP or port forwarding yet.
-
-## Local control and web
-
-`control` optionally enables a read-only HTTP server. It accepts only literal
-loopback IPs (including `::1`) or `localhost`; omitting it disables control.
-The Unix status socket and `status -s` have been removed.
-
-- `GET /status`: raw node status, including 64-bit endpoint IDs.
-- `GET /topology`: public registry, all live directed graph edges and selected
-  routes. Endpoint IDs are decimal strings so browsers preserve every bit.
-- `GET /metrics`: Prometheus text exposition. Counters cover packets by inner
-  kind and bytes in each direction, packets an incoming channel rejected by
-  reason, graph records applied, stale and invalid, data dropped by a relay
-  without a channel or on a local hop outside the graph, TUN packets read,
-  unrouted and delivered, link up and down events and failed dials. Gauges
-  cover graph edges, vertices, addresses, records, links, channels by
-  transport and direction, pending dials, routes, messages queued for the
-  graph actor, and per peer: reachability, route length, incoming links, record
-  age, vertices and links.
-- `GET /config?node=mini`: a bootstrap configuration for an ephemeral registry
-  entry. Select by its optional `name` or numeric `index`. Static entries
-  cannot be exported as ephemeral nodes. The result includes no private key,
-  TLS file paths or host binding overrides, and selects the native default TUN.
-  It contains the chosen node and peers with static endpoints, at the default
-  registry version `1`; the rest is learned from the mesh.
-
-`mesh web` is a separate, unprivileged process. It reads the localhost control
-API and serves the embedded Cytoscape.js 3.34.3 interface without a CDN:
-Hosts, Endpoint, Matrix and Config tabs. Matrix entries count transport hops
-between nodes in the directed graph; local attachment edges cost zero.
-Clicking a matrix cell highlights its path. Data refreshes every three seconds;
-unchanged topology preserves the viewport and dragged vertex positions.
-`/config` opens the configuration tab, and `/api/config?node=client` downloads JSON.
-The web listener can bind a LAN or mesh address; control stays on loopback.
-
-For example:
-
-```sh
-curl -f 'http://gateway.example:8059/api/config?node=client' -o config.json
-sudo mesh run -c config.json -key-file /path/to/private-key
-```
-
-Registry entries may include a `name` used for display and configuration
-selection. Names do not participate in the transport protocol or authentication.
-Only public registry data is exported; `mesh web` never reads the private key.
-
-## macOS
-
-Darwin builds use the kernel's native `utun`, on both arm64 and amd64, without
-an extension or third-party driver. Run `mesh run` as root. Omit `tun` for an
-automatically assigned interface, or set it to `utunN`. Linux's `mesh0` name
-is not valid on Darwin. `/sbin/ifconfig` assigns the node address and MTU, and
-`/sbin/route` adds the mesh subnet through that interface. Closing the process
-removes the utun interface and its route. UDP, WS/WSS, key files and the local
-HTTP API use the same configuration and protocol as Linux.
-
-The Darwin UDP listener reserves the corresponding localhost TCP port to
-prevent two mesh processes from sharing it accidentally. Linux keeps its
-namespace-local UDP port guard. Native macOS CI checks creation, encrypted
-ICMP round trips at two packet sizes, and restart on both architectures.
-
-## Releases
-
-Use **Actions → Release → Run workflow** on `master`, as in `shitty`. Leave
-`tag` empty to pick the next numeric release, or supply that next number.
-CI runs Linux e2e, browser, race and coverage checks and native Darwin tests,
-packages the tested binaries, creates a draft, attests the archives and
-publishes the release. Development stays on `master`; releases create tags.
-
-Exported ephemeral configurations include the selected node and peers with static
-endpoints, default registry version 1, and no listeners. Add local endpoints only
-when that node should accept new incoming connections. The status API exposes
-all graph descriptions under `addresses`; client sockets contain their actual
-`udp` or `tcp` address and port with `endpoint: false`. Listeners have
-`endpoint: true` and retain `udp`, `ws`, or `wss`.
