@@ -15,6 +15,11 @@ def test():
         lab.wait(lambda: (route := lab.endpoint_route('a', 'b'))
                  and route[0]['from']['addr'] == '10.1.0.1',
                  'initial route uses the source endpoint that will fail')
+        # Both of a's listeners must be linked from b before the reverse route
+        # is recorded, or the second link changes the tie-break later.
+        lab.wait(lambda: {e['to']['addr'] for e in lab.status('b')['graph']
+                          if e['to'].get('endpoint') and e['to'].get('port') == 7000} >= {'10.1.0.1', '10.1.0.101'},
+                 'b linked to both listeners of a')
         reverse_before = lab.endpoint_route('b', 'a')
         lab.intercept('a', 'b', 'drop', source_ip='10.1.0.1', count=-1)
         def alternative():
