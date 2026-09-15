@@ -82,7 +82,9 @@ func (n *Node) status() *Status {
 	slices.SortFunc(st.Links, func(a, b LinkStatus) int { return compareEdge(a.Edge, b.Edge) })
 
 	for dst, path := range n.routes {
-		st.Routes[n.describe(dst)] = path
+		if isHostID(dst) {
+			st.Routes[n.describe(dst)] = path
+		}
 	}
 
 	return st

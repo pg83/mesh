@@ -117,7 +117,7 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 	w.gauge("mesh_records", "Graph records held, including the local one.", float64(len(st.Records)))
 	w.gauge("mesh_links", "Incoming links observed within the last five seconds.", float64(len(st.Links)))
 	w.gauge("mesh_dials_pending", "Outgoing channel attempts in progress.", float64(st.Dialing))
-	w.gauge("mesh_routes", "Vertices with a computed route.", float64(len(st.Routes)))
+	w.gauge("mesh_routes", "Peers with a computed route.", float64(len(st.Routes)))
 	w.gauge("mesh_events_queued", "Messages waiting for the graph actor.", float64(queued))
 	w.family("mesh_channels", "gauge", "Channels by transport and direction.")
 

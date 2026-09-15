@@ -394,7 +394,7 @@ endpoint selector. Graph changes and the one-second local observation pass
 rebuild routes.
 
 Status exposes incoming endpoint pairs, the live graph, its vertices, every
-known record with its version, and routes keyed by destination endpoint. The
+known record with its version, and routes to peers keyed by mesh address. The
 graph owner publishes immutable snapshots through the same mailboxes used for
 packets.
 Channel identity is a directed id pair. Duplicate WS attachments prefer
