@@ -50,8 +50,16 @@ def name_of(rdata):
     return '.'.join(labels) + '.'
 
 
+class Lab(lib.Lab):
+    def registry(self):
+        registry = super().registry()
+        # A name that is not a single label has no place in the zone.
+        registry.append(dict(name='bad.name', index=9, pub=registry[0]['pub'], intip=lib.intip(9), endpoint=[]))
+        return registry
+
+
 def test():
-    lab = lib.Lab(['a', 'b', 'c'], {1: ['a', 'b', 'c']}, statics=['c'])
+    lab = Lab(['a', 'b', 'c'], {1: ['a', 'b', 'c']}, statics=['c'])
     lab.configs['a'] = dict(dns=True)
     lab.run_args['b'] = ['-dns', '-dns-port', '5353']
     with lab:
@@ -65,6 +73,7 @@ def test():
         assert rcode == 0 and [(kind, name_of(rdata)) for kind, rdata in answers] == [(12, 'b.mesh.')]
         assert ask(lab, 'a', service, 'b.mesh', qtype=28) == (0, []), 'AAAA of a known name is an empty answer'
         assert ask(lab, 'a', service, 'nobody.mesh')[0] == 3
+        assert ask(lab, 'a', service, 'bad.name.mesh')[0] == 3
         assert ask(lab, 'a', service, '9.0.77.10.in-addr.arpa', qtype=12)[0] == 3
         assert ask(lab, 'a', service, 'example.com')[0] == 5
         assert ask(lab, 'a', service, '1.0.0.10.in-addr.arpa', qtype=12)[0] == 5
