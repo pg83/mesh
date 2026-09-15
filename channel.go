@@ -327,8 +327,8 @@ func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
 	if d.cursor == len(d.hops) {
 		n.metrics.tunDelivered.Add(1)
 
-		if n.sshd != nil && n.sshd.accepts(d.payload) {
-			n.sshd.inject(d.payload)
+		if n.net != nil && n.net.accepts(d.payload) {
+			n.net.inject(d.payload)
 		} else {
 			post(n.tunWrites.in, d.payload)
 		}
@@ -363,15 +363,27 @@ func (n *Node) tunLoop() {
 		case *Snapshot:
 			view = v
 		case TunPacket:
+			n.metrics.tunRead.Add(1)
+
+			if n.net != nil && n.net.accepts(v.payload) {
+				n.net.inject(v.payload)
+
+				continue
+			}
+
 			var hops []uint16
 
 			if ip := v.destination.To4(); ip != nil {
+				if [4]byte(ip) == n.intip {
+					post(n.tunWrites.in, v.payload)
+
+					continue
+				}
+
 				if peer := view.registry.byIntip[[4]byte(ip)]; peer != nil {
 					hops = view.hops[hostID(peer.index)]
 				}
 			}
-
-			n.metrics.tunRead.Add(1)
 
 			if len(hops) == 0 {
 				n.metrics.tunUnrouted.Add(1)

@@ -25,6 +25,8 @@ func main() {
 			sshd := fs.Bool("sshd", false, "serve SSH on the mesh address")
 			sshdPort := fs.Int("sshd-port", 0, "SSH port on the mesh address (default 22)")
 			sshdKeys := fs.String("sshd-authorized-keys", "", "extra authorized keys file for SSH")
+			dns := fs.Bool("dns", false, "serve the mesh zone on the mesh address")
+			dnsPort := fs.Int("dns-port", 0, "DNS port on the mesh address (default 53)")
 
 			throw(fs.Parse(os.Args[2:]))
 
@@ -44,6 +46,12 @@ func main() {
 				cfg.SshdAuthorizedKeys = *sshdKeys
 			}
 
+			cfg.Dns = cfg.Dns || *dns
+
+			if *dnsPort != 0 {
+				cfg.DnsPort = *dnsPort
+			}
+
 			newNode(cfg, log).run()
 		case "keygen":
 			keygen()
@@ -61,6 +69,14 @@ func main() {
 			throw(fs.Parse(os.Args[2:]))
 			go stopOnSignal(log)
 			runWeb(*listen, *control)
+		case "dns":
+			fs := flag.NewFlagSet("dns", flag.ExitOnError)
+			control := fs.String("control", "127.0.0.1:8058", "localhost control address")
+			listen := fs.String("listen", "127.0.0.1:5355", "DNS listen address")
+
+			throw(fs.Parse(os.Args[2:]))
+			go stopOnSignal(log)
+			runDNS(*listen, *control)
 		default:
 			printUsage()
 			os.Exit(1)
@@ -79,5 +95,6 @@ Commands:
   keygen                print a fresh key pair as JSON
   status [-control 127.0.0.1:8058]       dump node status as JSON
   web [-control 127.0.0.1:8058] [-listen 127.0.0.1:8059]
+  dns [-control 127.0.0.1:8058] [-listen 127.0.0.1:5355]  serve the mesh zone from the node status
 `)
 }

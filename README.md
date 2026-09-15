@@ -22,6 +22,7 @@ mesh run -c config.json     # runs a node (root, for the TUN device)
 mesh run -c config.json -key-file /path/to/private-key
 mesh status -control 127.0.0.1:8058
 mesh web -control 127.0.0.1:8058 -listen 127.0.0.1:8059
+mesh dns -control 127.0.0.1:8058 -listen 127.0.0.1:5355
 ```
 
 ### Configuration
@@ -55,6 +56,7 @@ mesh web -control 127.0.0.1:8058 -listen 127.0.0.1:8059
 | `no_dial` | Optional list of `{"from": ip, "to": ip}` pairs this node never dials |
 | `tun`, `mtu` | TUN name (`mesh0` on Linux, `utun` on macOS) and MTU (default 1380) |
 | `sshd`, `sshd_port`, `sshd_authorized_keys` | Embedded SSH server, see below |
+| `dns`, `dns_port` | Embedded DNS server for the `mesh` zone, see below |
 
 `-key-file` names a file with either the base64 seed or an unencrypted
 OpenSSH Ed25519 private key; for an SSH identity put the full
@@ -127,6 +129,30 @@ Any ring member's Ed25519 key logs in; `sshd_authorized_keys`
 run as the user mesh runs as; when that is root, `user@` selects the
 account. Supported: exec, shell with pty, env, window resize and exit
 status; no SFTP or port forwarding.
+
+### Names
+
+Every registry entry with a `name` is `<name>.mesh`, and its mesh address
+resolves back to that name. `dns: true` (or `mesh run -dns`) makes the node
+answer the zone, port `dns_port` (`-dns-port`, default 53), from its own
+registry: on its mesh address for peers, and on the subnet's service
+address, the first address of the subnet (`10.77.0.0` for `10.77.0.0/24`),
+for its own system, whose packets to the node's own address never enter the
+TUN. Names are `A` and `PTR` records with a 60-second TTL; other record
+types of known names get an empty answer, unknown names in the zone
+`NXDOMAIN`, everything outside the zone `REFUSED`, so a resolver must
+forward only the zone:
+
+```
+resolvectl dns mesh0 10.77.0.0 && resolvectl domain mesh0 '~mesh'   # systemd-resolved
+server=/mesh/10.77.0.0                                             # dnsmasq
+-u '[/mesh/]10.77.0.0'                                              # dnsproxy
+echo 'nameserver 10.77.0.0' > /etc/resolver/mesh                    # macOS
+```
+
+`mesh dns` serves the same zone from a node's control API on a plain
+socket (`-listen`, default `127.0.0.1:5355`) for resolvers that forward to
+localhost; it needs no privileges and no TUN.
 
 ### Local control and web
 

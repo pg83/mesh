@@ -38,7 +38,7 @@ with software_checksums(), tempfile.TemporaryDirectory(prefix='mesh-darwin-') as
     peer_cfg = dict(index=2, key=b['key'], registry=registry,
                     endpoint=[dict(proto='udp', addr=host, port=17002)])
     (root/'peer.json').write_text(json.dumps(peer_cfg))
-    (root/'node.json').write_text(json.dumps(dict(index=1, subnet='10.77.0.0/24', mtu=1380,
+    (root/'node.json').write_text(json.dumps(dict(index=1, subnet='10.77.0.0/24', mtu=1380, dns=True,
         control='127.0.0.1:18058', registry=registry, endpoint=[dict(proto='udp', addr=host, port=17001)])))
     (root/'key').write_text(a['key'])
     capture_log = open(root/'udp-checksums.log', 'w+')
@@ -83,6 +83,12 @@ with software_checksums(), tempfile.TemporaryDirectory(prefix='mesh-darwin-') as
                 for size in [56, 1200]:
                     result=run('/sbin/ping', '-n', '-c', '4', '-s', str(size), '-W', '1000', '10.77.0.2')
                     assert ' 0.0% packet loss' in result, result
+                # The subnet's service address answers the mesh zone through utun.
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                    sock.settimeout(3)
+                    sock.sendto(b'\x00\x07\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00' + b'\x04echo\x04mesh\x00' + b'\x00\x01\x00\x01', ('10.77.0.0', 53))
+                    reply = sock.recv(512)
+                assert reply[3] & 15 == 0 and reply.endswith(bytes([10, 77, 0, 2])), reply.hex()
                 print(f'Darwin TUN round trip {attempt+1}: 8 ICMP packets, both sizes passed')
             finally:
                 node.terminate()

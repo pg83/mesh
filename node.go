@@ -73,6 +73,9 @@ type Node struct {
 	next          map[uint16]Edge
 	metrics       Metrics
 	sshd          *SSHServer
+	dns           *DNSServer
+	net           *Netstack
+	intip         [4]byte
 }
 
 func newNode(cfg *Config, log *slog.Logger) *Node {
@@ -140,9 +143,18 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	}
 
 	n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
+	n.intip = me.intip
+
+	if cfg.Sshd || cfg.Dns {
+		n.net = newNetstack(n, cfg.Mtu, [][4]byte{me.intip, serviceAddress(n.subnet)})
+	}
 
 	if cfg.Sshd {
 		n.sshd = newSSHServer(n, cfg, me.intip)
+	}
+
+	if cfg.Dns {
+		n.dns = newDNSServer(n, cfg)
 	}
 
 	n.refresh(time.Now())
@@ -166,6 +178,10 @@ func (n *Node) run() {
 
 	if n.sshd != nil {
 		go n.loop("sshd", n.sshd.run)
+	}
+
+	if n.dns != nil {
+		go n.loop("dns", n.dns.run)
 	}
 
 	n.loop("graph", n.graphLoop)

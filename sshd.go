@@ -2,9 +2,7 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"crypto/ed25519"
-	"encoding/binary"
 	"io"
 	"net"
 	"os"
@@ -19,28 +17,17 @@ import (
 	"filippo.io/edwards25519"
 	"github.com/creack/pty"
 	"golang.org/x/crypto/ssh"
-	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
-	"gvisor.dev/gvisor/pkg/tcpip/header"
-	"gvisor.dev/gvisor/pkg/tcpip/link/channel"
 	"gvisor.dev/gvisor/pkg/tcpip/network/ipv4"
-	"gvisor.dev/gvisor/pkg/tcpip/stack"
-	"gvisor.dev/gvisor/pkg/tcpip/transport/tcp"
 )
 
-const (
-	defaultSSHPort = 22
-	sshNIC         = 1
-	sshQueue       = 256
-)
+const defaultSSHPort = 22
 
 type SSHServer struct {
 	node       *Node
 	ip         [4]byte
 	port       uint16
-	link       *channel.Endpoint
-	stack      *stack.Stack
 	config     *ssh.ServerConfig
 	authorized map[string]bool
 }
@@ -106,29 +93,9 @@ func newSSHServer(n *Node, cfg *Config, intip [4]byte) *SSHServer {
 	}}
 
 	s.config.AddHostKey(signer)
-
-	s.stack = stack.New(stack.Options{
-		NetworkProtocols:   []stack.NetworkProtocolFactory{ipv4.NewProtocol},
-		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol},
-	})
-
-	s.link = channel.New(sshQueue, uint32(cfg.Mtu), "")
-
-	netstackCheck("nic", s.stack.CreateNIC(sshNIC, s.link))
-
-	address := tcpip.ProtocolAddress{Protocol: ipv4.ProtocolNumber, AddressWithPrefix: tcpip.AddrFrom4(intip).WithPrefix()}
-
-	netstackCheck("address", s.stack.AddProtocolAddress(sshNIC, address, stack.AddressProperties{}))
-
-	s.stack.SetRouteTable([]tcpip.Route{{Destination: header.IPv4EmptySubnet, NIC: sshNIC}})
+	n.net.register(6, s.port)
 
 	return s
-}
-
-func netstackCheck(what string, err tcpip.Error) {
-	if err != nil {
-		throwFmt("sshd %s: %v", what, err)
-	}
 }
 
 func (s *SSHServer) loadAuthorizedKeys(path string) {
@@ -191,46 +158,13 @@ func currentUser() string {
 	return strconv.Itoa(os.Getuid())
 }
 
-func (s *SSHServer) accepts(packet []byte) bool {
-	if !validIPv4(packet) || packet[9] != 6 || [4]byte(packet[16:20]) != s.ip {
-		return false
-	}
-
-	head := int(packet[0]&15) * 4
-
-	return len(packet) >= head+4 && binary.BigEndian.Uint16(packet[head+2:]) == s.port
-}
-
-func (s *SSHServer) inject(packet []byte) {
-	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(append([]byte(nil), packet...))})
-
-	s.link.InjectInbound(ipv4.ProtocolNumber, pkt)
-	pkt.DecRef()
-}
-
 func (s *SSHServer) run() {
-	go s.node.loop("sshd egress", s.egress)
-
-	listener := throw2(gonet.ListenTCP(s.stack, tcpip.FullAddress{NIC: sshNIC, Addr: tcpip.AddrFrom4(s.ip), Port: s.port}, ipv4.ProtocolNumber))
+	listener := throw2(gonet.ListenTCP(s.node.net.stack, tcpip.FullAddress{NIC: stackNIC, Addr: tcpip.AddrFrom4(s.ip), Port: s.port}, ipv4.ProtocolNumber))
 
 	for {
 		conn := throw2(listener.Accept())
 
 		go s.serve(conn)
-	}
-}
-
-func (s *SSHServer) egress() {
-	for {
-		pkt := s.link.ReadContext(context.Background())
-		data := pkt.ToBuffer()
-		packet := data.Flatten()
-
-		pkt.DecRef()
-
-		if destination := ipDestination(packet); destination != nil {
-			post(s.node.tunInbox.in, any(TunPacket{payload: packet, destination: destination}))
-		}
 	}
 }
 

@@ -46,6 +46,8 @@ type Config struct {
 	Sshd               bool             `json:"sshd,omitempty"`
 	SshdPort           int              `json:"sshd_port,omitempty"`
 	SshdAuthorizedKeys string           `json:"sshd_authorized_keys,omitempty"`
+	Dns                bool             `json:"dns,omitempty"`
+	DnsPort            int              `json:"dns_port,omitempty"`
 }
 
 func loadConfig(path string) *Config {
