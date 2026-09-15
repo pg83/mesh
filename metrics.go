@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	packetKinds   = [...]string{"data", "graph", "registry"}
+	packetKinds   = [...]string{"data", "graph", "registry", "versions"}
 	rejectReasons = [...]string{"short", "header", "auth", "source", "replay"}
 )
 
@@ -30,6 +30,7 @@ type Metrics struct {
 	receivedBytes, sentBytes                     atomic.Uint64
 	rejected                                     [len(rejectReasons)]atomic.Uint64
 	recordsApplied, recordsStale, recordsInvalid atomic.Uint64
+	vectorsApplied, vectorsStale, vectorsInvalid atomic.Uint64
 	forwardNoChannel                             atomic.Uint64
 	tunRead, tunUnrouted, tunDelivered           atomic.Uint64
 	linkUp, linkDown, dialFailed                 atomic.Uint64
@@ -103,6 +104,9 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 	w.counter("mesh_records_applied_total", "Graph records newer than the stored version.", &m.recordsApplied)
 	w.counter("mesh_records_stale_total", "Graph records not newer than the stored version.", &m.recordsStale)
 	w.counter("mesh_records_invalid_total", "Graph records rejected by the decoder.", &m.recordsInvalid)
+	w.counter("mesh_vectors_applied_total", "Version vectors newer than the stored version.", &m.vectorsApplied)
+	w.counter("mesh_vectors_stale_total", "Version vectors not newer than the stored version.", &m.vectorsStale)
+	w.counter("mesh_vectors_invalid_total", "Version bundles rejected by the decoder.", &m.vectorsInvalid)
 	w.counter("mesh_forward_dropped_total", "Data packets dropped by a relay without a channel for the next hop.", &m.forwardNoChannel)
 	w.counter("mesh_tun_read_total", "IP packets read from the TUN device.", &m.tunRead)
 	w.counter("mesh_tun_unrouted_total", "IP packets from the TUN device without a route.", &m.tunUnrouted)

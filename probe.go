@@ -26,6 +26,8 @@ type ProbeCommand struct {
 	Text   bool            `json:"text"`
 	ID     uint64          `json:"id"`
 	Source *uint32         `json:"source,omitempty"`
+
+	Compress bool `json:"compress"`
 }
 
 func main() {
@@ -150,8 +152,13 @@ func main() {
 			out = throw2(hex.DecodeString(command.Hex))
 		case "inner":
 			raw := throw2(hex.DecodeString(command.Hex))
+			body := raw[1:]
 
-			out = session.seal(from, raw[0], raw[1:], packetID)
+			if command.Compress {
+				body = compress(body)
+			}
+
+			out = session.seal(from, raw[0], body, packetID)
 		case "short-transport":
 			out = binary.LittleEndian.AppendUint64(nil, headerWord(kindData, packetID))
 			out = append(out, byte(cfg.Index))
@@ -167,11 +174,16 @@ func main() {
 				record.Vertices[i].Vertex = record.Vertices[i].canonical()
 			}
 
-			out = session.seal(from, kindGraph, encodeRecord(record.Owner, record.Version, encodeRecordBody(&record)), packetID)
+			out = session.seal(from, kindGraph, compress(encodeRecord(record.Owner, record.Version, encodeRecordBody(&record))), packetID)
 		case "open":
 			origin, inner, ok := session.open(throw2(hex.DecodeString(command.Hex)))
+			report := map[string]any{"opened": ok, "hex": hex.EncodeToString(inner), "source": origin, "kind": packetKind(throw2(hex.DecodeString(command.Hex)))}
 
-			throw(encoder.Encode(map[string]any{"opened": ok, "hex": hex.EncodeToString(inner), "source": origin, "kind": packetKind(throw2(hex.DecodeString(command.Hex)))}))
+			if inflated, ok := decompress(inner); ok {
+				report["inflated"] = hex.EncodeToString(inflated)
+			}
+
+			throw(encoder.Encode(report))
 
 			continue
 		default:

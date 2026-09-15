@@ -23,7 +23,8 @@ def test():
         captured = lab.intercept('r', 'a', 'hold', kind=1)
         probe.send(op='graph', body=lib.record(2, ident, [(x, True, False)]))
         lab.wait(lambda: len(captured['held']) == 1, 'unsigned gossip captured')
-        assert len(captured['held'][0][1]) == 20 + 8 + 9 + 16 + 4 + 10 + 2 + 11 + 2 + 2
+        # IP, UDP, header, tag, source id, then the record as a zstd frame of 27 raw bytes.
+        assert 20 + 8 + 9 + 16 + 4 + 13 < len(captured['held'][0][1]) <= 20 + 8 + 9 + 16 + 4 + 27 + 24
         lab.clear(captured)
         lab.replay(captured, transform=lambda packet: packet[:-1] + bytes([packet[-1] ^ 1]))
         probe.send(op='graph', body=lib.record(2, ident + 1, [(x, True, False), (y, False, True)]))

@@ -28,13 +28,14 @@ type Status struct {
 	Links     []LinkStatus      `json:"links"`
 	Graph     []Edge            `json:"graph"`
 	Records   []*GraphRecord    `json:"records"`
+	Vectors   []*Vector         `json:"vectors"`
 	Vertices  []uint32          `json:"vertices"`
 	Routes    map[string][]Edge `json:"routes"`
 }
 
 func (n *Node) status() *Status {
 	now := time.Now()
-	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Edge{}, Records: []*GraphRecord{}, Vertices: []uint32{}, Routes: map[string][]Edge{}}
+	st := &Status{Index: n.cfg.Index, Links: []LinkStatus{}, Graph: []Edge{}, Records: []*GraphRecord{}, Vectors: []*Vector{}, Vertices: []uint32{}, Routes: map[string][]Edge{}}
 
 	st.Registry = n.reg.records()
 	st.Addresses = map[uint32]Vertex{}
@@ -70,6 +71,10 @@ func (n *Node) status() *Status {
 
 	for _, owner := range slices.Sorted(maps.Keys(n.records)) {
 		st.Records = append(st.Records, n.records[owner])
+	}
+
+	for _, owner := range slices.Sorted(maps.Keys(n.vectors)) {
+		st.Vectors = append(st.Vectors, n.vectors[owner])
 	}
 
 	for ep := range vertices {

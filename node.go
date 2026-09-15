@@ -62,6 +62,7 @@ type Node struct {
 	transportID   atomic.Uint64
 	graph         map[Edge]bool
 	records       map[uint16]*GraphRecord
+	vectors       map[uint16]*Vector
 	observed      map[Edge]time.Time
 	local         map[uint32]*LocalAddress
 	addresses     map[uint32]Vertex
@@ -86,7 +87,7 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 	n := &Node{
 		events: newMailbox[any](nil), tunInbox: newMailbox[any](nil), tunWrites: newMailbox[[]byte](nil), channels: map[Edge]*Channel{},
 		cfg: cfg, reg: reg, key: dh, log: log,
-		graph: map[Edge]bool{}, records: map[uint16]*GraphRecord{}, observed: map[Edge]time.Time{},
+		graph: map[Edge]bool{}, records: map[uint16]*GraphRecord{}, vectors: map[uint16]*Vector{}, observed: map[Edge]time.Time{},
 		seen:     map[uint32][]SocketAddress{},
 		routes:   map[uint32][]Edge{},
 		packetID: uint64(time.Now().UnixNano()), addresses: map[uint32]Vertex{},

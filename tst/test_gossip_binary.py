@@ -61,8 +61,8 @@ def test():
         tail = len(packet) - 2 - 4 - 7
         ids = [lib.vertex_id(1, number) for number, _, _ in vertices]
 
-        def send(data):
-            probe.send(op='inner', hex=data.hex())
+        def send(data, compress=True):
+            probe.send(op='inner', hex=data.hex(), compress=compress)
 
         def present(edge):
             return any(e['from'] == edge[0] and e['to'] == edge[1] for e in lab.status('b')['graph'])
@@ -72,6 +72,9 @@ def test():
 
         for end in range(1, len(packet)):
             send(packet[:end])
+        # Records travel as zstd frames: an uncompressed record and a broken frame are invalid.
+        send(packet, compress=False)
+        send(b'\x28\xb5\x2f\xfd' + b'\0' * 20, compress=False)
         send(packet + b'\0')
         send(packet[:11] + b'\xff\xff' + packet[13:])
         send(packet[:tail] + b'\xff\xff')

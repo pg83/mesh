@@ -30,8 +30,10 @@ type GraphRecord struct {
 	Vertices []RecordVertex `json:"vertices"`
 	Links    []Edge         `json:"links"`
 	Observed []Observation  `json:"observed"`
-	packet   []byte
-	applied  time.Time
+
+	packet  []byte
+	body    []byte
+	applied time.Time
 }
 
 func (n *Node) publishRecord() {
@@ -103,12 +105,13 @@ func (n *Node) publishRecord() {
 	body := encodeRecordBody(record)
 	previous := n.records[n.cfg.Index]
 
-	if previous != nil && bytes.Equal(previous.packet[recordHeader:], body) {
+	if previous != nil && bytes.Equal(previous.body, body) {
 		return
 	}
 
 	record.Version = n.nextPacketID()
-	record.packet = encodeRecord(n.cfg.Index, record.Version, body)
+	record.body = body
+	record.packet = compress(encodeRecord(n.cfg.Index, record.Version, body))
 	record.applied = time.Now()
 
 	n.records[n.cfg.Index] = record

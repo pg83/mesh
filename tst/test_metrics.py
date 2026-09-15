@@ -51,7 +51,8 @@ def test():
         assert m['mesh_tun_read_total'] >= 5 and m['mesh_tun_delivered_total'] >= 5
         unrouted = m['mesh_tun_unrouted_total']
         assert m['mesh_records_applied_total'] >= 2
-        assert m['mesh_records_stale_total'] > 0, 'relayed records were not filtered by version'
+        assert m['mesh_vectors_applied_total'] >= 2 and m['mesh_vectors_stale_total'] > 0, 'version vectors not exchanged'
+        assert m['mesh_vectors_invalid_total'] == 0
         assert m['mesh_records_invalid_total'] == 0
         assert m['mesh_link_up_total'] == 1 and m['mesh_link_down_total'] == 0
         assert m['mesh_forward_dropped_total'] == 0

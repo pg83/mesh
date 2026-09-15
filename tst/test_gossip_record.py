@@ -40,9 +40,11 @@ def test():
         lab.wait(lambda: present(marker, host_r), 'barrier record applied')
         assert not known(y_id) and not present(y, x), 'a stale record revived a withdrawn vertex'
 
+        # Every second the channel carries a's version vector: the versions of
+        # every record it holds, relayed ones unchanged.
         captured = lab.intercept('a', 'r', 'copy', target_port=7000, count=-1)
         cursor = 0
-        seen = []
+        bundles = []
 
         def publications():
             nonlocal cursor
@@ -51,22 +53,21 @@ def test():
                 packet = packets[cursor][1]
                 cursor += 1
                 raw = packet[(packet[0] & 15) * 4 + 8:]
-                if raw[0] & 3 != 1:
+                if raw[0] & 3 != 3:
                     continue
                 probe.proc.stdin.write(json.dumps(dict(op='open', hex=raw.hex())).encode() + b'\n')
                 report = probe.read()
-                assert report['opened']
+                assert report['opened'] and report['kind'] == 3
                 inner = bytes.fromhex(report['hex'])
-                assert len(inner) <= 1000
-                assert report['kind'] == 1
-                owner, version = struct.unpack_from('<HQ', inner)
-                seen.append((owner, version))
-            return all(sum(1 for owner, _ in seen if owner == index) >= 3 for index in (1, 2, 3))
+                assert len(inner) <= 1443
+                bundles.append(lib.decode_bundle(bytes.fromhex(report['inflated'])))
+            return len(bundles) >= 3
 
-        lab.wait(publications, 'every known record is republished periodically', timeout=12)
+        lab.wait(publications, 'version vectors published periodically', timeout=12)
         lab.clear(captured)
-        assert {(2, ident + 1), (3, ident + 1)} <= set(seen), 'relayed records changed their versions'
-        print('record gossip:', sorted(set(seen)))
+        own = [v for bundle in bundles for v in bundle if v['owner'] == 1]
+        assert own and all(v['records'].get(2) == ident + 1 and v['records'].get(3) == ident + 1 for v in own), own
+        print('vectors:', own[-1])
         probe.finish()
 
 

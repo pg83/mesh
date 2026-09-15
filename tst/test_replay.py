@@ -16,7 +16,7 @@ def test():
         lab.wait_ping('a', 'b')
         lab.wait_links('b', ['a', 'r'])
         assert rejected(lab, 'b') == 0
-        captured = lab.intercept('a', 'b', 'copy', kind=1, count=4)
+        captured = lab.intercept('a', 'b', 'copy', kind=3, count=4)
         lab.wait(lambda: captured['hits'] == 4, 'live gossip captured')
         lab.clear(captured)
         # A replayed packet is dropped by the live channel.

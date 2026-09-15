@@ -15,7 +15,15 @@ type Snapshot struct {
 	next      map[uint16]Edge
 	channels  map[Edge]*Channel
 	records   map[uint16]uint64
-	gossip    [][]byte
+	vectors   map[uint16]*Vector
+	gossip    []Advertisement
+	bundles   [][]byte
+}
+
+type Advertisement struct {
+	owner   uint16
+	version uint64
+	packet  []byte
 }
 
 type Received struct {
@@ -119,9 +127,19 @@ func (a *Channel) run() {
 }
 
 func (a *Channel) gossip() {
-	if a.outgoing && a.view != nil && a.enabled() {
-		for _, inner := range a.view.gossip {
-			a.send(kindGraph, inner)
+	if !a.outgoing || a.view == nil || !a.enabled() {
+		return
+	}
+
+	for _, inner := range a.view.bundles {
+		a.send(kindVersions, inner)
+	}
+
+	held := a.view.vectors[a.peer]
+
+	for _, ad := range a.view.gossip {
+		if held == nil || held.Records[ad.owner] < ad.version {
+			a.send(kindGraph, ad.packet)
 		}
 	}
 }
@@ -171,7 +189,7 @@ func (a *Channel) receive(r Received) {
 		return
 	}
 
-	if packetSender(r.packet) != a.peer || !validPacketType(packetKind(r.packet)) {
+	if packetSender(r.packet) != a.peer {
 		a.node.metrics.rejected[rejectHeader].Add(1)
 
 		return
@@ -226,10 +244,57 @@ func (a *Channel) receive(r Received) {
 		if records, ok := decodeRegistry(inner); ok {
 			post(a.node.events.in, any(records))
 		}
+	case kindVersions:
+		a.versions(inner)
 	}
 }
 
-func (a *Channel) graph(inner []byte) {
+func (a *Channel) versions(inner []byte) {
+	raw, ok := decompress(inner)
+	chunks, valid := decodeBundle(raw)
+
+	if !ok || !valid {
+		a.node.metrics.vectorsInvalid.Add(1)
+
+		return
+	}
+
+	for _, chunk := range chunks {
+		if chunk.Owner == a.node.cfg.Index || a.view.registry.byIndex[chunk.Owner] == nil {
+			continue
+		}
+
+		current := a.view.vectors[chunk.Owner]
+
+		if current != nil && (chunk.Version < current.Version || (chunk.Version == current.Version && covered(current, chunk))) {
+			a.node.metrics.vectorsStale.Add(1)
+
+			continue
+		}
+
+		post(a.node.events.in, any(chunk))
+	}
+}
+
+func covered(current, chunk *Vector) bool {
+	for owner, version := range chunk.Records {
+		if held, ok := current.Records[owner]; !ok || held != version {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (a *Channel) graph(packed []byte) {
+	inner, ok := decompress(packed)
+
+	if !ok {
+		a.node.metrics.recordsInvalid.Add(1)
+
+		return
+	}
+
 	owner, version, ok := recordHead(inner)
 
 	if !ok || owner == a.node.cfg.Index || a.view.registry.byIndex[owner] == nil || version <= a.view.records[owner] {
@@ -239,6 +304,7 @@ func (a *Channel) graph(inner []byte) {
 	}
 
 	if record, ok := decodeRecord(owner, version, inner); ok {
+		record.packet = packed
 		post(a.node.events.in, any(record))
 	} else {
 		a.node.metrics.recordsInvalid.Add(1)

@@ -18,15 +18,17 @@ def test():
                 client.send(payload)
                 assert client.recv() == payload
                 time.sleep(.1)
-        # Gossip and data have distinct authenticated outer packet types.
-        probes = [lab.intercept('a', 'b', 'observe', kind=1, seg=seg, count=-1,
+        # Gossip and data have distinct authenticated outer packet types; the
+        # periodic gossip is the version bundle.
+        probes = [lab.intercept('a', 'b', 'observe', kind=3, seg=seg, count=-1,
                                 max_size=899) for seg in (1, 2)]
         before = [rule['hits'] for rule in probes]
         traffic(3.2)
         assert all(rule['hits'] - start >= 3 for rule, start in zip(probes, before)), probes
         for rule in probes:
             lab.clear(rule)
-        dropped = lab.intercept('a', 'b', 'drop', kind=1, count=-1)
+        dropped = lab.intercept('a', 'b', 'drop', kind=3, count=-1)
+        records_dropped = lab.intercept('a', 'b', 'drop', kind=1, count=-1)
         registry_dropped = lab.intercept('a', 'b', 'drop', kind=2, count=-1)
         up_before = (lab.dir / 'b.log').read_text().count('link up')
         # Only the incoming edge is proven by data. Send without requiring the
@@ -51,6 +53,7 @@ def test():
         assert lab.links('a') == {lab.nodes['b'].index}
         lab.wait_route('a', 'b', None, timeout=3)
         lab.clear(dropped)
+        lab.clear(records_dropped)
         lab.clear(registry_dropped)
         lab.unblock('a', 'b', both=False)
         lab.wait_links('b', ['a'], timeout=3)

@@ -6,11 +6,13 @@ import workload
 def test():
     segments = {1: ['a', 'r1'], 2: ['r1', 'b'], 3: ['a', 'r2'], 4: ['r2', 'b']}
     with lib.Lab(['a', 'r1', 'r2', 'b'], segments) as lab:
+        # Records are sent only until the peer's version vector shows them, so
+        # the old advertisements are caught while the graph is still forming.
+        ads = lab.intercept('r1', 'a', 'hold', kind=1, count=2)
         lab.wait_route('a', 'b', ['r1', 'b'])
         lab.wait_route('b', 'a', ['r1', 'a'])
         log = workload.udp_server(lab, 'b')
         udp = workload.UdpClient(lab, 'a', 'b')
-        ads = lab.intercept('r1', 'a', 'hold', kind=1, count=2)
         lab.wait(lambda: ads['hits'] == 2, 'old route advertisements held')
         data = lab.intercept('a', 'r1', 'hold', kind=0, min_size=900)
         old = b'obsolete-route'.ljust(900, b'.')

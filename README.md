@@ -244,11 +244,12 @@ and the receiver's public key. There is no handshake or forward secrecy.
 | Type | Layout |
 |---|---|
 | data transport | header word (8), sender index (1), ChaCha20-Poly1305 ciphertext and tag (16) |
-| graph transport | the same header and encryption |
+| graph transport | the same header and encryption; the inner record is a zstd frame |
 | registry transport | the same header and encryption |
+| versions transport | the same header and encryption; the inner bundle is a zstd frame |
 
 The header word is little-endian: the packet kind in its two low bits (data
-`0`, graph `1`, registry `2`, `3` is invalid) and the packet ID above them.
+`0`, graph `1`, registry `2`, versions `3`) and the packet ID above them.
 Registry indexes are limited to 1..255, so the sender fits one byte. The
 header is authenticated as associated data. The nonce is not sent: it is the
 header word padded with zeros. Packet IDs come from one counter per node
@@ -279,10 +280,32 @@ node address allocation in the current registry remains IPv4.
 
 The graph is a set of per-node records. A node's record holds its listener and
 client socket vertices, each with its attachment directions, and the links it
-observes into them. One record travels in one packet; every outgoing channel
-sends every known record once per second.
+observes into them. One record travels in one packet, compressed with zstd;
+a frame that inflates past 64 KiB is rejected.
 
-Inner graph records start with the owner registry index (2), version (8),
+Every second each outgoing channel sends the node's **version bundle** and
+then every record the peer's last known version vector does not show. A
+node's vector lists the version of every record it holds, stamped with the
+node's packet counter when that set last changed, so it changes only when a
+record does. Vectors travel through the mesh like records: a node forwards
+every vector it knows, and a peer's vector arrives directly on a two-way
+channel or through other nodes when the channel carries nothing back. A
+record is sent to a peer until the peer's vector shows its version, so a
+lost packet is sent again on the next tick; a peer whose vector never
+arrived gets every record every second, which is the only option for a
+node that sends to nobody. The bundle is also what keeps a link alive.
+
+A bundle is a zstd frame of: chunk count (1), then per chunk the vector
+owner (1), the vector version (8), entry count (1) and entries of record
+owner (1) and record version (8). The node's own vector comes first, then
+the others by owner. The whole list is compressed; a frame that would not
+fit one 1500-byte datagram is halved and each half packed again, and a
+chunk carries any subset of a vector's entries: a chunk of a version newer
+than the stored one replaces the vector, one of the same version adds its
+entries, an older one is dropped. Bad frames, a zero owner, a short chunk
+and trailing bytes reject the bundle.
+
+Inner graph records, once inflated, start with the owner registry index (2), version (8),
 vertex count (2), the vertices, link count (2), the links, observation
 count (2) and the observations. Each vertex is its counter (3, little-endian;
 the owner byte is the record owner and is not repeated), one flags byte
@@ -305,13 +328,13 @@ to a counter outside the record, self-links, observations of a source that is
 not a link, non-UDP or portless observations, and trailing bytes reject the
 record as a whole. A record with an unknown owner, the receiver's own index,
 or a version not above the stored one is ignored. Lost or reordered records
-are repaired by the next periodic publication. Other nodes can use vertices
+are sent again while the peer's vector lacks them. Other nodes can use vertices
 with `endpoint: true` to open new direct channels. The flag is metadata and
 does not change the id.
 
 The authenticated sender relays every record it knows, including those of
-other members, unchanged. A newer record replaces the owner's previous record
-completely. Gossip remains periodic, once per second.
+other members, unchanged and still compressed as received. A newer record
+replaces the owner's previous record completely.
 
 A WebSocket binary message contains one mesh transport packet with its source
 id inside the authenticated ciphertext. The client side is a fresh id of the
@@ -370,7 +393,8 @@ retransmission timeout.
 A link only becomes an edge while its source vertex is in the current record of
 its owner.
 
-Every second each host sends its known graph on outgoing channels only.
+Every second each host sends its version bundle, and the records its peer
+lacks, on outgoing channels only.
 Dial candidates combine local source addresses with remote listening endpoints
 from the registry and learned vertices with the endpoint flag set. Client socket
 vertices are never dial targets.
@@ -383,8 +407,8 @@ interface, with the source set through socket control metadata. Establishing a c
 is independent of graph payload availability and of any reverse channel.
 
 Gossip replaces records whole. Receiving a newer record updates the graph
-without sending a reply or forwarding it immediately; the next periodic send
-carries it. Records have no age-based expiry: the last record of a node that
+without sending a reply or forwarding it immediately; the next tick carries
+it to every peer whose vector lacks it. Records have no age-based expiry: the last record of a node that
 never returns stays, but its links into other nodes disappear as their channels
 expire. Older versions cannot restore a removed vertex or link.
 
@@ -399,7 +423,8 @@ endpoint selector. Graph changes and the one-second local observation pass
 rebuild routes.
 
 Status exposes incoming endpoint pairs, the live graph, its vertices, every
-known record with its version, and routes to peers keyed by mesh address. The
+known record with its version, every known version vector, and routes to
+peers keyed by mesh address. The
 graph owner publishes immutable snapshots through the same mailboxes used for
 packets.
 Channel identity is a directed id pair. Duplicate WS attachments prefer

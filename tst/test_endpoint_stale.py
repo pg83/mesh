@@ -7,7 +7,7 @@ import workload
 def test():
     with lib.Lab(['a', 'b'], {1: ['a', 'b']}) as lab:
         lab.wait_ping('a', 'b')
-        held = lab.intercept('b', 'a', 'hold', kind=1, count=3)
+        held = lab.intercept('b', 'a', 'hold', kind=3, count=3)
         lab.wait(lambda: held['hits'] == 3, 'three delayed packets from the old address')
         stream = workload.SshServer(lab, 'b').stream('a')
         lab.set_address('b', 1, '10.1.0.99')

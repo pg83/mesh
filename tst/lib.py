@@ -111,6 +111,22 @@ def record(owner, version, vertices=(), links=(), observed=()):
                 observed=[{'from': source, 'seen': seen} for source, seen in observed])
 
 
+def decode_bundle(raw):
+    """Version bundle chunks: owner, vector version and the record versions it lists."""
+    count, raw = raw[0], raw[1:]
+    chunks = []
+    for _ in range(count):
+        owner, version, entries = raw[0], int.from_bytes(raw[1:9], 'little'), raw[9]
+        raw = raw[10:]
+        records = {}
+        for _ in range(entries):
+            records[raw[0]] = int.from_bytes(raw[1:9], 'little')
+            raw = raw[9:]
+        chunks.append(dict(owner=owner, version=version, records=records))
+    assert not raw, 'trailing bytes in a version bundle'
+    return chunks
+
+
 def segaddr(seg, index):
     return f"10.{seg}.0.{index}"
 

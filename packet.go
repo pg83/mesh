@@ -6,6 +6,7 @@ const (
 	kindData        = 0
 	kindGraph       = 1
 	kindRegistry    = 2
+	kindVersions    = 3
 	headerTransport = 8 + 1
 	sourceSize      = 4
 	maxPacket       = 65535
@@ -26,10 +27,6 @@ func packetID(packet []byte) uint64 {
 
 func packetSender(packet []byte) uint16 {
 	return uint16(packet[8])
-}
-
-func validPacketType(kind byte) bool {
-	return kind < 3
 }
 
 type Data struct {

@@ -91,7 +91,11 @@ func (n *Node) publishSnapshot() {
 	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local),
 		routes: n.routes, hops: n.hops, next: n.next, channels: channels, records: versions}
 
+	n.publishVector()
+	view.vectors = maps.Clone(n.vectors)
 	view.gossip = n.advertisements()
+	view.bundles = n.bundles()
+
 	n.snapshot = view
 
 	for _, actor := range n.channels {
@@ -156,6 +160,9 @@ func (n *Node) graphLoop() {
 				dirty = false
 			case *GraphRecord:
 				n.handleRecord(v)
+				dirty = true
+			case *Vector:
+				n.handleVector(v)
 				dirty = true
 			case RegistryRecords:
 				if n.handleRegistry(v) {

@@ -70,15 +70,15 @@ func (n *Node) refresh(now time.Time) {
 	n.rebuild()
 }
 
-func (n *Node) advertisements() [][]byte {
+func (n *Node) advertisements() []Advertisement {
 	owners := slices.Sorted(maps.Keys(n.records))
-	packets := make([][]byte, 0, len(owners))
+	ads := make([]Advertisement, 0, len(owners))
 
 	for _, owner := range owners {
-		packets = append(packets, n.records[owner].packet)
+		ads = append(ads, Advertisement{owner: owner, version: n.records[owner].Version, packet: n.records[owner].packet})
 	}
 
-	return packets
+	return ads
 }
 
 type Candidate struct {

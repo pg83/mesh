@@ -1,7 +1,7 @@
 package main
 
 func (n *Node) readPacket(packet []byte, view *Snapshot) (*Session, uint32, []byte, bool) {
-	if len(packet) < headerTransport || !validPacketType(packetKind(packet)) {
+	if len(packet) < headerTransport {
 		return nil, 0, nil, false
 	}
 
