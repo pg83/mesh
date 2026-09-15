@@ -126,6 +126,7 @@ func (n *Node) observe(r ChannelReport) {
 		if !exists {
 			n.metrics.linkUp.Add(1)
 			n.log.Info("link up", "from", n.describe(r.edge.From), "to", n.describe(r.edge.To))
+			n.resetBackoff(r.peer)
 		}
 	}
 
@@ -155,6 +156,7 @@ func (n *Node) graphLoop() {
 				n.syncListeners(v)
 				n.interfaces = v
 				clear(n.routeCache)
+				n.resetBackoff(0)
 				n.syncLocal()
 				n.refresh(time.Now())
 				n.publishSnapshot()
@@ -186,6 +188,13 @@ func (n *Node) graphLoop() {
 
 				v.attempt.pending = false
 				v.attempt.channels = v.channels
+
+				if len(v.channels) == 0 {
+					v.attempt.failures++
+					v.attempt.next = time.Now().Add(backoff(v.attempt.failures))
+				} else {
+					n.resetBackoff(v.attempt.session.peer)
+				}
 
 				for _, c := range v.channels {
 					n.installChannel(c)

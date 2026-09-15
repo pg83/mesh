@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"time"
 )
+
+const maxBackoff = time.Minute
 
 type DialKey struct {
 	source InterfaceAddress
@@ -26,6 +29,27 @@ type DialAttempt struct {
 	channels []*ChannelIO
 	pending  bool
 	next     time.Time
+
+	failures int
+}
+
+func backoff(failures int) time.Duration {
+	delay := time.Second << min(failures, 6)
+
+	if delay > maxBackoff {
+		delay = maxBackoff
+	}
+
+	return delay*3/4 + time.Duration(rand.Int64N(int64(delay)/2))
+}
+
+func (n *Node) resetBackoff(peer uint16) {
+	for _, attempt := range n.dials {
+		if peer == 0 || attempt.session.peer == peer {
+			attempt.failures = 0
+			attempt.next = time.Time{}
+		}
+	}
 }
 
 type DialResult struct {

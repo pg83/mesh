@@ -127,6 +127,7 @@ func (n *Node) handleRecord(record *GraphRecord) {
 	n.metrics.recordsApplied.Add(1)
 	record.applied = time.Now()
 	n.records[record.Owner] = record
+	n.resetBackoff(record.Owner)
 }
 
 func (n *Node) rebuild() {
