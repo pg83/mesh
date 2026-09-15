@@ -27,6 +27,8 @@ func main() {
 			sshdKeys := fs.String("sshd-authorized-keys", "", "extra authorized keys file for SSH")
 			dns := fs.Bool("dns", false, "serve the mesh zone on the mesh address")
 			dnsPort := fs.Int("dns-port", 0, "DNS port on the mesh address (default 53)")
+			tun := fs.Bool("tun", false, "create the TUN device (the default without -sshd)")
+			noTun := fs.Bool("no-tun", false, "no TUN device: the node only relays and serves SSH and DNS")
 
 			throw(fs.Parse(os.Args[2:]))
 
@@ -50,6 +52,16 @@ func main() {
 
 			if *dnsPort != 0 {
 				cfg.DnsPort = *dnsPort
+			}
+
+			if *tun && *noTun {
+				throwFmt("-tun and -no-tun exclude each other")
+			}
+
+			if *noTun {
+				cfg.Tun = ""
+			} else if cfg.Tun == "" && (*tun || !*sshd) {
+				cfg.Tun = defaultTun
 			}
 
 			newNode(cfg, log).run()
@@ -91,7 +103,7 @@ func printUsage() {
 	os.Stderr.WriteString(`Usage: mesh command [flags]
 
 Commands:
-  run -c config.json [-key-file path]    run a node
+  run -c config.json [-key-file path] [-tun|-no-tun] [-sshd] [-dns]   run a node
   keygen                print a fresh key pair as JSON
   status [-control 127.0.0.1:8058]       dump node status as JSON
   web [-control 127.0.0.1:8058] [-listen 127.0.0.1:8059]

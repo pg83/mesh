@@ -26,6 +26,7 @@ type Status struct {
 	Addresses map[uint32]Vertex `json:"addresses"`
 	Index     uint16            `json:"index"`
 	Subnet    string            `json:"subnet"`
+	Tun       string            `json:"tun"`
 	Links     []LinkStatus      `json:"links"`
 	Graph     []Edge            `json:"graph"`
 	Records   []*GraphRecord    `json:"records"`
@@ -37,7 +38,7 @@ type Status struct {
 
 func (n *Node) status() *Status {
 	now := time.Now()
-	st := &Status{Index: n.cfg.Index, Subnet: n.cfg.Subnet, Links: []LinkStatus{}, Graph: []Edge{}, Records: []*GraphRecord{}, Vectors: []*Vector{}, Vertices: []uint32{}, Routes: map[string][]Edge{}}
+	st := &Status{Index: n.cfg.Index, Subnet: n.cfg.Subnet, Tun: n.cfg.Tun, Links: []LinkStatus{}, Graph: []Edge{}, Records: []*GraphRecord{}, Vectors: []*Vector{}, Vertices: []uint32{}, Routes: map[string][]Edge{}}
 
 	st.Registry = n.reg.records()
 	st.Addresses = map[uint32]Vertex{}

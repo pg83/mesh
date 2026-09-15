@@ -68,9 +68,5 @@ func loadConfig(path string) *Config {
 		cfg.Mtu = 1380
 	}
 
-	if cfg.Tun == "" {
-		cfg.Tun = defaultTun
-	}
-
 	return cfg
 }

@@ -1,4 +1,5 @@
 """Nodes answer the mesh zone on the subnet's service address and their own address; mesh dns serves it from the control API."""
+import json
 import socket
 import struct
 import lib
@@ -27,11 +28,18 @@ def parse(reply):
     return flags & 15, answers
 
 
-def ask(lab, name, server, question, qtype=1, port=53, timeout=3):
+def send(lab, name, server, packet, port=53, timeout=3):
+    """The reply to a raw packet, or None when the server stays silent."""
     code = ('import socket, sys; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(%r); '
-            's.sendto(bytes.fromhex(sys.argv[1]), (%r, %d)); sys.stdout.write(s.recv(512).hex())' % (timeout, server, port))
-    out = lab.run(name, ['python3', '-c', code, query(question, qtype).hex()]).stdout
-    return parse(bytes.fromhex(out))
+            's.sendto(bytes.fromhex(sys.argv[1]), (%r, %d))\n'
+            'try: sys.stdout.write(s.recv(512).hex())\n'
+            'except socket.timeout: pass' % (timeout, server, port))
+    out = lab.run(name, ['python3', '-c', code, packet.hex()]).stdout
+    return bytes.fromhex(out) if out else None
+
+
+def ask(lab, name, server, question, qtype=1, port=53, timeout=3):
+    return parse(send(lab, name, server, query(question, qtype), port, timeout))
 
 
 def name_of(rdata):
@@ -60,6 +68,17 @@ def test():
         assert ask(lab, 'a', service, '9.0.77.10.in-addr.arpa', qtype=12)[0] == 3
         assert ask(lab, 'a', service, 'example.com')[0] == 5
         assert ask(lab, 'a', service, '1.0.0.10.in-addr.arpa', qtype=12)[0] == 5
+        # Malformed queries are dropped: short, a response, two questions, a truncated
+        # name, a label over 63 bytes, a name too long; a wrong class and a bad octet
+        # in a reverse name are refused; a PTR name asked for another type is empty.
+        q = query('b.mesh')
+        for bad in [q[:11], bytes([0, 7, 0x81]) + q[3:], q[:4] + b'\0\x02' + q[6:], q[:16], q[:12] + b'\x40' + b'x' * 64 + q[13:],
+                    q[:12] + b'\x01x' * 40 + q[12:]]:
+            assert send(lab, 'a', service, bad, timeout=1) is None, bad.hex()
+        assert parse(send(lab, 'a', service, q[:-2] + b'\0\x03'))[0] == 5
+        assert ask(lab, 'a', service, '256.0.77.10.in-addr.arpa', qtype=12)[0] == 5
+        assert ask(lab, 'a', service, '01.0.77.10.in-addr.arpa', qtype=12)[0] == 5
+        assert ask(lab, 'a', service, '2.0.77.10.in-addr.arpa', qtype=1) == (0, [])
         # A peer asks the node's own address across the mesh, on the flag-configured port.
         assert ask(lab, 'a', lib.intip(2), 'c.mesh', port=5353) == (0, [(1, socket.inet_aton(lib.intip(3)))])
         # The standalone command serves the same zone from the control API on a plain socket.
@@ -67,6 +86,13 @@ def test():
         lab.wait(lambda: ask(lab, 'a', '127.0.0.1', 'c.mesh', port=5355, timeout=1) == (0, [(1, socket.inet_aton(lib.intip(3)))]),
                  'standalone dns serves the zone', timeout=15)
         assert ask(lab, 'a', '127.0.0.1', 'example.org', port=5355)[0] == 5
+        # A DNS port outside 1..65535 stops the node at startup.
+        lab.stop_node('c')
+        config = json.loads((lab.dir / 'c.json').read_text())
+        config.update(dns=True, dns_port=70000)
+        (lab.dir / 'bad.json').write_text(json.dumps(config))
+        result = lab.run('c', [lib.MESH, 'run', '-c', lab.dir / 'bad.json'], check=False, timeout=10)
+        assert result.returncode != 0 and 'bad dns port 70000' in result.stderr, result
 
 
 lib.main(test)

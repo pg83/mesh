@@ -54,7 +54,7 @@ mesh dns -control 127.0.0.1:8058 -listen 127.0.0.1:5355
 | `registry` | Known nodes: `index`, `pub`, `intip`, static `endpoint` list, optional `name` |
 | `registry_version` | Version of the records loaded from this file, default `1`; raise it when changing the registry |
 | `no_dial` | Optional list of `{"from": ip, "to": ip}` pairs this node never dials |
-| `tun`, `mtu` | TUN name (`mesh0` on Linux, `utun` on macOS) and MTU (default 1380) |
+| `tun`, `mtu` | TUN name (`mesh0` on Linux, `utun` on macOS) and MTU (default 1380); see below for running without a device |
 | `sshd`, `sshd_port`, `sshd_authorized_keys` | Embedded SSH server, see below |
 | `dns`, `dns_port` | Embedded DNS server for the `mesh` zone, see below |
 
@@ -67,6 +67,15 @@ their own entry and those hosts and learn the rest from the mesh. Nodes
 introduce each other; a registry record changes only for a strictly higher
 version, there is no removal. A node without static endpoints is never
 dialed first: it dials, and its own addresses let others dial it back.
+
+### With and without a TUN device
+
+The device is created when the config names one or `mesh run -tun` asks
+for it, never with `-no-tun`, and by default unless `-sshd` was given: a
+node started for SSH access alone leaves the system's network as it is. A
+node without a device still relays traffic between peers and answers SSH
+and DNS on its mesh address for them; nothing reaches or leaves its own
+system through the mesh.
 
 ### Endpoints
 

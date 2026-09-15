@@ -20,7 +20,7 @@ class Ring(lib.Lab):
         if node.name == 'b':
             self.run_args[node.name] += ['-sshd-port', '2222']
         if node.name == 'c':
-            self.run_args[node.name] += ['-sshd', '-sshd-authorized-keys', str(self.dir / 'authorized_keys')]
+            self.run_args[node.name] += ['-sshd', '-tun', '-sshd-authorized-keys', str(self.dir / 'authorized_keys')]
 
     def registry(self):
         peers = super().registry()

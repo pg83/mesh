@@ -142,7 +142,10 @@ func newNode(cfg *Config, log *slog.Logger) *Node {
 		n.endpoints = append(n.endpoints, ListenerBinding{config: config, public: public, bind: local})
 	}
 
-	n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
+	if cfg.Tun != "" {
+		n.tun = openTun(cfg.Tun, me.intip, cfg.Subnet, cfg.Mtu)
+	}
+
 	n.intip = me.intip
 
 	if cfg.Sshd || cfg.Dns {
@@ -166,11 +169,19 @@ func (n *Node) run() {
 	n.publishSnapshot()
 	go n.loop("interfaces", n.watchInterfaces)
 
-	go n.loop("TUN reader", n.readTun)
 	go n.loop("TUN actor", n.tunLoop)
+
+	if n.tun != nil {
+		go n.loop("TUN reader", n.readTun)
+	}
+
 	go n.loop("TUN writer", func() {
 		for p := range n.tunWrites.out {
-			n.tun.write(p)
+			if n.tun != nil {
+				n.tun.write(p)
+			} else {
+				n.metrics.tunDropped.Add(1)
+			}
 		}
 	})
 	go n.loop("control", n.controlLoop)
