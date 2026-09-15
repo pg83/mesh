@@ -23,14 +23,15 @@ class Mixed(lib.Lab):
 
 def test():
     with Mixed() as lab:
+        # r and b also carry implicit UDP sockets on 10.2.0.x, and a UDP link is
+        # cheaper than WebSocket; the second segment passes no UDP.
+        for src, dst in [('r', 'b'), ('b', 'r')]:
+            lab.intercept(src, dst, 'drop', proto=17, count=-1, seg=2)
         lab.wait_route('a', 'b', ['r', 'b'])
         lab.wait_route('b', 'a', ['r', 'a'])
         def transports(source, target):
             return [hop['to' if not hop['from']['endpoint'] else 'from']['proto']
                     for hop in lab.endpoint_route(source, target)]
-        # r and b also link over their implicit UDP sockets on 10.2.0.x, and that
-        # link can come up before r's WebSocket connection; the WebSocket hop
-        # wins the tie-break once both exist.
         lab.wait(lambda: transports('a', 'b') == ['udp', 'ws'], 'a -> b over UDP then WebSocket')
         lab.wait(lambda: transports('b', 'a') == ['ws', 'udp'], 'b -> a over WebSocket then UDP')
         for name in ['a', 'b']:

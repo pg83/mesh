@@ -269,9 +269,9 @@ ending with the destination. The opaque payload follows. Routes allow at
 most 16 hops. Truncated routes, a cursor past the route and zero indexes are
 rejected. A relay accepts a packet only when the node
 at the cursor is itself and the previous node is the channel's peer, advances
-the cursor, and sends through its own channel to the next node: the first
-outgoing socket in canonical order that has a graph edge to a listener of
-that node, the same choice the sender's BFS would make. When the cursor
+the cursor, and sends through its own channel to the next node: the
+cheapest outgoing channel with a graph edge into that node, then the first
+in canonical order, the same choice the sender's search would make. When the cursor
 passes the last hop the packet is delivered to TUN.
 The transport never reads the payload to find an address or choose a destination.
 The TUN adapter handles IPv4/IPv6 packet framing and destination lookup on ingress;
@@ -383,8 +383,11 @@ carries it. Records have no age-based expiry: the last record of a node that
 never returns stays, but its links into other nodes disappear as their channels
 expire. Older versions cannot restore a removed vertex or link.
 
-BFS follows the directed id graph, with stable ordering for identical path
-lengths: by description, then by id. Only the sequence of nodes travels in the packet;
+Dijkstra follows the directed id graph with a cost per link: 3 into a UDP
+listener, 6 for a WebSocket connection in either direction; attachments to a
+host are free. Equal costs prefer fewer node hops, then the path whose
+vertices come first in description and id order, so every node that sees
+the same graph makes the same choice. Costs are fixed for now. Only the sequence of nodes travels in the packet;
 each relay picks its link to the next node from the same graph. The
 return path is computed independently. There is no separate per-host
 endpoint selector. Graph changes and the one-second local observation pass
