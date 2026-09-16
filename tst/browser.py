@@ -143,6 +143,29 @@ with sync_playwright() as p:
         Path(artifacts).mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(Path(artifacts) / 'mesh-web.png'))
     phase('configs')
+    # An update that keeps the vertices the graph already shows must land on the
+    # positions they already have, and a peer nothing reaches must read as such
+    # in the matrix. Both come from one answer: the same topology with every
+    # link of the third node taken out.
+    page.get_by_role('tab', name='Endpoint', exact=True).click()
+    page.wait_for_function('cy.nodes().length > 3')
+    placed = page.evaluate('cy.nodes()[0].position()')
+    topology = json.loads(frozen)
+    owner = {v['id']: v['owner'] for v in topology['vertices']}
+    topology['edges'] = [e for e in topology['edges']
+                         if 3 not in (owner.get(e['source']), owner.get(e['target']))]
+    cut = json.dumps(topology)
+    page.unroute('**/api/topology')
+    page.route('**/api/topology', lambda route: route.fulfill(
+        status=200, content_type='application/json', body=cut))
+    page.wait_for_function('t.edges.length === %d' % len(topology['edges']), timeout=20000)
+    assert page.evaluate('cy.nodes()[0].position()') == placed, 'the update moved a vertex'
+    page.get_by_role('tab', name='Matrix', exact=True).click()
+    unreachable = page.locator('td.no-path')
+    assert unreachable.count() >= 2, unreachable.count()
+    assert 'no route' in (unreachable.first.get_attribute('title') or '')
+    phase('update without a route')
+    page.get_by_role('tab', name='Endpoint', exact=True).click()
     page.unroute('**/api/topology')
     # A control API that stops answering is reported, and recovery is silent.
     page.route('**/api/topology', lambda route: route.abort())
