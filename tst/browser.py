@@ -51,18 +51,6 @@ def lcov(source, scripts, name):
     return '\n'.join(record) + '\n'
 
 
-def destination(value):
-    """Point the route list at one peer, or at nobody. The list is a plain
-    select whose onchange draws the route, so setting the value and announcing
-    the change is the whole of what choosing an entry does."""
-    return """(() => {
-  const list = $('route-dest');
-  list.value = %s;
-  list.dispatchEvent(new Event('change'));
-  return list.value;
-})()""" % json.dumps(value)
-
-
 def coverage(session, path):
     source = SOURCE.read_text()
     scripts = [s['functions'] for s in session.send('Profiler.takePreciseCoverage')['result']
@@ -80,6 +68,21 @@ with sync_playwright() as p:
     page.set_default_timeout(20000)
     errors = []
     page.on('pageerror', lambda error: errors.append(str(error)))
+    def run(script):
+        """Time every call into the page and name the slow ones. A call that
+        returns a graph element makes Playwright copy the whole graph out, which
+        is how this run used to lose half a minute without saying a word; an
+        empty call timed beside it tells a busy page from a slow channel."""
+        started = time.monotonic()
+        value = page.evaluate(script)
+        spent = time.monotonic() - started
+        if spent > 1:
+            idle = time.monotonic()
+            page.evaluate('0')
+            print(f'browser {spent:6.1f}s of which {time.monotonic() - idle:.1f}s'
+                  f' for an empty call: {script.split(chr(10))[0][:70]}', flush=True)
+        return value
+
     session = page.context.new_cdp_session(page)
     session.send('Profiler.enable')
     session.send('Profiler.startPreciseCoverage', {'callCount': False, 'detailed': True})
@@ -88,72 +91,77 @@ with sync_playwright() as p:
     page.wait_for_function('ready && t.peers.length === 3')
     phase('first snapshot')
     assert page.get_by_role('tab').count() == 4
-    assert page.evaluate('cy.nodes().length') >= 6
+    assert run('cy.nodes().length') >= 6
     # Every endpoint circle shown is linked to a vertex of another node; lone attachments are hidden.
-    assert page.evaluate('t.vertices.some(v => !(v.proto === "udp" && v.port === 0) && !cy.getElementById(v.id).length)')
-    assert page.evaluate('cy.nodes().filter(n => !n.hasClass("ip") && !n.hasClass("host")).every(n => n.connectedEdges().connectedNodes().some(m => m.id() !== n.id() && !m.hasClass("ip")))')
-    assert page.evaluate('getComputedStyle(document.querySelector(".graph-panel")).borderWidth') == '0px'
-    assert page.evaluate('getComputedStyle(document.querySelector(".inspector")).borderWidth') == '0px'
-    assert page.evaluate('getComputedStyle(document.querySelector("main")).padding') == '0px'
-    # Dragging/zooming survives periodic refreshes.
-    page.evaluate('cy.zoom(1.3); cy.pan({x: 71, y: 83}); cy.nodes()[0].position({x:321,y:123})')
+    assert run('t.vertices.some(v => !(v.proto === "udp" && v.port === 0) && !cy.getElementById(v.id).length)')
+    assert run('cy.nodes().filter(n => !n.hasClass("ip") && !n.hasClass("host")).every(n => n.connectedEdges().connectedNodes().some(m => m.id() !== n.id() && !m.hasClass("ip")))')
+    assert run('getComputedStyle(document.querySelector(".graph-panel")).borderWidth') == '0px'
+    assert run('getComputedStyle(document.querySelector(".inspector")).borderWidth') == '0px'
+    assert run('getComputedStyle(document.querySelector("main")).padding') == '0px'
+    # Dragging/zooming survives periodic refreshes. Nothing here may hand a
+    # cytoscape object back: Playwright serialises whatever an expression
+    # returns, and one graph element carries the whole graph with it. That has
+    # cost this run half a minute at a time, and once hung it outright.
+    run('() => { cy.zoom(1.3); cy.pan({x: 71, y: 83}); cy.nodes()[0].position({x:321,y:123}); }')
     page.wait_for_timeout(3500)
-    assert page.evaluate('cy.zoom()') == 1.3
-    assert page.evaluate('cy.pan()') == {'x': 71, 'y': 83}
-    assert page.evaluate('cy.nodes()[0].position()') == {'x': 321, 'y': 123}
+    assert run('cy.zoom()') == 1.3
+    assert run('cy.pan()') == {'x': 71, 'y': 83}
+    assert run('cy.nodes()[0].position()') == {'x': 321, 'y': 123}
     phase('drag survived a refresh')
     # The inspector and the destination list are rebuilt whenever the topology
-    # changes, which a live mesh does every few seconds. Serve the snapshot the
-    # page already holds so the elements below stay put while they are used;
-    # the page keeps polling, it just keeps reading the same answer.
-    frozen = page.evaluate('JSON.stringify(t)')
-    page.route('**/api/topology', lambda route: route.fulfill(
-        status=200, content_type='application/json', body=frozen))
+    # changes, which a live mesh does every few seconds, and the steps below
+    # read those elements. So the page stops asking for a while: the poll is
+    # replaced by one that does nothing, and the call already scheduled is the
+    # last. The reload further down brings back a page that polls for real.
+    frozen = run('JSON.stringify(t)')
+    assert run('(window.beats = 0, window.refresh = () => { beats++ }, true)')
+    # The poll already scheduled is the last one that asks; when the one it
+    # schedules in turn is the replacement, the page has gone quiet for good.
+    page.wait_for_function('beats > 0')
     phase('topology frozen')
-    # Everything below sits next to a canvas that redraws on its own. Playwright
-    # holds a click until the page looks still, which beside that canvas has
-    # taken minutes, so these controls are pressed from inside the page instead.
-    assert page.evaluate('($("fit").click(), $("reset").click(), cy.zoom() > 0)')
+    # The panel buttons restore the view the dragging moved.
+    page.get_by_role('button', name='Fit ↗', exact=True).click()
+    assert run('cy.zoom()') > 0
+    page.get_by_role('button', name='Layout', exact=True).click()
     phase('panel buttons')
     # Tapping a vertex selects its owner and highlights the vertex itself.
-    page.evaluate('cy.nodes().filter(n => !n.hasClass("ip"))[0].emit("tap")')
-    assert page.evaluate('cy.elements(".focus").length') >= 1
-    assert page.evaluate('$("selected-name").textContent')
+    run('() => { cy.nodes().filter(n => !n.hasClass("ip"))[0].emit("tap"); }')
+    assert run('cy.elements(".focus").length') >= 1
+    assert run('$("selected-name").textContent')
     phase('vertex tap')
     # An advertised endpoint of the selected node leads back to its circle.
-    page.evaluate('cy.nodes().filter(n => n.hasClass("ip") && n.data("owner") === 1)[0].emit("tap")')
-    assert page.evaluate('$("endpoint-count").textContent') != '0'
-    page.evaluate('document.querySelector("#endpoints button").click()')
-    assert page.evaluate('cy.elements(".focus").length') >= 1
+    run('() => { cy.nodes().filter(n => n.hasClass("ip") && n.data("owner") === 1)[0].emit("tap"); }')
+    assert run('$("endpoint-count").textContent') != '0'
+    page.locator('#endpoints button').first.click()
+    assert run('cy.elements(".focus").length') >= 1
     phase('endpoint button')
     # Tapping a link describes it, tapping the background clears the highlight.
-    page.evaluate('cy.edges()[0].emit("tap")')
-    assert page.evaluate('$("selected-name").textContent') == 'Directed link'
-    page.evaluate('cy.emit("tap")')
-    assert page.evaluate('cy.elements(".focus").length') == 0
+    run('() => { cy.edges()[0].emit("tap"); }')
+    assert run('$("selected-name").textContent') == 'Directed link'
+    run('() => { cy.emit("tap"); }')
+    assert run('cy.elements(".focus").length') == 0
     phase('link and background tap')
     # The route selector highlights the local route and then drops it.
-    peer = page.evaluate('[...$("route-dest").options].map(option => option.value).find(Boolean)')
-    assert page.evaluate(destination(peer)) == peer
-    assert 'hops' in page.evaluate('$("route-summary").textContent')
-    assert page.evaluate('cy.edges(".focus").length') >= 1
-    page.evaluate(destination(''))
-    assert page.evaluate('cy.elements(".focus").length') == 0
+    page.select_option('#route-dest', label=[o for o in page.locator('#route-dest option').all_text_contents() if '→' in o][0])
+    assert 'hops' in run('$("route-summary").textContent')
+    assert run('cy.edges(".focus").length') >= 1
+    page.select_option('#route-dest', value='')
+    assert run('cy.elements(".focus").length') == 0
     phase('graph interactions')
-    page.get_by_role('tab', name='Hosts', exact=True).click()
-    assert page.evaluate('cy.nodes().length') == 3
+    page.locator('#hosts-mode').click()
+    assert run('cy.nodes().length') == 3
     # In this mode a link carries how many endpoint pairs it stands for.
-    page.evaluate('cy.edges()[0].emit("tap")')
-    assert 'edges between endpoints' in page.evaluate('$("selected-note").textContent')
-    page.get_by_role('tab', name='Matrix', exact=True).click()
+    run('() => { cy.edges()[0].emit("tap"); }')
+    assert 'edges between endpoints' in run('$("selected-note").textContent')
+    page.locator('#matrix-tab').click()
     page.wait_for_selector('#matrix-page:not([hidden])')
-    hop = page.get_by_role('button', name='2', exact=True).first
-    assert 'a → work' in (hop.get_attribute('title') or '')
+    hop = page.locator('#matrix button[title^="a → work"]')
+    assert hop.text_content() == '2', hop.text_content()
     hop.click()
-    assert page.get_by_role('tab', name='Endpoint', exact=True).get_attribute('aria-selected') == 'true'
-    assert page.evaluate('cy.edges(".focus").length') >= 2
+    assert page.locator('#endpoints-mode').get_attribute('aria-selected') == 'true'
+    assert run('cy.edges(".focus").length') >= 2
     phase('matrix')
-    page.get_by_role('tab', name='Configs', exact=True).click()
+    page.locator('#configs-tab').click()
     with page.expect_download() as download:
         page.get_by_role('link', name='Download mesh-2.json ↓').click()
     config = json.loads(Path(download.value.path()).read_text())
@@ -162,8 +170,8 @@ with sync_playwright() as p:
     assert config.get('registry_version', 1) == 1
     page.goto('http://127.0.0.1:8059/config')
     page.wait_for_selector('#config-cards .config-card')
-    assert page.get_by_role('tab', name='Configs', exact=True).get_attribute('aria-selected') == 'true'
-    page.get_by_role('tab', name='Endpoint', exact=True).click()
+    assert page.locator('#configs-tab').get_attribute('aria-selected') == 'true'
+    page.locator('#endpoints-mode').click()
     page.wait_for_function('cy.nodes().length > 3')
     if artifacts := os.environ.get('MESH_TEST_ARTIFACTS'):
         Path(artifacts).mkdir(parents=True, exist_ok=True)
@@ -173,30 +181,29 @@ with sync_playwright() as p:
     # positions they already have, and a peer nothing reaches must read as such
     # in the matrix. Both come from one answer: the same topology with every
     # link of the third node taken out.
-    page.get_by_role('tab', name='Endpoint', exact=True).click()
+    page.locator('#endpoints-mode').click()
     page.wait_for_function('cy.nodes().length > 3')
-    placed = page.evaluate('cy.nodes()[0].position()')
+    placed = run('cy.nodes()[0].position()')
     topology = json.loads(frozen)
     owner = {v['id']: v['owner'] for v in topology['vertices']}
     topology['edges'] = [e for e in topology['edges']
                          if 3 not in (owner.get(e['source']), owner.get(e['target']))]
     cut = json.dumps(topology)
-    page.unroute('**/api/topology')
     page.route('**/api/topology', lambda route: route.fulfill(
         status=200, content_type='application/json', body=cut))
     page.wait_for_function('t.edges.length === %d' % len(topology['edges']), timeout=20000)
-    assert page.evaluate('cy.nodes()[0].position()') == placed, 'the update moved a vertex'
-    page.get_by_role('tab', name='Matrix', exact=True).click()
+    assert run('cy.nodes()[0].position()') == placed, 'the update moved a vertex'
+    page.locator('#matrix-tab').click()
     unreachable = page.locator('td.no-path')
     assert unreachable.count() >= 2, unreachable.count()
     assert 'no route' in (unreachable.first.get_attribute('title') or '')
     phase('update without a route')
-    page.get_by_role('tab', name='Endpoint', exact=True).click()
+    page.locator('#endpoints-mode').click()
     page.unroute('**/api/topology')
     # A control API that stops answering is reported, and recovery is silent.
     page.route('**/api/topology', lambda route: route.abort())
     page.wait_for_function('$("connection").classList.contains("error")', timeout=15000)
-    assert page.evaluate('$("connection").textContent') == 'Control API offline'
+    assert run('$("connection").textContent') == 'Control API offline'
     page.unroute('**/api/topology')
     # A refusal from the API reads the same as silence, and the page recovers
     # from either on its own.
