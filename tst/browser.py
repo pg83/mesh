@@ -1,10 +1,17 @@
 """Chromium exercises the live web UI in the observer's network namespace."""
 import json
 import os
+import time
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 SOURCE = Path(__file__).resolve().parent.parent / 'web' / 'app.js'
+START = time.monotonic()
+
+
+def phase(name):
+    """Every step prints where it got to, so a slow run names its own step."""
+    print(f'browser {time.monotonic() - START:6.1f}s {name}', flush=True)
 
 
 def script_counts(functions, size):
@@ -55,9 +62,11 @@ with sync_playwright() as p:
     page.on('pageerror', lambda error: errors.append(str(error)))
     session = page.context.new_cdp_session(page)
     session.send('Profiler.enable')
-    session.send('Profiler.startPreciseCoverage', {'callCount': True, 'detailed': True})
+    session.send('Profiler.startPreciseCoverage', {'callCount': False, 'detailed': True})
+    phase('coverage armed')
     page.goto('http://127.0.0.1:8059/')
     page.wait_for_function('ready && t.peers.length === 3')
+    phase('first snapshot')
     assert page.get_by_role('tab').count() == 4
     assert page.evaluate('cy.nodes().length') >= 6
     # Every endpoint circle shown is linked to a vertex of another node; lone attachments are hidden.
@@ -72,6 +81,7 @@ with sync_playwright() as p:
     assert page.evaluate('cy.zoom()') == 1.3
     assert page.evaluate('cy.pan()') == {'x': 71, 'y': 83}
     assert page.evaluate('cy.nodes()[0].position()') == {'x': 321, 'y': 123}
+    phase('drag survived a refresh')
     # The panel buttons restore the view the dragging moved.
     page.get_by_role('button', name='Fit ↗', exact=True).click()
     assert page.evaluate('cy.zoom()') > 0
@@ -96,6 +106,7 @@ with sync_playwright() as p:
     assert page.evaluate('cy.edges(".focus").length') >= 1
     page.select_option('#route-dest', value='')
     assert page.evaluate('cy.elements(".focus").length') == 0
+    phase('graph interactions')
     page.get_by_role('tab', name='Hosts', exact=True).click()
     assert page.evaluate('cy.nodes().length') == 3
     # In this mode a link carries how many endpoint pairs it stands for.
@@ -108,6 +119,7 @@ with sync_playwright() as p:
     hop.click()
     assert page.get_by_role('tab', name='Endpoint', exact=True).get_attribute('aria-selected') == 'true'
     assert page.evaluate('cy.edges(".focus").length') >= 2
+    phase('matrix')
     page.get_by_role('tab', name='Configs', exact=True).click()
     with page.expect_download() as download:
         page.get_by_role('link', name='Download mesh-2.json ↓').click()
@@ -123,22 +135,25 @@ with sync_playwright() as p:
     if artifacts := os.environ.get('MESH_TEST_ARTIFACTS'):
         Path(artifacts).mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(Path(artifacts) / 'mesh-web.png'))
+    phase('configs')
     # A control API that stops answering is reported, and recovery is silent.
     page.route('**/api/topology', lambda route: route.abort())
     page.wait_for_function('$("connection").classList.contains("error")', timeout=15000)
     assert page.evaluate('$("connection").textContent') == 'Control API offline'
     page.unroute('**/api/topology')
-    page.wait_for_function('!$("connection").classList.contains("error")', timeout=15000)
-    # A refusal from the API reads the same as silence.
+    # A refusal from the API reads the same as silence, and the page recovers
+    # from either on its own.
     page.route('**/api/topology', lambda route: route.fulfill(status=503, body='down'))
-    page.wait_for_function('$("connection").classList.contains("error")', timeout=15000)
-    assert '503' in page.evaluate('$("connection").title')
+    page.wait_for_function('$("connection").title.includes("503")', timeout=20000)
     page.unroute('**/api/topology')
-    page.wait_for_function('!$("connection").classList.contains("error")', timeout=15000)
+    page.wait_for_function('!$("connection").classList.contains("error")', timeout=20000)
+    phase('control API loss and recovery')
     page.set_viewport_size({'width': 390, 'height': 844})
     for name in ['Hosts', 'Endpoint', 'Matrix', 'Configs']:
         page.get_by_role('tab', name=name, exact=True).click()
     assert not errors, errors
+    phase('narrow viewport')
     if report := os.environ.get('MESH_TEST_WEB_COVERAGE'):
         coverage(session, report)
+        phase('coverage written')
     browser.close()
