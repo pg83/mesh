@@ -49,10 +49,7 @@ select { width:100%;padding:9px;color:var(--text);font-size:10px;border:1px soli
 #matrix td { text-align:center;height:36px;min-width:25px }
 #matrix button { border:0;background:var(--accent-bg);color:var(--accent);border-radius:4px;width:100%;height:100%;font:11px var(--mono) }
 #matrix .no-path { color:var(--muted);opacity:.6 }
-.config-banner { border:1px solid var(--line);border-radius:10px;background:var(--surface);padding:26px;display:flex;justify-content:space-between;align-items:center;gap:20px }
-.config-banner h2 { font-size:22px;margin-bottom:9px }
-.config-banner pre { font:11px/1.9 var(--mono);background:var(--accent-bg);padding:19px 24px;border-radius:7px;color:var(--accent);white-space:pre-wrap }
-#config-cards { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:20px }
+#config-cards { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px }
 .config-card { border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:25px }
 .config-card h2 { margin:18px 0 7px }
 .config-card .pub { font:10px/1.8 var(--mono);color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:5px;padding:12px;margin:23px 0 18px;overflow-wrap:anywhere;min-height:77px }
@@ -70,7 +67,7 @@ body[data-design="graph"] { --bg:#10171f;--surface:#151e28;--panel:#141e28;--lin
 [data-design="graph"] #graph { height:620px;background-color:#111b25;background-image:radial-gradient(#2d3c4a .65px,transparent .65px);background-size:20px 20px }
 [data-design="graph"] .snapshot { border-radius:4px }
 [data-design="graph"] .config-card a { color:#12251a }
-[data-design="graph"] .config-banner, [data-design="graph"] .config-card { border-radius:5px }
+[data-design="graph"] .config-card { border-radius:5px }
 @media(min-height:1000px) {
 [data-design="graph"] #graph { height:66vh }
 }
@@ -79,7 +76,6 @@ main { padding:25px 20px 0 }
 .topology-layout { grid-template-columns:minmax(0,1fr) 215px }
 }
 @media(max-width:950px) {
-.config-banner { flex-direction:column;align-items:stretch }
 #config-cards { grid-template-columns:repeat(2,minmax(0,1fr)) }
 .logo small { display:none }
 }
@@ -97,8 +93,6 @@ h1 { font-size:27px }
 #graph, [data-design="graph"] #graph { height:480px }
 [data-design="graph"] .graph-panel { border-radius:6px }
 #config-cards { grid-template-columns:1fr }
-.config-banner { padding:20px }
-.config-banner h2 { font-size:20px }
 }
 body[data-design="graph"] { height:100dvh;overflow:hidden }
 [data-design="graph"] header { height:60px;padding:0 24px }
