@@ -3,7 +3,9 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
+	"math/rand/v2"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -18,6 +20,8 @@ const (
 	defaultDNSPort = 53
 	dnsSuffix      = ".mesh."
 	dnsTTL         = 60
+	dnsPoolTTL     = 5
+	dnsFreshness   = 5 * time.Second
 	dnsAnswerCap   = 512
 	dnsTypeA       = 1
 	dnsTypePTR     = 12
@@ -25,18 +29,94 @@ const (
 	dnsTypeAny     = 255
 	dnsClassIN     = 1
 	rcodeOK        = 0
+	rcodeServer    = 2
 	rcodeName      = 3
 	rcodeRefuse    = 5
 )
 
 type Zone struct {
 	subnet  *net.IPNet
-	forward map[string][4]byte
+	forward map[string]*DNSRecord
 	reverse map[[4]byte]string
+	expires time.Time
 }
 
-func newZone(peers []RegistryRecord, subnet *net.IPNet) *Zone {
-	z := &Zone{subnet: subnet, forward: map[string][4]byte{}, reverse: map[[4]byte]string{}}
+type DNSRecord struct {
+	ips [][4]byte
+	ttl uint32
+}
+
+func dnsLabel(label string) bool {
+	if len(label) == 0 || len(label) > 63 {
+		return false
+	}
+
+	for _, c := range label {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+
+	return true
+}
+
+func parseDNSRecords(records map[string][]string) map[string][]string {
+	if len(records) == 0 {
+		return nil
+	}
+
+	out := map[string][]string{}
+
+	for owner, peers := range records {
+		name := strings.ToLower(strings.TrimSuffix(owner, "."))
+
+		if len(name+dnsSuffix)+1 > 255 {
+			throwFmt("dns_records: name too long: %q", owner)
+		}
+
+		for i, label := range strings.Split(name, ".") {
+			if !dnsLabel(label) && !(i == 0 && label == "*") {
+				throwFmt("dns_records: invalid name %q", owner)
+			}
+		}
+
+		if _, exists := out[name]; exists {
+			throwFmt("dns_records: duplicate name %q", owner)
+		}
+
+		if len(peers) == 0 {
+			throwFmt("dns_records: %s: no nodes", owner)
+		}
+
+		for _, peer := range peers {
+			peer = strings.ToLower(strings.TrimSuffix(peer, "."))
+
+			if !dnsLabel(peer) {
+				throwFmt("dns_records: %s: invalid node %q", owner, peer)
+			}
+
+			out[name] = append(out[name], peer)
+		}
+	}
+
+	return out
+}
+
+func (z *Zone) add(name string, record *DNSRecord) {
+	z.forward[name] = record
+
+	for name != "mesh." {
+		_, name, _ = strings.Cut(name, ".")
+
+		if _, exists := z.forward[name]; !exists {
+			z.forward[name] = nil
+		}
+	}
+}
+
+func newZone(peers []RegistryRecord, subnet *net.IPNet, records map[string][]string, reachable map[uint16]bool) *Zone {
+	z := &Zone{subnet: subnet, forward: map[string]*DNSRecord{"mesh.": nil}, reverse: map[[4]byte]string{}}
+	hosts := map[string][][4]byte{}
 
 	for _, p := range peers {
 		name := strings.ToLower(strings.TrimSuffix(p.Name, "."))
@@ -47,8 +127,28 @@ func newZone(peers []RegistryRecord, subnet *net.IPNet) *Zone {
 
 		ip := parseIntip(p.Intip)
 
-		z.forward[name+dnsSuffix] = ip
+		z.add(name+dnsSuffix, &DNSRecord{ips: [][4]byte{ip}, ttl: dnsTTL})
 		z.reverse[ip] = name + dnsSuffix
+
+		if reachable[p.Index] {
+			hosts[name] = append(hosts[name], ip)
+		}
+	}
+
+	for name, members := range records {
+		record := &DNSRecord{ttl: dnsPoolTTL}
+		seen := map[[4]byte]bool{}
+
+		for _, member := range members {
+			for _, ip := range hosts[member] {
+				if !seen[ip] {
+					record.ips = append(record.ips, ip)
+					seen[ip] = true
+				}
+			}
+		}
+
+		z.add(name+dnsSuffix, record)
 	}
 
 	return z
@@ -83,7 +183,7 @@ func (z *Zone) reply(query []byte) []byte {
 		out = append(out, 0xc0, 12)
 		out = binary.BigEndian.AppendUint16(out, answer.kind)
 		out = binary.BigEndian.AppendUint16(out, dnsClassIN)
-		out = binary.BigEndian.AppendUint32(out, dnsTTL)
+		out = binary.BigEndian.AppendUint32(out, answer.ttl)
 		out = binary.BigEndian.AppendUint16(out, uint16(len(answer.data)))
 		out = append(out, answer.data...)
 	}
@@ -93,31 +193,64 @@ func (z *Zone) reply(query []byte) []byte {
 	return out
 }
 
-type dnsAnswer struct {
+type DNSAnswer struct {
 	kind uint16
 	data []byte
+	ttl  uint32
 }
 
-func (z *Zone) lookup(name string, qtype, class uint16) (int, []dnsAnswer) {
+func (z *Zone) lookup(name string, qtype, class uint16) (int, []DNSAnswer) {
 	if class != dnsClassIN {
 		return rcodeRefuse, nil
 	}
 
-	if strings.HasSuffix(name, dnsSuffix) {
-		ip, known := z.forward[name]
+	if name == "mesh." || strings.HasSuffix(name, dnsSuffix) {
+		if !z.expires.IsZero() && time.Now().After(z.expires) {
+			return rcodeServer, nil
+		}
+
+		record, known := z.forward[name]
+
+		if !known {
+			for parent := name; parent != "mesh."; {
+				_, parent, _ = strings.Cut(parent, ".")
+
+				if _, exists := z.forward[parent]; exists {
+					record, known = z.forward["*."+parent]
+
+					break
+				}
+			}
+		}
 
 		if !known {
 			return rcodeName, nil
 		}
 
-		if qtype == dnsTypeA || qtype == dnsTypeAny {
-			return rcodeOK, []dnsAnswer{{kind: dnsTypeA, data: ip[:]}}
+		if record == nil || (qtype != dnsTypeA && qtype != dnsTypeAny) {
+			return rcodeOK, nil
 		}
 
-		return rcodeOK, nil
+		if len(record.ips) == 0 {
+			return rcodeServer, nil
+		}
+
+		answers := make([]DNSAnswer, 0, len(record.ips))
+
+		for _, ip := range record.ips {
+			answers = append(answers, DNSAnswer{kind: dnsTypeA, data: ip[:], ttl: record.ttl})
+		}
+
+		rand.Shuffle(len(answers), func(i, j int) { answers[i], answers[j] = answers[j], answers[i] })
+
+		return rcodeOK, answers
 	}
 
 	if ip, ok := reverseName(name); ok && z.subnet.Contains(net.IP(ip[:])) {
+		if !z.expires.IsZero() && time.Now().After(z.expires) {
+			return rcodeServer, nil
+		}
+
 		owner, known := z.reverse[ip]
 
 		if !known {
@@ -125,7 +258,7 @@ func (z *Zone) lookup(name string, qtype, class uint16) (int, []dnsAnswer) {
 		}
 
 		if qtype == dnsTypePTR || qtype == dnsTypeAny {
-			return rcodeOK, []dnsAnswer{{kind: dnsTypePTR, data: encodeName(owner)}}
+			return rcodeOK, []DNSAnswer{{kind: dnsTypePTR, data: encodeName(owner), ttl: dnsTTL}}
 		}
 
 		return rcodeOK, nil
@@ -229,13 +362,18 @@ func (s *DNSServer) run() {
 
 		go s.node.loop("dns "+net.IP(ip[:]).String(), func() { s.serve(conn) })
 	}
+}
 
-	for {
-		view := s.node.currentSnapshot()
+func (s *DNSServer) update(view *Snapshot) {
+	reachable := map[uint16]bool{s.node.cfg.Index: true}
 
-		s.zone.Store(newZone(view.registry.records(), s.node.subnet))
-		time.Sleep(time.Second)
+	for dst := range view.hops {
+		if isHostID(dst) {
+			reachable[vertexOwner(dst)] = true
+		}
 	}
+
+	s.zone.Store(newZone(view.registry.records(), s.node.subnet, s.node.cfg.DnsRecords, reachable))
 }
 
 func (s *DNSServer) serve(conn *gonet.UDPConn) {
@@ -257,6 +395,9 @@ func (s *DNSServer) serve(conn *gonet.UDPConn) {
 func runDNS(address, control string) {
 	base := "http://" + controlAddress(control)
 	client := controlClient()
+
+	client.Timeout = 2 * time.Second
+
 	conn := throw2(net.ListenPacket("udp", address))
 
 	var zone atomic.Pointer[Zone]
@@ -266,18 +407,33 @@ func runDNS(address, control string) {
 			try(func() {
 				var status Status
 
+				started := time.Now()
 				response := throw2(client.Get(base + "/status"))
 
 				defer response.Body.Close()
 
+				if response.StatusCode != http.StatusOK {
+					throwFmt("control: %s", response.Status)
+				}
+
 				throw(json.NewDecoder(response.Body).Decode(&status))
 
 				_, subnet := throw3(net.ParseCIDR(status.Subnet))
+				reachable := map[uint16]bool{status.Index: true}
 
-				zone.Store(newZone(status.Registry, subnet))
+				for _, peer := range status.Registry {
+					if len(status.Routes[udpVertex(net.ParseIP(peer.Intip), 0).string()]) != 0 {
+						reachable[peer.Index] = true
+					}
+				}
+
+				z := newZone(status.Registry, subnet, status.DnsRecords, reachable)
+
+				z.expires = started.Add(dnsFreshness)
+				zone.Store(z)
 			}).catch(func(*Exception) {})
 
-			time.Sleep(3 * time.Second)
+			time.Sleep(time.Second)
 		}
 	}()
 

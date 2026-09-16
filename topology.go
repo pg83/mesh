@@ -106,6 +106,10 @@ func (n *Node) publishSnapshot() {
 
 	n.snapshot = view
 
+	if n.dns != nil {
+		n.dns.update(view)
+	}
+
 	for _, actor := range n.channels {
 		actor.post(view)
 	}

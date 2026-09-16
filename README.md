@@ -57,6 +57,7 @@ mesh dns -control 127.0.0.1:8058 -listen 127.0.0.1:5355
 | `tun`, `mtu` | TUN name (`mesh0` on Linux, `utun` on macOS) and MTU (default 1380); see below for running without a device |
 | `sshd`, `sshd_port`, `sshd_authorized_keys` | Embedded SSH server, see below |
 | `dns`, `dns_port` | Embedded DNS server for the `mesh` zone, see below |
+| `dns_records` | DNS names relative to `.mesh`, mapped to lists of registry node names; a leading `*.` is a wildcard |
 
 `-key-file` names a file with either the base64 seed or an unencrypted
 OpenSSH Ed25519 private key; for an SSH identity put the full
@@ -190,12 +191,54 @@ echo 'nameserver 10.77.0.0' > /etc/resolver/mesh                    # macOS
 socket (`-listen`, default `127.0.0.1:5355`) for resolvers that forward to
 localhost; it needs no privileges and no TUN.
 
+To balance a service name across nodes, add records to the DNS node's
+configuration:
+
+```json
+"dns": true,
+"dns_records": {
+  "*.lab": ["lab1", "lab2", "lab3"],
+  "special.lab": ["lab1"]
+}
+```
+
+`grafana.lab.mesh` then answers with all distinct mesh addresses of the
+listed nodes that have a route from this node, in a freshly shuffled order
+on every query. The local node also qualifies; a route through a relay
+qualifies too. A node merely heard through incoming links does not qualify
+without an outgoing route. Members are resolved from the current registry,
+so a name learned later through registry exchange starts participating once
+its route exists. This checks network routes, not application health.
+
+Record names and member names are case-insensitive; a trailing dot is
+accepted. Record names are relative to `.mesh`: `*.lab` matches
+`grafana.lab.mesh`, and `special.lab` names `special.lab.mesh`. Wildcards
+follow DNS name boundaries: exact names take precedence, `*.lab` does not
+answer for `lab.mesh` itself, and an existing intermediate name blocks a
+wildcard higher in the tree. Without such an intermediate name, the wildcard
+also answers deeper names such as `api.grafana.lab.mesh`.
+
+Pool answers have a five-second TTL. A matching pool with no reachable
+members returns `SERVFAIL`; other record types, including AAAA, return an
+empty successful answer. Existing node names and PTR records retain their
+60-second TTL. Rules are local configuration, available in `/status` and
+included in downloaded bootstrap configurations. `mesh dns` uses the same
+rules and routes even when the embedded DNS server is disabled; it returns
+`SERVFAIL` for the zone if its last successful control read is over five
+seconds old.
+
+Clients should query their own node's DNS so filtering uses their routes.
+DNS caches can retain an address until its TTL expires, in addition to the
+time mesh needs to detect the lost route. Do not force a longer minimum TTL
+or serve expired cached responses for this zone. DNS uses UDP; TCP fallback
+and response truncation are not implemented.
+
 ### Local control and web
 
 `control` enables a read-only HTTP API on a loopback address:
 
 - `GET /status`: node status: registry, channels, links, graph, records,
-  version vectors and routes.
+  version vectors, routes and configured DNS records.
 - `GET /topology`: registry, live graph edges and routes for the web page.
 - `GET /metrics`: Prometheus text: packets and bytes by kind and direction,
   rejected packets by reason, records and vectors applied, stale and

@@ -48,6 +48,7 @@ type Config struct {
 	SshdAuthorizedKeys string              `json:"sshd_authorized_keys,omitempty"`
 	Dns                bool                `json:"dns,omitempty"`
 	DnsPort            int                 `json:"dns_port,omitempty"`
+	DnsRecords         map[string][]string `json:"dns_records,omitempty"`
 	Exit               bool                `json:"exit,omitempty"`
 	Routes             map[string][]string `json:"routes,omitempty"`
 	exitRoutes         []ExitRoute
@@ -72,6 +73,7 @@ func loadConfig(path string) *Config {
 	}
 
 	cfg.exitRoutes = parseRoutes(cfg)
+	cfg.DnsRecords = parseDNSRecords(cfg.DnsRecords)
 
 	return cfg
 }

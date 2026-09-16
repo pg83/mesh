@@ -91,6 +91,7 @@ func (n *Node) exportConfig(w http.ResponseWriter, r *http.Request) {
 			Index: peer.Index, Subnet: n.cfg.Subnet, Mtu: n.cfg.Mtu,
 			Control: "127.0.0.1:8058", Registry: bootstrap,
 			Endpoint: []EndpointConfig{},
+			Dns:      n.cfg.Dns, DnsRecords: n.cfg.DnsRecords,
 		}
 
 		w.Header().Set("Content-Disposition", "attachment; filename=mesh-"+strconv.Itoa(int(peer.Index))+".json")

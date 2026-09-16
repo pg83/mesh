@@ -20,21 +20,22 @@ type ChannelStatus struct {
 }
 
 type Status struct {
-	Registry  []RegistryRecord  `json:"registry"`
-	Channels  []ChannelStatus   `json:"channels"`
-	Dialing   int               `json:"dialing"`
-	Addresses map[uint32]Vertex `json:"addresses"`
-	Index     uint16            `json:"index"`
-	Subnet    string            `json:"subnet"`
-	Tun       string            `json:"tun"`
-	Links     []LinkStatus      `json:"links"`
-	Alive     []uint16          `json:"alive"`
-	Graph     []Edge            `json:"graph"`
-	Records   []*GraphRecord    `json:"records"`
-	Vectors   []*Vector         `json:"vectors"`
-	Bundles   int               `json:"bundles"`
-	Vertices  []uint32          `json:"vertices"`
-	Routes    map[string][]Edge `json:"routes"`
+	Registry   []RegistryRecord    `json:"registry"`
+	Channels   []ChannelStatus     `json:"channels"`
+	Dialing    int                 `json:"dialing"`
+	Addresses  map[uint32]Vertex   `json:"addresses"`
+	Index      uint16              `json:"index"`
+	Subnet     string              `json:"subnet"`
+	Tun        string              `json:"tun"`
+	Links      []LinkStatus        `json:"links"`
+	Alive      []uint16            `json:"alive"`
+	Graph      []Edge              `json:"graph"`
+	Records    []*GraphRecord      `json:"records"`
+	Vectors    []*Vector           `json:"vectors"`
+	Bundles    int                 `json:"bundles"`
+	Vertices   []uint32            `json:"vertices"`
+	Routes     map[string][]Edge   `json:"routes"`
+	DnsRecords map[string][]string `json:"dns_records,omitempty"`
 }
 
 func (n *Node) status() *Status {
@@ -43,6 +44,7 @@ func (n *Node) status() *Status {
 
 	st.Alive = slices.Sorted(maps.Keys(n.alive))
 	st.Registry = n.reg.records()
+	st.DnsRecords = n.cfg.DnsRecords
 	st.Addresses = map[uint32]Vertex{}
 
 	for id, ep := range n.addresses {
