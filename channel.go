@@ -66,10 +66,6 @@ type Channel struct {
 }
 
 func (a *Channel) run() {
-	ticker := time.NewTicker(tickInterval)
-
-	defer ticker.Stop()
-
 	defer func() { a.io.stop(); a.report() }()
 
 	a.since = time.Now()
@@ -92,9 +88,15 @@ func (a *Channel) run() {
 			case *Snapshot:
 				a.view = v
 
-				if v.registry.byIndex[a.peer].session != a.session || (!a.outgoing && v.local[a.edge.To] == nil) {
+				if v.registry.byIndex[a.peer].session != a.session || (!a.outgoing && v.local[a.edge.To] == nil) || a.silent(time.Now()) {
+					a.io.closeConnection()
+
 					return
 				}
+
+				a.report()
+				a.gossip()
+				a.exchangeRegistry(time.Now())
 			case Received:
 				a.receive(v)
 			case Outbound:
@@ -102,25 +104,18 @@ func (a *Channel) run() {
 			}
 		case <-a.io.ctx.Done():
 			return
-		case now := <-ticker.C:
-
-			if last := a.seen; !a.outgoing {
-				if last.IsZero() {
-					last = a.since
-				}
-
-				if now.Sub(last) >= sessionTimeout {
-					a.io.closeConnection()
-
-					return
-				}
-			}
-
-			a.report()
-			a.gossip()
-			a.exchangeRegistry(time.Now())
 		}
 	}
+}
+
+func (a *Channel) silent(now time.Time) bool {
+	last := a.seen
+
+	if last.IsZero() {
+		last = a.since
+	}
+
+	return !a.outgoing && now.Sub(last) >= sessionTimeout
 }
 
 func (a *Channel) gossip() {
