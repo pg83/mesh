@@ -154,3 +154,15 @@ body[data-design="graph"] { height:100dvh;overflow:hidden }
 #physics-controls input { width:90px;accent-color:var(--accent) }
 #physics-controls button { background:none;border:1px solid var(--line);border-radius:4px;font-size:10px;color:var(--accent);padding:2px 7px }
 #physics-status { font:10px var(--mono);margin-left:auto }
+
+/* Move the existing header to the left; leave the workspace unchanged. */
+body[data-design="graph"] { display:flex }
+[data-design="graph"] header { flex:0 0 152px;height:100dvh;padding:24px 16px;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:28px;border-bottom:0 }
+[data-design="graph"] nav { position:static;left:auto;transform:none;height:auto;flex-direction:column;gap:0 }
+[data-design="graph"] nav button { min-height:44px;padding:12px 10px;text-align:left;border-bottom:0;border-left:2px solid transparent }
+[data-design="graph"] nav button.active { border-left-color:var(--accent) }
+[data-design="graph"] .snapshot { margin-top:auto;align-self:flex-start }
+[data-design="graph"] .shell { flex:1;min-width:0;height:100dvh }
+@media(max-width:680px) {
+[data-design="graph"] header { flex-basis:124px;padding:20px 12px }
+}
