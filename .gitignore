@@ -7,3 +7,4 @@ __pycache__/
 .claude/
 /node_ownership_gen.go
 /coverage
+/e2e_*
