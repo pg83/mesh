@@ -123,8 +123,10 @@ TLS.
 A node dials a target only from an interface whose network contains it or
 through which the system routes it. Failed WebSocket connection attempts
 back off exponentially up to a minute; a new interface address, a link from
-the peer or a new record of it retries at once. Routes prefer UDP links over
-WebSocket ones and shorter paths over longer.
+the peer or a new record of it retries at once. A datagram the kernel
+refuses is a datagram lost: the UDP channel keeps its socket, and only
+silence takes the link down. Routes prefer UDP links over WebSocket ones and
+shorter paths over longer.
 
 On Linux the TUN interface persists across restarts; remove it with
 `ip link del <name>` when renaming or uninstalling. On macOS the interface
