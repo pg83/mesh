@@ -1,4 +1,5 @@
 """Chromium exercises the live web UI in the observer's network namespace."""
+import faulthandler
 import json
 import os
 import time
@@ -7,6 +8,9 @@ from playwright.sync_api import sync_playwright
 
 SOURCE = Path(__file__).resolve().parent.parent / 'web' / 'app.js'
 START = time.monotonic()
+# A browser that stops answering used to burn the whole budget of the test and
+# die from the outside with nothing to read. This prints where it stopped.
+faulthandler.dump_traceback_later(300, exit=True)
 
 
 def phase(name):
@@ -47,6 +51,18 @@ def lcov(source, scripts, name):
     return '\n'.join(record) + '\n'
 
 
+def destination(value):
+    """Point the route list at one peer, or at nobody. The list is a plain
+    select whose onchange draws the route, so setting the value and announcing
+    the change is the whole of what choosing an entry does."""
+    return """(() => {
+  const list = $('route-dest');
+  list.value = %s;
+  list.dispatchEvent(new Event('change'));
+  return list.value;
+})()""" % json.dumps(value)
+
+
 def coverage(session, path):
     source = SOURCE.read_text()
     scripts = [s['functions'] for s in session.send('Profiler.takePreciseCoverage')['result']
@@ -58,6 +74,10 @@ def coverage(session, path):
 with sync_playwright() as p:
     browser = p.chromium.launch(args=['--no-sandbox'])
     page = browser.new_page(viewport={'width': 1440, 'height': 900}, accept_downloads=True)
+    # No single step deserves half a minute here: everything this page shows is
+    # on screen within a second, so a step that waits longer is a step that is
+    # never going to finish, and it should say so while the log is still short.
+    page.set_default_timeout(20000)
     errors = []
     page.on('pageerror', lambda error: errors.append(str(error)))
     session = page.context.new_cdp_session(page)
@@ -89,29 +109,35 @@ with sync_playwright() as p:
     frozen = page.evaluate('JSON.stringify(t)')
     page.route('**/api/topology', lambda route: route.fulfill(
         status=200, content_type='application/json', body=frozen))
-    # The panel buttons restore the view the dragging moved.
-    page.get_by_role('button', name='Fit ↗', exact=True).click()
-    assert page.evaluate('cy.zoom()') > 0
-    page.get_by_role('button', name='Layout', exact=True).click()
+    phase('topology frozen')
+    # Everything below sits next to a canvas that redraws on its own. Playwright
+    # holds a click until the page looks still, which beside that canvas has
+    # taken minutes, so these controls are pressed from inside the page instead.
+    assert page.evaluate('($("fit").click(), $("reset").click(), cy.zoom() > 0)')
+    phase('panel buttons')
     # Tapping a vertex selects its owner and highlights the vertex itself.
     page.evaluate('cy.nodes().filter(n => !n.hasClass("ip"))[0].emit("tap")')
     assert page.evaluate('cy.elements(".focus").length') >= 1
     assert page.evaluate('$("selected-name").textContent')
+    phase('vertex tap')
     # An advertised endpoint of the selected node leads back to its circle.
     page.evaluate('cy.nodes().filter(n => n.hasClass("ip") && n.data("owner") === 1)[0].emit("tap")')
     assert page.evaluate('$("endpoint-count").textContent') != '0'
-    page.locator('#endpoints button').first.click()
+    page.evaluate('document.querySelector("#endpoints button").click()')
     assert page.evaluate('cy.elements(".focus").length') >= 1
+    phase('endpoint button')
     # Tapping a link describes it, tapping the background clears the highlight.
     page.evaluate('cy.edges()[0].emit("tap")')
     assert page.evaluate('$("selected-name").textContent') == 'Directed link'
     page.evaluate('cy.emit("tap")')
     assert page.evaluate('cy.elements(".focus").length') == 0
+    phase('link and background tap')
     # The route selector highlights the local route and then drops it.
-    page.select_option('#route-dest', label=[o for o in page.locator('#route-dest option').all_text_contents() if '→' in o][0])
+    peer = page.evaluate('[...$("route-dest").options].map(option => option.value).find(Boolean)')
+    assert page.evaluate(destination(peer)) == peer
     assert 'hops' in page.evaluate('$("route-summary").textContent')
     assert page.evaluate('cy.edges(".focus").length') >= 1
-    page.select_option('#route-dest', value='')
+    page.evaluate(destination(''))
     assert page.evaluate('cy.elements(".focus").length') == 0
     phase('graph interactions')
     page.get_by_role('tab', name='Hosts', exact=True).click()
