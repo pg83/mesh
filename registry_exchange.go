@@ -13,7 +13,7 @@ func (a *Channel) exchangeRegistry(now time.Time) {
 	a.nextRegistry = now.Add(registryInterval)
 }
 
-func (n *Node) handleRegistry(records RegistryRecords) bool {
+func (n *Node) handleRegistry(records RegistryRecords) {
 	reg := n.reg
 
 	for _, record := range records {
@@ -52,9 +52,5 @@ func (n *Node) handleRegistry(records RegistryRecords) bool {
 		}).catch(func(e *Exception) { n.log.Debug("registry record rejected", "index", record.Index, "err", e) })
 	}
 
-	changed := reg != n.reg
-
 	n.reg = reg
-
-	return changed
 }

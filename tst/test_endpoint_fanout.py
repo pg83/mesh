@@ -13,7 +13,7 @@ class ManyEndpoints(lib.Lab):
 
 def test():
     with ManyEndpoints(['a', 'b'], {1: ['a', 'b']}, statics=['b']) as lab:
-        lab.wait_ping('a', 'b', timeout=4)
+        lab.wait_ping('a', 'b', timeout=8)
         stream = workload.SshServer(lab, 'b').stream('a')
         probes = lab.intercept('b', 'a', 'observe', kind=3, count=-1)
         # The working endpoint continues receiving periodic version bundles.

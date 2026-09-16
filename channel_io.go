@@ -18,6 +18,7 @@ type ChannelIO struct {
 	wire           SocketAddress
 	origin, id     uint64
 	queue          *Mailbox[[]byte]
+	inbox          *Mailbox[any]
 	ctx            context.Context
 	cancel         context.CancelFunc
 	write          func(context.Context, []byte)
@@ -30,7 +31,7 @@ func newChannelIO(session *Session, edge Edge, source, target Vertex, outgoing, 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &ChannelIO{session: session, edge: edge, source: source, target: target, listener: listener,
-		peer: session.peer, outgoing: outgoing, origin: uint64(edge.From), id: id, queue: newMailbox[[]byte](ctx.Done()), ctx: ctx, cancel: cancel}
+		peer: session.peer, outgoing: outgoing, origin: uint64(edge.From), id: id, queue: newMailbox[[]byte](ctx.Done()), inbox: newMailbox[any](ctx.Done()), ctx: ctx, cancel: cancel}
 }
 
 func (c *ChannelIO) localID() uint32 {
@@ -63,7 +64,7 @@ func (c *ChannelIO) transport() string {
 
 func (a *Channel) post(message any) {
 	select {
-	case a.inbox.in <- message:
+	case a.io.inbox.in <- message:
 	case <-a.io.ctx.Done():
 	}
 }

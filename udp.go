@@ -42,7 +42,6 @@ type UDPInputKey struct {
 }
 type UDPInput struct {
 	channel *ChannelIO
-	input   chan any
 	seen    time.Time
 }
 
@@ -104,18 +103,8 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 			c.local = view.local[id]
 			c.wire = key.remote
 
-			ready := make(chan chan any, 1)
-
-			c.read = func(in chan any) { ready <- in }
-			post(n.events.in, any(c))
-
-			select {
-			case input.input = <-ready:
-			case <-c.ctx.Done():
-				continue
-			}
-
 			input.channel = c
+			post(n.events.in, any(c))
 
 			for key, old := range inputs {
 				if now.Sub(old.seen) >= sessionTimeout {
@@ -129,7 +118,7 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 		inputs[key] = input
 
 		select {
-		case input.input <- Received{packet: append([]byte(nil), buf[:headerTransport]...), source: source, inner: inner, at: now, io: input.channel}:
+		case input.channel.inbox.in <- Received{packet: append([]byte(nil), buf[:headerTransport]...), source: source, inner: inner, at: now, io: input.channel}:
 		case <-input.channel.ctx.Done():
 		}
 	}

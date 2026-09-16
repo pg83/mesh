@@ -52,7 +52,7 @@ def test():
         lab.wait(lambda: len(lab.channels('b')) == 2, 'remaining pair intact')
         assert local_edge(internal, endpoint), 'closing one channel removed a shared local direction'
         lab.wait(lambda: not lab.channels('b'), 'silent client closed after five seconds', timeout=10)
-        assert not local_edge(internal, endpoint), 'last sender removed the outgoing direction'
+        lab.wait(lambda: not local_edge(internal, endpoint), 'last sender removed the outgoing direction')
         assert local_edge(endpoint, internal), 'listener must remain discoverable without clients'
         two.finish()
 

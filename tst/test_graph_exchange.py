@@ -37,7 +37,7 @@ def test():
         # A newer record replaces the whole vertex set of its owner.
         probe.send(op='graph', body=lib.record(2, ident + 2, [(x, True, False)]))
         lab.wait(lambda: version('c') == ident + 2, 'newer record propagates')
-        assert not present('c', host, y), 'an omitted vertex survived a newer record'
+        lab.wait(lambda: not present('c', host, y), 'an omitted vertex survived a newer record')
         assert present('c', x, host)
         assert str(lib.record_id(2, 1)) not in lab.status('c')['addresses']
         # An older version cannot roll a peer back.

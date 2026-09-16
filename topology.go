@@ -50,7 +50,7 @@ func (n *Node) installChannel(c *ChannelIO) {
 		n.local[local] = c.local
 	}
 
-	actor := &Channel{node: n, edge: c.edge, peer: c.peer, outgoing: c.outgoing, inbox: newMailbox[any](c.ctx.Done()), session: c.session, io: c}
+	actor := &Channel{node: n, edge: c.edge, peer: c.peer, outgoing: c.outgoing, session: c.session, io: c, view: n.snapshot}
 
 	n.channels[c.edge] = actor
 	n.channelStatus[c.edge] = ChannelStatus{Transport: c.transport(), Edge: c.edge, Outgoing: c.outgoing, ID: c.id, Wire: c.wire}
@@ -148,13 +148,8 @@ func (n *Node) observe(r ChannelReport) {
 
 func (n *Node) graphLoop() {
 	ticker := time.NewTicker(tickInterval)
-	updates := time.NewTicker(20 * time.Millisecond)
 
 	defer ticker.Stop()
-
-	defer updates.Stop()
-
-	dirty := false
 
 	for {
 		select {
@@ -168,23 +163,16 @@ func (n *Node) graphLoop() {
 				n.syncLocal()
 				n.refresh(time.Now())
 				n.publishSnapshot()
-				dirty = false
 			case *GraphRecord:
 				n.handleRecord(v)
-				dirty = true
 			case *Vector:
 				n.handleVector(v)
-				dirty = true
 			case *Route:
 				n.routeCache[v.host] = v
 			case RegistryRecords:
-				if n.handleRegistry(v) {
-					n.publishSnapshot()
-					dirty = false
-				}
+				n.handleRegistry(v)
 			case ChannelReport:
 				n.observe(v)
-				dirty = true
 			case DialResult:
 				if n.dials[v.attempt.key] != v.attempt {
 					for _, c := range v.channels {
@@ -207,36 +195,16 @@ func (n *Node) graphLoop() {
 				for _, c := range v.channels {
 					n.installChannel(c)
 				}
-
-				n.refresh(time.Now())
-				n.publishSnapshot()
 			case *ChannelIO:
 				n.installChannel(v)
-				n.refresh(time.Now())
-				n.publishSnapshot()
-
 			case chan *Snapshot:
 				post(v, n.snapshot)
 			case chan *Status:
-				if dirty {
-					n.refresh(time.Now())
-					n.publishSnapshot()
-					dirty = false
-				}
-
 				post(v, n.status())
 			}
 		case now := <-ticker.C:
 			n.refresh(now)
-
 			n.publishSnapshot()
-			dirty = false
-		case <-updates.C:
-			if dirty {
-				n.refresh(time.Now())
-				n.publishSnapshot()
-				dirty = false
-			}
 		}
 	}
 }

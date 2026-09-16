@@ -133,7 +133,8 @@ def test():
         assert version() == ident, 'malformed gossip changed the record version'
         assert not any(present(edge) for edge in edges), 'malformed gossip partially changed the graph'
 
-        assert not any(str(ident) in lab.status('b')['addresses'] for ident in ids)
+        # The dial channels towards the withdrawn listeners go with the next snapshot.
+        lab.wait(lambda: not any(str(ident) in lab.status('b')['addresses'] for ident in ids), 'withdrawn vertices forgotten')
         send(packet)
         lab.wait(lambda: all(present(edge) for edge in edges), 'independent binary writer accepted')
         assert not present((marker, host)), 'a replaced record kept an omitted vertex'
@@ -151,7 +152,7 @@ def test():
         withdrawn, _ = encode_record(1, ident + 3, [], [])
         send(withdrawn)
         lab.wait(lambda: not any(present(edge) for edge in edges), 'binary withdrawal applied')
-        assert not any(str(ident) in lab.status('b')['addresses'] for ident in ids)
+        lab.wait(lambda: not any(str(ident) in lab.status('b')['addresses'] for ident in ids), 'withdrawn vertices forgotten')
         probe.finish()
 
 

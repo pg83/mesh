@@ -56,7 +56,6 @@ type Channel struct {
 	edge         Edge
 	peer         uint16
 	outgoing     bool
-	inbox        *Mailbox[any]
 	view         *Snapshot
 	session      *Session
 	replay       Replay
@@ -75,30 +74,26 @@ func (a *Channel) run() {
 
 	a.since = time.Now()
 
+	if a.io.read != nil {
+		go a.io.read(a.io.inbox.in)
+	}
+
+	if a.io.write != nil {
+		go a.io.runWriter(a.node)
+	}
+
+	a.gossip()
+	a.exchangeRegistry(a.since)
+
 	for {
 		select {
-		case msg := <-a.inbox.out:
+		case msg := <-a.io.inbox.out:
 			switch v := msg.(type) {
 			case *Snapshot:
-				first := a.view == nil
-
 				a.view = v
 
-				if v.registry.byIndex[a.peer].session != a.session || (a.outgoing && !a.enabled()) || (!a.outgoing && v.local[a.edge.To] == nil) {
+				if v.registry.byIndex[a.peer].session != a.session || (!a.outgoing && v.local[a.edge.To] == nil) {
 					return
-				}
-
-				if first {
-					if a.io.read != nil {
-						go a.io.read(a.inbox.in)
-					}
-
-					if a.io.write != nil {
-						go a.io.runWriter(a.node)
-					}
-
-					a.gossip()
-					a.exchangeRegistry(time.Now())
 				}
 			case Received:
 				a.receive(v)
@@ -157,7 +152,7 @@ func (a *Channel) report() {
 }
 
 func (a *Channel) enabled() bool {
-	return a.view != nil && a.view.local[a.edge.From] != nil && a.io.ctx.Err() == nil
+	return a.view != nil && a.io.ctx.Err() == nil
 }
 
 func (a *Channel) send(kind byte, inner []byte) {
