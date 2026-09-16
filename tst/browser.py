@@ -26,14 +26,14 @@ with sync_playwright() as p:
     assert page.evaluate('cy.pan()') == {'x': 71, 'y': 83}
     assert page.evaluate('cy.nodes()[0].position()') == {'x': 321, 'y': 123}
     # The spring simulation runs until the bodies stop; hosts end up apart from each other.
-    page.get_by_role('tab', name='Пружины', exact=True).click()
+    page.get_by_role('tab', name='Springs', exact=True).click()
     page.wait_for_function('physics.steps > 30')
     page.wait_for_function('physics.converged', timeout=90000)
     hosts = page.evaluate('cy.nodes(".ip").map(n => n.position())')
     assert len(hosts) == 3
     assert all(((a['x'] - b['x']) ** 2 + (a['y'] - b['y']) ** 2) ** .5 > 100 for i, a in enumerate(hosts) for b in hosts[i + 1:]), hosts
-    assert 'сошлось' in page.locator('#physics-status').text_content()
-    page.get_by_role('tab', name='Хосты', exact=True).click()
+    assert 'converged' in page.locator('#physics-status').text_content()
+    page.get_by_role('tab', name='Hosts', exact=True).click()
     assert page.evaluate('cy.nodes().length') == 3
     page.get_by_role('tab', name='Matrix', exact=True).click()
     page.wait_for_selector('#matrix-page:not([hidden])')
@@ -42,23 +42,23 @@ with sync_playwright() as p:
     hop.click()
     assert page.get_by_role('tab', name='Endpoint', exact=True).get_attribute('aria-selected') == 'true'
     assert page.evaluate('cy.edges(".focus").length') >= 2
-    page.get_by_role('tab', name='Конфиги', exact=True).click()
+    page.get_by_role('tab', name='Configs', exact=True).click()
     with page.expect_download() as download:
-        page.get_by_role('link', name='Скачать mesh-2.json ↓').click()
+        page.get_by_role('link', name='Download mesh-2.json ↓').click()
     config = json.loads(Path(download.value.path()).read_text())
     assert config['index'] == 2 and 'key' not in config
     assert [peer['index'] for peer in config['registry']] == [1, 2]
     assert config.get('registry_version', 1) == 1
     page.goto('http://127.0.0.1:8059/config')
     page.wait_for_selector('#config-cards .config-card')
-    assert page.get_by_role('tab', name='Конфиги', exact=True).get_attribute('aria-selected') == 'true'
+    assert page.get_by_role('tab', name='Configs', exact=True).get_attribute('aria-selected') == 'true'
     page.get_by_role('tab', name='Endpoint', exact=True).click()
     page.wait_for_function('cy.nodes().length > 3')
     if artifacts := os.environ.get('MESH_TEST_ARTIFACTS'):
         Path(artifacts).mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(Path(artifacts) / 'mesh-web.png'))
     page.set_viewport_size({'width': 390, 'height': 844})
-    for name in ['Хосты', 'Endpoint', 'Matrix', 'Конфиги']:
+    for name in ['Hosts', 'Endpoint', 'Matrix', 'Configs']:
         page.get_by_role('tab', name=name, exact=True).click()
     assert not errors, errors
     browser.close()

@@ -103,7 +103,7 @@ const physics = {
   else requestAnimationFrame(()=>this.frame());
   this.report();
  },
- report(){$('physics-status').textContent=`шаг ${this.steps} · энергия ${this.energy.toFixed(1)} · ${this.converged?'сошлось':'идёт'}`;}
+ report(){$('physics-status').textContent=`step ${this.steps} · energy ${this.energy.toFixed(1)} · ${this.converged?'converged':'running'}`;}
 };
 $('physics-restart').onclick=()=>{layout();};
 $('physics-shake').onclick=()=>physics.shake();
@@ -138,34 +138,34 @@ function buildGraph(preserve = false) {
 function inspect(index, highlight=true) {
  selected=index;const p=peer(index); if(!p)return;
  $('selected-name').textContent=p.name;$('selected-ip').textContent=p.intip;
- $('selected-note').textContent=index===t.index?'Локальная нода.':active(p)?'Кто-то слышит эту ноду.':'В registry. Никто не слышит эту ноду.';
+ $('selected-note').textContent=index===t.index?'Local node.':active(p)?'Heard by another node.':'Registered. No node hears this node.';
  $('endpoints').replaceChildren();const endpoints=epFor(index);$('endpoint-count').textContent=endpoints.length;
- for(const e of endpoints){const row=document.createElement('div');row.className='endpoint-row';const proto=document.createElement('span');proto.textContent=e.proto.toUpperCase();const value=document.createTextNode(label(e));const button=document.createElement('button');button.textContent='↗';button.title='Показать endpoint';button.onclick=()=>{setPage('endpoints');focusVertex(e.id);};row.append(proto,value,button);$('endpoints').append(row);}
- if(!endpoints.length){const note=document.createElement('p');note.textContent='Нет объявленных точек входа.';note.style.fontSize='10px';$('endpoints').append(note);}
+ for(const e of endpoints){const row=document.createElement('div');row.className='endpoint-row';const proto=document.createElement('span');proto.textContent=e.proto.toUpperCase();const value=document.createTextNode(label(e));const button=document.createElement('button');button.textContent='↗';button.title='Show endpoint';button.onclick=()=>{setPage('endpoints');focusVertex(e.id);};row.append(proto,value,button);$('endpoints').append(row);}
+ if(!endpoints.length){const note=document.createElement('p');note.textContent='No advertised endpoints.';note.style.fontSize='10px';$('endpoints').append(note);}
  if(highlight){clear();const nodes=cy.nodes().filter(n=>n.data('owner')===index);const edges=nodes.connectedEdges();cy.elements().addClass('dim');nodes.union(edges).union(edges.connectedNodes()).removeClass('dim');nodes.addClass('focus');edges.addClass('focus');}
 }
 function focusVertex(id){clear();const n=cy.getElementById(id);cy.elements().addClass('dim');n.closedNeighborhood().removeClass('dim');n.connectedEdges().addClass('focus');n.addClass('focus');}
 function showPath(path,description){
- clear();if(!path){$('route-summary').textContent='В этом снимке пути нет.';return;}
+ clear();if(!path){$('route-summary').textContent='No route in this snapshot.';return;}
  const ids=new Set(path.map(e=>mode==='hosts'?`n${byID.get(e.source)?.owner}:n${byID.get(e.target)?.owner}`:`${e.source}:${e.target}`));
  const edges=cy.edges().filter(e=>ids.has(e.id()));cy.elements().addClass('dim');edges.union(edges.connectedNodes()).removeClass('dim').addClass('focus');
  $('route-summary').textContent=description+'\n'+path.filter(e=>byID.get(e.source)?.owner!==byID.get(e.target)?.owner).map(e=>`${label(byID.get(e.source))} → ${label(byID.get(e.target))}`).join('\n');
 }
-function localRoute(index){const p=peer(index),path=t.routes[p.intip+':0'];inspect(index,false);$('route-dest').value=String(index);showPath(path,`${peer(t.index).name} → ${p.name} · ${path?.filter(e=>byID.get(e.source)?.owner!==byID.get(e.target)?.owner).length || 0} переходов`);}
+function localRoute(index){const p=peer(index),path=t.routes[p.intip+':0'];inspect(index,false);$('route-dest').value=String(index);showPath(path,`${peer(t.index).name} → ${p.name} · ${path?.filter(e=>byID.get(e.source)?.owner!==byID.get(e.target)?.owner).length || 0} hops`);}
 function renderPeers() {
  const destination = $('route-dest').value;
- $('route-dest').replaceChildren(new Option('Выбрать назначение',''));
+ $('route-dest').replaceChildren(new Option('Choose destination',''));
  $('config-cards').replaceChildren();
 for(const p of t.peers){
  if(p.index!==t.index)$('route-dest').add(new Option(`${peer(t.index).name} → ${p.name} · ${p.intip}`,p.index));
- if(!p.endpoint.length){const card=document.createElement('article');card.className='config-card';const kicker=document.createElement('div');kicker.className='kicker';kicker.textContent='EPHEMERAL NODE / '+p.index;const name=document.createElement('h2');name.textContent=p.name;const ip=document.createElement('div');ip.className='mono';ip.textContent=p.intip;const pub=document.createElement('div');pub.className='pub';pub.textContent='PUBLIC KEY\n'+p.pub;const note=document.createElement('p');note.textContent='Полный конфиг · без приватного ключа';const link=document.createElement('a');link.href=`api/config?node=${p.index}`;link.download=`mesh-${p.index}.json`;link.textContent=`Скачать mesh-${p.index}.json ↓`;card.append(kicker,name,ip,pub,note,link);$('config-cards').append(card);}
+ if(!p.endpoint.length){const card=document.createElement('article');card.className='config-card';const kicker=document.createElement('div');kicker.className='kicker';kicker.textContent='EPHEMERAL NODE / '+p.index;const name=document.createElement('h2');name.textContent=p.name;const ip=document.createElement('div');ip.className='mono';ip.textContent=p.intip;const pub=document.createElement('div');pub.className='pub';pub.textContent='PUBLIC KEY\n'+p.pub;const note=document.createElement('p');note.textContent='Full config · no private key';const link=document.createElement('a');link.href=`api/config?node=${p.index}`;link.download=`mesh-${p.index}.json`;link.textContent=`Download mesh-${p.index}.json ↓`;card.append(kicker,name,ip,pub,note,link);$('config-cards').append(card);}
 }
  $('route-dest').value = destination;
 }
 $('fit').onclick=()=>cy.fit(undefined,40);$('reset').onclick=layout;
 $('route-dest').onchange=()=>{if($('route-dest').value)localRoute(Number($('route-dest').value));else clear();};
 cy.on('tap','node',event=>{const n=event.target;if(peer(n.data('owner')))inspect(n.data('owner'));if(mode!=='hosts')focusVertex(n.id());});
-cy.on('tap','edge',event=>{clear();const e=event.target;e.addClass('focus');$('selected-name').textContent='Направленная связь';$('selected-ip').textContent='';$('selected-note').textContent=mode==='hosts'?`${peer(e.source().data('owner')).name} → ${peer(e.target().data('owner')).name}: ${e.data('count')} рёбер между endpoint`:`${label(e.source().data('vertex'))} → ${label(e.target().data('vertex'))}`;});
+cy.on('tap','edge',event=>{clear();const e=event.target;e.addClass('focus');$('selected-name').textContent='Directed link';$('selected-ip').textContent='';$('selected-note').textContent=mode==='hosts'?`${peer(e.source().data('owner')).name} → ${peer(e.target().data('owner')).name}: ${e.data('count')} edges between endpoints`:`${label(e.source().data('vertex'))} → ${label(e.target().data('vertex'))}`;});
 cy.on('tap',event=>{if(event.target===cy)clear();});
 function setPage(page) {
  const graphPage = page === 'hosts' || page === 'endpoints' || page === 'physics';
@@ -219,11 +219,11 @@ function renderMatrix() {
  const table = document.createElement('table');
  const caption = document.createElement('caption');
  caption.className = 'sr-only';
- caption.textContent = 'Минимальное число хопов по направленному графу. Строка — источник, столбец — назначение. Прочерк — пути нет.';
+ caption.textContent = 'Minimum hop count in the directed graph. Rows are sources; columns are destinations. A dash means no route.';
  table.append(caption);
  const head = document.createElement('thead'), row = document.createElement('tr');
  const corner = document.createElement('th');
- corner.textContent = 'От ↓ / До →';
+ corner.textContent = 'From ↓ / To →';
  row.append(corner);
  for (const p of t.peers) {
   const cell = document.createElement('th');
@@ -254,16 +254,16 @@ function renderMatrix() {
    } else if (!route) {
     cell.textContent = '—';
     cell.className = 'no-path';
-    cell.title = `${from.name} → ${to.name}: пути нет`;
+    cell.title = `${from.name} → ${to.name}: no route`;
    } else {
     const button = document.createElement('button');
     button.textContent = route.hops;
-    button.title = `${from.name} → ${to.name}: хопов ${route.hops}. Показать путь`;
+    button.title = `${from.name} → ${to.name}: hops: ${route.hops}. Show route`;
     button.onclick = () => {
      setPage('endpoints');
      inspect(to.index, false);
      $('route-dest').value = '';
-     showPath(route.path, `${from.name} → ${to.name} · хопов ${route.hops}`);
+     showPath(route.path, `${from.name} → ${to.name} · hops: ${route.hops}`);
     };
     cell.append(button);
    }
@@ -279,7 +279,7 @@ setPage(location.pathname === '/config' ? 'configs' : 'endpoints');
 async function refresh() {
  try {
   const response = await fetch('api/topology', {cache: 'no-store', signal: AbortSignal.timeout(10000)});
-  if (!response.ok) throw new Error(`Контролька: HTTP ${response.status}`);
+  if (!response.ok) throw new Error(`Control API: HTTP ${response.status}`);
   const next = await response.json();
   next.peers = next.peers.map(p => ({...p, name: p.name || `node ${p.index}`}));
   const key = JSON.stringify([next.index, next.peers, next.alive, next.vertices, next.edges, next.routes]);
@@ -300,10 +300,10 @@ async function refresh() {
   }
   $('connection').classList.remove('error');
   $('connection').textContent = peer(t.index).name;
-  $('connection').title = 'Обновлено: ' + new Date(t.time).toLocaleString();
+  $('connection').title = 'Updated: ' + new Date(t.time).toLocaleString('en');
  } catch (error) {
   $('connection').classList.add('error');
-  $('connection').textContent = 'Нет связи с контролькой';
+  $('connection').textContent = 'Control API offline';
   $('connection').title = error.message;
  }
  setTimeout(refresh, 3000);

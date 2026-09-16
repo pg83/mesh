@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>mesh</title><link rel="stylesheet" href="style.css">
@@ -8,24 +8,24 @@
 <body data-design="graph">
 <header>
 <a class="logo" href="./"><span class="logo-icon">m<span>↗</span></span> mesh</a>
-<nav role="tablist" aria-orientation="vertical" aria-label="Режим просмотра">
-<button id="hosts-mode" data-page="hosts" role="tab" aria-controls="topology-page" aria-selected="false">Хосты</button>
+<nav role="tablist" aria-orientation="vertical" aria-label="View mode">
+<button id="hosts-mode" data-page="hosts" role="tab" aria-controls="topology-page" aria-selected="false">Hosts</button>
 <button id="endpoints-mode" class="active" data-page="endpoints" role="tab" aria-controls="topology-page" aria-selected="true">Endpoint</button>
-<button id="physics-mode" data-page="physics" role="tab" aria-controls="topology-page" aria-selected="false">Пружины</button>
+<button id="physics-mode" data-page="physics" role="tab" aria-controls="topology-page" aria-selected="false">Springs</button>
 <button id="matrix-tab" data-page="matrix" role="tab" aria-controls="matrix-page" aria-selected="false">Matrix</button>
-<button id="configs-tab" data-page="configs" role="tab" aria-controls="configs-page" aria-selected="false">Конфиги</button>
+<button id="configs-tab" data-page="configs" role="tab" aria-controls="configs-page" aria-selected="false">Configs</button>
 </nav>
-<span id="connection" class="snapshot" role="status">Подключение…</span>
+<span id="connection" class="snapshot" role="status">Connecting…</span>
 </header>
 <div class="shell"><main>
 <section id="topology-page" role="tabpanel"><div class="topology-layout">
 <section class="graph-panel">
-<div class="panel-actions"><button id="reset">Раскладка</button><button id="fit">Вписать ↗</button></div>
+<div class="panel-actions"><button id="reset">Layout</button><button id="fit">Fit ↗</button></div>
 <div id="physics-controls" hidden>
-<label>Заряд хостов <input id="physics-charge" type="range" min="4" max="6.5" step=".05" value="5.4"></label>
-<label>Длина линка <input id="physics-length" type="range" min="40" max="320" step="5" value="140"></label>
-<label>Затухание <input id="physics-damping" type="range" min=".5" max=".98" step=".01" value=".88"></label>
-<button id="physics-restart">Перезапуск</button><button id="physics-shake">Встряхнуть</button>
+<label>Host charge <input id="physics-charge" type="range" min="4" max="6.5" step=".05" value="5.4"></label>
+<label>Link length <input id="physics-length" type="range" min="40" max="320" step="5" value="140"></label>
+<label>Damping <input id="physics-damping" type="range" min=".5" max=".98" step=".01" value=".88"></label>
+<button id="physics-restart">Restart</button><button id="physics-shake">Shake</button>
 <span id="physics-status" role="status"></span>
 </div>
 <div id="graph"></div>
@@ -35,12 +35,12 @@
 <div id="selected-ip" class="mono"></div>
 <p id="selected-note"></p>
 <div class="details-heading">ENDPOINTS <span id="endpoint-count"></span></div><div id="endpoints"></div>
-<div class="route-selector"><label for="route-dest">Маршрут</label><select id="route-dest"><option value="">Выбрать назначение</option></select><div id="route-summary">Выбери хост — путь подсветится на графе.</div></div>
+<div class="route-selector"><label for="route-dest">Route</label><select id="route-dest"><option value="">Choose destination</option></select><div id="route-summary">Choose a host to highlight its route on the graph.</div></div>
 </aside>
 </div></section>
 <section id="matrix-page" role="tabpanel" aria-labelledby="matrix-tab" hidden><div id="matrix"></div></section>
 <section id="configs-page" role="tabpanel" hidden>
-<div class="config-banner"><div><span class="kicker">BRING YOUR OWN KEY</span><h2>Конфиг скачивается. Ключ остаётся у тебя.</h2><p>Адрес ноды и точки входа уже внутри. Остальные ноды найдутся автоматически.</p></div><pre>sudo mesh run -c config.json \
+<div class="config-banner"><div><span class="kicker">BRING YOUR OWN KEY</span><h2>Download the config. Keep your key.</h2><p>The node address and entry points are included. Other nodes are discovered automatically.</p></div><pre>sudo mesh run -c config.json \
   -key-file /path/to/private-key</pre></div>
 <div id="config-cards"></div>
 </section>
