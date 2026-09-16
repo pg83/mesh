@@ -38,10 +38,6 @@ func socketReuse(fd, iface int, v6 bool) error {
 	}).asError()
 }
 
-func (u *UDPWriter) writePacket(packet []byte) {
-	throw2(u.conn.WriteToUDP(packet, u.remote))
-}
-
 func socketInterface(fd, iface int, v6 bool) error {
 	if v6 {
 		return unix.SetsockoptInt(fd, unix.IPPROTO_IPV6, unix.IPV6_BOUND_IF, iface)

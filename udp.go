@@ -2,16 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
-	"net"
 	"time"
 )
-
-type UDPWriter struct {
-	conn   *net.UDPConn
-	local  *LocalAddress
-	remote *net.UDPAddr
-}
 
 func newUDPChannel(attempt *DialAttempt, id uint64) *ChannelIO {
 	socket, local := attempt.socket, attempt.local
@@ -40,98 +32,8 @@ type UDPInputKey struct {
 	remote, local SocketAddress
 	peer          uint16
 }
+
 type UDPInput struct {
 	channel *ChannelIO
 	seen    time.Time
-}
-
-func (n *Node) discoverUDP(socket *UDPSocket) {
-	buf := make([]byte, maxPacket)
-	inputs := map[UDPInputKey]UDPInput{}
-
-	defer func() {
-		for _, input := range inputs {
-			input.channel.stop()
-		}
-	}()
-
-	for {
-		size, dst, addr, err := socket.read(buf)
-
-		if errors.Is(err, net.ErrClosed) {
-			return
-		}
-
-		throw(err)
-
-		if size < headerTransport || dst == nil {
-			continue
-		}
-
-		remote := addr.(*net.UDPAddr)
-		key := UDPInputKey{remote: socketAddress(remote.IP, remote.Port), local: socketAddress(dst, int(socket.port)), peer: packetSender(buf)}
-		input, known := inputs[key]
-		now := time.Now()
-
-		var source uint32
-		var inner []byte
-
-		if known && input.channel.ctx.Err() == nil {
-			var ok bool
-			source, inner, ok = input.channel.session.open(buf[:size])
-
-			if !ok {
-				continue
-			}
-
-			known = source == input.channel.edge.From
-		}
-
-		if !known || input.channel.ctx.Err() != nil {
-			view := n.currentSnapshot()
-			id := n.incomingID(view, key.local)
-			session, from, body, ok := n.readPacket(buf[:size], view)
-
-			if !ok || id == 0 {
-				continue
-			}
-
-			source, inner = from, body
-
-			c := newChannelIO(session, Edge{From: source, To: id}, Vertex{}, view.addresses[id], false, true, packetID(buf))
-
-			c.local = view.local[id]
-			c.wire = key.remote
-
-			input.channel = c
-			post(n.events.in, any(c))
-
-			for key, old := range inputs {
-				if now.Sub(old.seen) >= sessionTimeout {
-					old.channel.stop()
-					delete(inputs, key)
-				}
-			}
-		}
-
-		input.seen = now
-		inputs[key] = input
-
-		select {
-		case input.channel.inbox.in <- Received{packet: append([]byte(nil), buf[:headerTransport]...), source: source, inner: inner, at: now, io: input.channel}:
-		case <-input.channel.ctx.Done():
-		}
-	}
-}
-
-func (n *Node) incomingID(view *Snapshot, wire SocketAddress) uint32 {
-	for id, local := range view.local {
-		v := view.addresses[id]
-
-		if v.isEndpoint() && v.Proto == "udp" && local.address == wire {
-			return id
-		}
-	}
-
-	return 0
 }

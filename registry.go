@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"maps"
+	"math/rand/v2"
 	"net"
 	"slices"
 )
@@ -124,4 +126,32 @@ func (r *Registry) records() []RegistryRecord {
 	slices.SortFunc(records, func(a, b RegistryRecord) int { return int(a.Index) - int(b.Index) })
 
 	return records
+}
+
+func (p *Peer) vertex() Vertex {
+	return udpVertex(net.IP(p.intip[:]), 0)
+}
+
+func (r *Registry) packet() []byte {
+	peers := make([]*Peer, 0, len(r.byIndex))
+
+	for _, peer := range r.byIndex {
+		peers = append(peers, peer)
+	}
+
+	out := []byte{0, 0}
+	count := uint16(0)
+
+	for _, i := range rand.Perm(len(peers)) {
+		packet := peers[i].packet
+
+		if len(out)+len(packet) <= registryPayloadSize {
+			out = append(out, packet...)
+			count++
+		}
+	}
+
+	binary.LittleEndian.PutUint16(out, count)
+
+	return out
 }

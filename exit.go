@@ -66,34 +66,6 @@ func prefixNet(prefix netip.Prefix) *net.IPNet {
 	return &net.IPNet{IP: prefix.Addr().AsSlice(), Mask: net.CIDRMask(prefix.Bits(), prefix.Addr().BitLen())}
 }
 
-func (n *Node) exitHops(view *Snapshot, ip net.IP, packet []byte) []uint16 {
-	addr, _ := netip.AddrFromSlice(ip)
-
-	for _, route := range n.cfg.exitRoutes {
-		if !route.prefix.Contains(addr) {
-			continue
-		}
-
-		candidates := []uint16{}
-
-		for _, node := range route.nodes {
-			if view.exits[node] && len(view.hops[hostID(node)]) > 0 {
-				candidates = append(candidates, node)
-			}
-		}
-
-		if len(candidates) == 0 {
-			continue
-		}
-
-		n.metrics.tunExit.Add(1)
-
-		return view.hops[hostID(candidates[flowHash(packet)%uint32(len(candidates))])]
-	}
-
-	return nil
-}
-
 func flowHash(packet []byte) uint32 {
 	h := fnv.New32a()
 	head := int(packet[0]&15) * 4

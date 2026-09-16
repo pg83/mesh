@@ -137,10 +137,6 @@ func compareEdge(a, b Edge) int {
 	return cmp.Compare(a.To, b.To)
 }
 
-func (p *Peer) vertex() Vertex {
-	return udpVertex(net.IP(p.intip[:]), 0)
-}
-
 func (v Vertex) isHost() bool {
 	return v.Proto == "udp" && v.Port == 0
 }

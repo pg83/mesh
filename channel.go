@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const registryInterval = 5 * time.Second
+
 type Snapshot struct {
 	registry  *Registry
 	graph     map[Edge]bool
@@ -37,6 +39,7 @@ type Received struct {
 }
 
 type Outbound struct{ inner []byte }
+
 type TunPacket struct {
 	payload     []byte
 	destination net.IP
@@ -315,79 +318,18 @@ func (a *Channel) forward(inner []byte) {
 	a.node.routeData(a.view, d, inner)
 }
 
-func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
-	if d.cursor == len(d.hops) {
-		n.metrics.tunDelivered.Add(1)
+func (a *Channel) post(message any) {
+	select {
+	case a.io.inbox.in <- message:
+	case <-a.io.ctx.Done():
+	}
+}
 
-		if n.net != nil && n.net.accepts(d.payload) {
-			n.net.inject(d.payload)
-		} else {
-			post(n.tunWrites.in, d.payload)
-		}
-
+func (a *Channel) exchangeRegistry(now time.Time) {
+	if !a.outgoing || a.view == nil || !a.enabled() || now.Before(a.nextRegistry) {
 		return
 	}
 
-	if actor := view.channels[view.next[d.hops[d.cursor]]]; actor != nil {
-		actor.post(Outbound{inner: inner})
-	} else {
-		n.metrics.forwardNoChannel.Add(1)
-	}
-}
-
-func (n *Node) readTun() {
-	buf := make([]byte, maxPacket)
-
-	for {
-		packet := append([]byte(nil), n.tun.read(buf)...)
-
-		if destination := ipDestination(packet); destination != nil {
-			post(n.tunInbox.in, any(TunPacket{payload: packet, destination: destination}))
-		}
-	}
-}
-
-func (n *Node) tunLoop() {
-	var view *Snapshot
-
-	for message := range n.tunInbox.out {
-		switch v := message.(type) {
-		case *Snapshot:
-			view = v
-		case TunPacket:
-			n.metrics.tunRead.Add(1)
-
-			if n.net != nil && n.net.accepts(v.payload) {
-				n.net.inject(v.payload)
-
-				continue
-			}
-
-			var hops []uint16
-
-			if ip := v.destination.To4(); ip != nil {
-				if [4]byte(ip) == n.intip {
-					post(n.tunWrites.in, v.payload)
-
-					continue
-				}
-
-				if peer := view.registry.byIntip[[4]byte(ip)]; peer != nil {
-					hops = view.hops[hostID(peer.index)]
-				} else if !n.subnet.Contains(ip) {
-					hops = n.exitHops(view, ip, v.payload)
-				}
-			}
-
-			if len(hops) == 0 {
-				n.metrics.tunUnrouted.Add(1)
-
-				continue
-			}
-
-			d := &Data{hops: hops, payload: v.payload}
-
-			n.routeData(view, d, encodeData(d))
-		}
-	}
+	a.send(kindRegistry, a.view.registry.packet())
+	a.nextRegistry = now.Add(registryInterval)
 }

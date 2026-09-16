@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/binary"
-	"maps"
-	"slices"
 )
 
 const maxInner = 1500 - 28 - headerTransport - sourceSize - 16
@@ -18,56 +16,6 @@ type vectorItem struct {
 	vector  *Vector
 	owner   uint16
 	version uint64
-}
-
-func (n *Node) publishVector() {
-	records := map[uint16]uint64{}
-
-	for owner, record := range n.records {
-		records[owner] = record.Version
-	}
-
-	if current := n.vectors[n.cfg.Index]; current != nil && maps.Equal(current.Records, records) {
-		return
-	}
-
-	n.vectors[n.cfg.Index] = &Vector{Owner: n.cfg.Index, Version: n.nextPacketID(), Records: records}
-}
-
-func (n *Node) handleVector(chunk *Vector) {
-	current := n.vectors[chunk.Owner]
-
-	switch {
-	case current == nil || chunk.Version > current.Version:
-		n.metrics.vectorsApplied.Add(1)
-		n.vectors[chunk.Owner] = chunk
-	case chunk.Version == current.Version:
-		merged := &Vector{Owner: chunk.Owner, Version: chunk.Version, Records: maps.Clone(current.Records)}
-
-		maps.Copy(merged.Records, chunk.Records)
-		n.vectors[chunk.Owner] = merged
-	default:
-		n.metrics.vectorsStale.Add(1)
-	}
-}
-
-func (n *Node) bundles() [][]byte {
-	items := []vectorItem{}
-	owners := slices.Sorted(maps.Keys(n.vectors))
-
-	if own := n.vectors[n.cfg.Index]; own != nil {
-		owners = slices.Insert(slices.DeleteFunc(owners, func(o uint16) bool { return o == n.cfg.Index }), 0, n.cfg.Index)
-	}
-
-	for _, owner := range owners {
-		v := n.vectors[owner]
-
-		for _, o := range slices.Sorted(maps.Keys(v.Records)) {
-			items = append(items, vectorItem{vector: v, owner: o, version: v.Records[o]})
-		}
-	}
-
-	return packBundles(items)
 }
 
 func packBundles(items []vectorItem) [][]byte {

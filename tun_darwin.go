@@ -14,12 +14,14 @@ import (
 
 const defaultTun = "utun"
 
-type Tun struct {
+type Tun = DarwinTun
+
+type DarwinTun struct {
 	file *os.File
 	name string
 }
 
-func openTun(name string, intip [4]byte, subnet string, mtu int) *Tun {
+func openTun(name string, intip [4]byte, subnet string, mtu int) *DarwinTun {
 	unit := 0
 
 	if name != "utun" {
@@ -48,7 +50,7 @@ func openTun(name string, intip [4]byte, subnet string, mtu int) *Tun {
 	throw(unix.SetNonblock(fd, true))
 
 	actual := throw2(unix.GetsockoptString(fd, 2, 2))
-	tun := &Tun{file: os.NewFile(uintptr(fd), "utun"), name: actual}
+	tun := &DarwinTun{file: os.NewFile(uintptr(fd), "utun"), name: actual}
 	ip := net.IP(intip[:]).String()
 
 	darwinCommand("/sbin/ifconfig", actual, "inet", ip, ip, "netmask", "255.255.255.255", "mtu", strconv.Itoa(mtu), "up")
@@ -57,7 +59,7 @@ func openTun(name string, intip [4]byte, subnet string, mtu int) *Tun {
 	return tun
 }
 
-func (t *Tun) route(prefix netip.Prefix) {
+func (t *DarwinTun) route(prefix netip.Prefix) {
 	darwinCommand("/sbin/route", "-n", "add", "-net", prefix.String(), "-interface", t.name)
 }
 
@@ -69,7 +71,7 @@ func darwinCommand(command string, args ...string) {
 	}
 }
 
-func (t *Tun) read(buf []byte) []byte {
+func (t *DarwinTun) read(buf []byte) []byte {
 	for {
 		n := throw2(t.file.Read(buf))
 
@@ -79,7 +81,7 @@ func (t *Tun) read(buf []byte) []byte {
 	}
 }
 
-func (t *Tun) write(packet []byte) {
+func (t *DarwinTun) write(packet []byte) {
 	if ipDestination(packet) == nil {
 		return
 	}

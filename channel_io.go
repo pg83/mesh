@@ -62,13 +62,6 @@ func (c *ChannelIO) transport() string {
 	return c.target.Proto
 }
 
-func (a *Channel) post(message any) {
-	select {
-	case a.io.inbox.in <- message:
-	case <-a.io.ctx.Done():
-	}
-}
-
 func (c *ChannelIO) runWriter(n *Node) {
 	defer c.closeConnection()
 

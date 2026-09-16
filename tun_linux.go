@@ -10,12 +10,14 @@ import (
 
 const defaultTun = "mesh0"
 
-type Tun struct {
+type Tun = LinuxTun
+
+type LinuxTun struct {
 	fd   int
 	link netlink.Link
 }
 
-func openTun(name string, intip [4]byte, subnet string, mtu int) *Tun {
+func openTun(name string, intip [4]byte, subnet string, mtu int) *LinuxTun {
 	fd := throw2(unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_CLOEXEC, 0))
 	ifr := throw2(unix.NewIfreq(name))
 
@@ -33,20 +35,20 @@ func openTun(name string, intip [4]byte, subnet string, mtu int) *Tun {
 	throw(netlink.LinkSetUp(link))
 	throw(unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 1))
 
-	return &Tun{fd: fd, link: link}
+	return &LinuxTun{fd: fd, link: link}
 }
 
-func (t *Tun) route(prefix netip.Prefix) {
+func (t *LinuxTun) route(prefix netip.Prefix) {
 	throw(netlink.RouteReplace(&netlink.Route{LinkIndex: t.link.Attrs().Index, Dst: prefixNet(prefix), Scope: netlink.SCOPE_LINK}))
 }
 
-func (t *Tun) read(buf []byte) []byte {
+func (t *LinuxTun) read(buf []byte) []byte {
 	n := throw2(unix.Read(t.fd, buf))
 
 	return buf[:n]
 }
 
-func (t *Tun) write(packet []byte) {
+func (t *LinuxTun) write(packet []byte) {
 	if ipDestination(packet) == nil {
 		return
 	}

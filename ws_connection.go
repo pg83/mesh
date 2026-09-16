@@ -2,8 +2,9 @@ package main
 
 import (
 	"context"
-	"github.com/coder/websocket"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 type WSConnection struct {
@@ -58,4 +59,14 @@ func newWSConnection(socket *websocket.Conn, session *Session, edge Edge, source
 	}()
 
 	return c
+}
+
+func readWS(ctx context.Context, conn *websocket.Conn) []byte {
+	kind, packet := throw3(conn.Read(ctx))
+
+	if kind != websocket.MessageBinary {
+		throwFmt("non-binary websocket message")
+	}
+
+	return packet
 }

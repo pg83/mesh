@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/binary"
-	"math/rand/v2"
 	"net"
 )
 
@@ -14,6 +13,7 @@ type RegistryRecord struct {
 }
 
 type RegistryRecords []RegistryRecord
+
 type RegistryReader struct{ data []byte }
 
 func appendRegistryString(out []byte, value string) []byte {
@@ -38,30 +38,6 @@ func encodeRegistryRecord(p *Peer) []byte {
 	for _, ep := range p.addresses {
 		out = appendEndpoint(out, ep)
 	}
-
-	return out
-}
-
-func (r *Registry) packet() []byte {
-	peers := make([]*Peer, 0, len(r.byIndex))
-
-	for _, peer := range r.byIndex {
-		peers = append(peers, peer)
-	}
-
-	out := []byte{0, 0}
-	count := uint16(0)
-
-	for _, i := range rand.Perm(len(peers)) {
-		packet := peers[i].packet
-
-		if len(out)+len(packet) <= registryPayloadSize {
-			out = append(out, packet...)
-			count++
-		}
-	}
-
-	binary.LittleEndian.PutUint16(out, count)
 
 	return out
 }

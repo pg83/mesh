@@ -7,7 +7,6 @@ import (
 	"io"
 	"net"
 	"net/netip"
-	"net/url"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,56 +19,6 @@ type ListenerBinding struct {
 	config EndpointConfig
 	public Endpoint
 	bind   SocketAddress
-}
-
-func (c EndpointConfig) validate() {
-	if c.Proto != "udp" && c.Proto != "ws" && c.Proto != "wss" {
-		throwFmt("bad endpoint proto %q", c.Proto)
-	}
-
-	if c.Port < 1 || c.Port > 65535 || c.BindPort < 0 || c.BindPort > 65535 {
-		throwFmt("bad endpoint port")
-	}
-
-	if c.Proto != "udp" {
-		path := c.description().Path
-
-		if !strings.HasPrefix(path, "/") {
-			throwFmt("bad websocket path")
-		}
-
-		if _, err := url.ParseRequestURI(path); err != nil {
-			throwFmt("bad websocket path: %s", err)
-		}
-	}
-}
-
-func (c EndpointConfig) address() *net.UDPAddr {
-	return parseUDPAddr(net.JoinHostPort(c.Addr, strconv.Itoa(c.Port)))
-}
-
-func (c EndpointConfig) binding() *net.UDPAddr {
-	addr, port := c.BindAddr, c.BindPort
-
-	if addr == "" {
-		addr = c.Addr
-	}
-
-	if port == 0 {
-		port = c.Port
-	}
-
-	return parseUDPAddr(net.JoinHostPort(addr, strconv.Itoa(port)))
-}
-
-func (c EndpointConfig) description() Endpoint {
-	if c.Proto == "udp" {
-		a := c.address()
-
-		return udpVertex(a.IP, a.Port).endpoint()
-	}
-
-	return (Endpoint{Proto: c.Proto, Addr: c.Addr, Port: uint16(c.Port), Path: c.Path}).canonical()
 }
 
 func udpControl(iface int) func(string, string, syscall.RawConn) error {
@@ -198,4 +147,18 @@ func tcpControl(iface int) func(string, string, syscall.RawConn) error {
 
 		return errors.Join(err, result)
 	}
+}
+
+type UDPSocket struct {
+	guard    io.Closer
+	conn     *net.UDPConn
+	read     func([]byte) (int, net.IP, net.Addr, error)
+	port     uint16
+	implicit bool
+}
+
+type SocketKey struct {
+	addr string
+	port uint16
+	ipv6 bool
 }
