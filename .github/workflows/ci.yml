@@ -140,6 +140,13 @@ jobs:
           echo /usr/sbin >> "$GITHUB_PATH"
           echo "MESH_TEST_ARTIFACTS=$RUNNER_TEMP/mesh-artifacts" >> "$GITHUB_ENV"
 
+      - name: Install browser for web e2e
+        run: |
+          python3 -m venv "$RUNNER_TEMP/browser"
+          "$RUNNER_TEMP/browser/bin/pip" install playwright==1.58.0
+          "$RUNNER_TEMP/browser/bin/playwright" install --with-deps chromium
+          echo "MESH_TEST_BROWSER_PYTHON=$RUNNER_TEMP/browser/bin/python" >> "$GITHUB_ENV"
+
       - name: Prepare namespaces and tun
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -148,12 +155,27 @@ jobs:
       - name: Run the tests against the instrumented binary
         run: ./build -k -j 4 -Dcoverage coverage
 
+      - name: Check the web UI coverage floor
+        run: python3 dev/web_coverage.py .build/coverage-web.info --minimum 80
+
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() && hashFiles('.build/coverage.out') != '' }}
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           use_oidc: true
           files: .build/coverage.out
+          flags: go
+          disable_search: true
+          fail_ci_if_error: true
+          verbose: true
+
+      - name: Upload web UI coverage to Codecov
+        if: ${{ !cancelled() && hashFiles('.build/coverage-web.info') != '' }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          use_oidc: true
+          files: .build/coverage-web.info
+          flags: web
           disable_search: true
           fail_ci_if_error: true
           verbose: true

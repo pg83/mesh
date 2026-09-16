@@ -124,6 +124,11 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         coverage_dirs.append(env["GOCOVERDIR"])
         outputs.append(env["GOCOVERDIR"])
 
+    # The browser records which lines of the web UI it ran. The file appears
+    # only where a browser is installed, so it is a report, not an output.
+    if COVERAGE and test_name == "web":
+        env["MESH_TEST_WEB_COVERAGE"] = "$(B)/coverage-web.info"
+
     e2e_tests.append(command(
         name=f"e2e_{test_name}",
         inputs=[test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), *(["$(S)/tst/dns.py"] if test_name.startswith("dns") else []), "$(S)/tst/lib.py", "$(S)/tst/work_load.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat", "nat_punch") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])],
