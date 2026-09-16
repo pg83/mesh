@@ -69,7 +69,8 @@ def test():
         lab.wait(lambda: metrics(lab, 'a')['mesh_tun_unrouted_total'] > unrouted, 'unrouted packet counted')
         m = metrics(lab, 'b')
         assert m['mesh_link_down_total'] == 1 and m['mesh_links'] == 0
-        assert m['mesh_peer_route_edges{peer="r"}'] == 3, 'the working direction lost its route'
+        # b hears nobody, so nobody is alive for b and the working direction has no route either.
+        assert m['mesh_peer_alive{peer="r"}'] == 0 and 'mesh_peer_route_edges{peer="r"}' not in m
         assert m['mesh_peer_links{peer="r"}'] == 0
         m = metrics(lab, 'r')
         assert m['mesh_links'] == 2 and 'mesh_peer_route_edges{peer="b"}' not in m

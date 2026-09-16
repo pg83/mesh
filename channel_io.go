@@ -77,10 +77,6 @@ func (c *ChannelIO) runWriter(n *Node) {
 			case packet := <-c.queue.out:
 				err := try(func() { c.write(c.ctx, packet) })
 
-				// A datagram that the kernel refuses is a datagram lost,
-				// nothing more: the socket and the address stay as good as
-				// they were, and the link lives or dies by what comes back.
-				// Only a socket that is gone ends the channel.
 				if err != nil && (c.transport() != "udp" || errors.Is(err.asError(), net.ErrClosed)) {
 					err.throw()
 				}

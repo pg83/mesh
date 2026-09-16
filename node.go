@@ -61,6 +61,7 @@ type Node struct {
 	packetID      uint64
 	transportID   atomic.Uint64
 	graph         map[Edge]bool
+	alive         map[uint16]bool
 	records       map[uint16]*GraphRecord
 	vectors       map[uint16]*Vector
 	routeCache    map[string]*Route

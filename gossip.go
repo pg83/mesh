@@ -94,7 +94,7 @@ func (n *Node) candidates(peer *Peer) []Candidate {
 		ids[peer.endpointID(i)] = ep.vertex().canonical()
 	}
 
-	if record := n.records[peer.index]; record != nil {
+	if record := n.records[peer.index]; record != nil && n.alive[peer.index] {
 		for _, v := range record.Vertices {
 			if v.Ingress && v.isEndpoint() && !n.subnet.Contains(v.ip()) {
 				ids[v.ID] = v.Vertex

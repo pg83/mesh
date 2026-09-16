@@ -75,6 +75,14 @@ func (w *MetricsWriter) gauge(name, help string, value float64) {
 	w.value(name, nil, value)
 }
 
+func btoi(value bool) int {
+	if value {
+		return 1
+	}
+
+	return 0
+}
+
 func peerName(peer PeerConfig) string {
 	return cmp.Or(peer.Name, strconv.Itoa(int(peer.Index)))
 }
@@ -156,6 +164,18 @@ func writeMetrics(out io.Writer, st *Status, m *Metrics, queued int, now time.Ti
 		if record.Index != st.Index {
 			peers = append(peers, record.PeerConfig)
 		}
+	}
+
+	alive := map[uint16]bool{}
+
+	for _, index := range st.Alive {
+		alive[index] = true
+	}
+
+	w.family("mesh_peer_alive", "gauge", "Whether some node observes a link from the peer.")
+
+	for _, peer := range peers {
+		w.value("mesh_peer_alive", [][2]string{{"peer", peerName(peer)}}, float64(btoi(alive[peer.Index])))
 	}
 
 	w.family("mesh_peer_reachable", "gauge", "Whether a route to the peer's mesh address exists.")

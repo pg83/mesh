@@ -17,6 +17,7 @@ type Snapshot struct {
 	records   map[uint16]uint64
 	vectors   map[uint16]*Vector
 	exits     map[uint16]bool
+	alive     map[uint16]bool
 	gossip    []Advertisement
 	bundles   [][]byte
 }

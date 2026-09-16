@@ -79,7 +79,9 @@ system through the mesh.
 
 A node that stops sending disappears from every route within seconds: a
 node is reachable only while some node observes a link from it, whatever
-its last graph record still claims.
+its last graph record still claims, and the addresses in that record are
+dialed only while it is. Static endpoints from the registry are dialed
+always.
 
 ### Endpoints
 

@@ -89,12 +89,12 @@ func (n *Node) publishSnapshot() {
 	}
 
 	view := &Snapshot{registry: n.reg, graph: maps.Clone(n.graph), addresses: maps.Clone(n.addresses), local: maps.Clone(n.local),
-		routes: n.routes, hops: n.hops, next: n.next, channels: channels, records: versions}
+		routes: n.routes, hops: n.hops, next: n.next, channels: channels, records: versions, alive: n.alive}
 
 	view.exits = map[uint16]bool{}
 
 	for owner, record := range n.records {
-		if record.Exit {
+		if record.Exit && n.alive[owner] {
 			view.exits[owner] = true
 		}
 	}

@@ -184,16 +184,11 @@ func (n *Node) rebuild() {
 	}
 
 	seen := map[uint32][]SocketAddress{}
-	alive := map[uint16]bool{n.cfg.Index: true}
 
-	for edge := range n.observed {
-		alive[vertexOwner(edge.From)] = true
-	}
+	n.alive = n.heard()
 
 	for _, record := range n.records {
 		for _, link := range record.Links {
-			alive[vertexOwner(link.From)] = true
-
 			if present[link.From] && link.From != link.To {
 				graph[link] = true
 			}
@@ -232,7 +227,7 @@ func (n *Node) rebuild() {
 	}
 
 	for edge := range graph {
-		if vertexOwner(edge.From) != vertexOwner(edge.To) && !alive[vertexOwner(edge.To)] {
+		if vertexOwner(edge.From) != vertexOwner(edge.To) && !n.alive[vertexOwner(edge.To)] {
 			delete(graph, edge)
 		}
 	}
@@ -241,6 +236,33 @@ func (n *Node) rebuild() {
 	n.seen = seen
 	n.graph = graph
 	n.recompute()
+}
+
+func (n *Node) heard() map[uint16]bool {
+	alive := map[uint16]bool{n.cfg.Index: true}
+
+	for edge := range n.observed {
+		alive[vertexOwner(edge.From)] = true
+	}
+
+	for grown := true; grown; {
+		grown = false
+
+		for owner, record := range n.records {
+			if !alive[owner] {
+				continue
+			}
+
+			for _, link := range record.Links {
+				if from := vertexOwner(link.From); !alive[from] {
+					alive[from] = true
+					grown = true
+				}
+			}
+		}
+	}
+
+	return alive
 }
 
 func (n *Node) compareIDs(a, b uint32) int {

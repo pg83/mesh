@@ -28,6 +28,7 @@ type Topology struct {
 	Index    uint16                    `json:"index"`
 	Time     string                    `json:"time"`
 	Peers    []PeerConfig              `json:"peers"`
+	Alive    []uint16                  `json:"alive"`
 	Vertices []TopologyVertex          `json:"vertices"`
 	Edges    []TopologyEdge            `json:"edges"`
 	Routes   map[string][]TopologyEdge `json:"routes"`
@@ -38,7 +39,7 @@ func topologyEdge(edge Edge) TopologyEdge {
 }
 
 func topology(status *Status, peers []PeerConfig) *Topology {
-	result := &Topology{Index: status.Index, Time: time.Now().UTC().Format(time.RFC3339), Peers: peers,
+	result := &Topology{Index: status.Index, Time: time.Now().UTC().Format(time.RFC3339), Peers: peers, Alive: status.Alive,
 		Vertices: []TopologyVertex{}, Edges: []TopologyEdge{}, Routes: map[string][]TopologyEdge{}}
 
 	for _, edge := range status.Graph {

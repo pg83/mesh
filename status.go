@@ -28,6 +28,7 @@ type Status struct {
 	Subnet    string            `json:"subnet"`
 	Tun       string            `json:"tun"`
 	Links     []LinkStatus      `json:"links"`
+	Alive     []uint16          `json:"alive"`
 	Graph     []Edge            `json:"graph"`
 	Records   []*GraphRecord    `json:"records"`
 	Vectors   []*Vector         `json:"vectors"`
@@ -40,6 +41,7 @@ func (n *Node) status() *Status {
 	now := time.Now()
 	st := &Status{Index: n.cfg.Index, Subnet: n.cfg.Subnet, Tun: n.cfg.Tun, Links: []LinkStatus{}, Graph: []Edge{}, Records: []*GraphRecord{}, Vectors: []*Vector{}, Vertices: []uint32{}, Routes: map[string][]Edge{}}
 
+	st.Alive = slices.Sorted(maps.Keys(n.alive))
 	st.Registry = n.reg.records()
 	st.Addresses = map[uint32]Vertex{}
 

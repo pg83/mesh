@@ -1,5 +1,5 @@
 'use strict';
-let t = {peers: [], vertices: [], edges: [], routes: {}, index: 0};
+let t = {peers: [], alive: [], vertices: [], edges: [], routes: {}, index: 0};
 const dark = true;
 const $ = id => document.getElementById(id), byID = new Map(t.vertices.map(v => [v.id,v]));
 const peer = i => t.peers.find(p => p.index === Number(i));
@@ -7,7 +7,7 @@ const isHost = v => v?.proto === 'udp' && v.port === 0;
 const label = v => v ? `${v.port && v.addr.includes(':') ? '['+v.addr+']' : v.addr}${v.port ? ':'+v.port : ''}` : '—';
 const epFor = index => t.vertices.filter(v => v.owner === index && v.endpoint);
 const ipVertex = index => t.vertices.find(v => isHost(v) && v.addr === peer(index)?.intip);
-const active = p => !!ipVertex(p.index);
+const active = p => t.alive.includes(p.index);
 const colors = dark ? ['#93c4a4','#9aaed0','#c0b48c','#7cb9bf'] : ['#6484eb','#8e7ed0','#55a5a1','#c89a65'];
 const nodeColor = index => colors[Math.max(0,t.peers.findIndex(p=>p.index===index))%colors.length];
 let mode = 'endpoints', selected = 0, topologyKey = '', ready = false;
@@ -138,7 +138,7 @@ function buildGraph(preserve = false) {
 function inspect(index, highlight=true) {
  selected=index;const p=peer(index); if(!p)return;
  $('selected-name').textContent=p.name;$('selected-ip').textContent=p.intip;
- $('selected-note').textContent=index===t.index?'Локальная нода.':active(p)?'Есть в графе достижимости.':'В registry. В снимке маршрута до ноды нет.';
+ $('selected-note').textContent=index===t.index?'Локальная нода.':active(p)?'Кто-то слышит эту ноду.':'В registry. Никто не слышит эту ноду.';
  $('endpoints').replaceChildren();const endpoints=epFor(index);$('endpoint-count').textContent=endpoints.length;
  for(const e of endpoints){const row=document.createElement('div');row.className='endpoint-row';const proto=document.createElement('span');proto.textContent=e.proto.toUpperCase();const value=document.createTextNode(label(e));const button=document.createElement('button');button.textContent='↗';button.title='Показать endpoint';button.onclick=()=>{setPage('endpoints');focusVertex(e.id);};row.append(proto,value,button);$('endpoints').append(row);}
  if(!endpoints.length){const note=document.createElement('p');note.textContent='Нет объявленных точек входа.';note.style.fontSize='10px';$('endpoints').append(note);}
@@ -282,7 +282,7 @@ async function refresh() {
   if (!response.ok) throw new Error(`Контролька: HTTP ${response.status}`);
   const next = await response.json();
   next.peers = next.peers.map(p => ({...p, name: p.name || `node ${p.index}`}));
-  const key = JSON.stringify([next.index, next.peers, next.vertices, next.edges, next.routes]);
+  const key = JSON.stringify([next.index, next.peers, next.alive, next.vertices, next.edges, next.routes]);
   t = next;
   if (key !== topologyKey) {
    topologyKey = key;
