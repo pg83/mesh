@@ -41,7 +41,3 @@ func recordFlags(record *GraphRecord) byte {
 
 	return 0
 }
-
-type Distance struct {
-	cost, hops int
-}

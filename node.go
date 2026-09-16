@@ -60,6 +60,7 @@ type Node struct {
 	packetID      uint64
 	transportID   atomic.Uint64
 	graph         map[Edge]bool
+	order         *VertexOrder
 	alive         map[uint16]bool
 	records       map[uint16]*GraphRecord
 	vectors       map[uint16]*Vector
@@ -377,8 +378,6 @@ func (n *Node) syncLocal() {
 }
 
 func (n *Node) publishSnapshot() {
-	n.recompute()
-
 	n.syncDials()
 
 	channels := maps.Clone(n.channels)
@@ -751,6 +750,7 @@ func (n *Node) rebuild() {
 	n.addresses = addresses
 	n.seen = seen
 	n.graph = graph
+	n.order = newVertexOrder(addresses, graph)
 	n.recompute()
 }
 
@@ -782,11 +782,7 @@ func (n *Node) heard() map[uint16]bool {
 }
 
 func (n *Node) compareIDs(a, b uint32) int {
-	if v := compareVertex(n.addresses[a], n.addresses[b]); v != 0 {
-		return v
-	}
-
-	return cmp.Compare(a, b)
+	return n.order.compare(a, b)
 }
 
 func (n *Node) cost(edge Edge) int {
@@ -802,54 +798,57 @@ func (n *Node) cost(edge Edge) int {
 }
 
 func (n *Node) recompute() {
-	adjacency := map[uint32][]uint32{}
+	source, reachable := n.order.index(hostID(n.cfg.Index))
+
+	if !reachable {
+		n.routes, n.hops, n.next = map[uint32][]Edge{}, map[uint32][]uint16{}, map[uint16]Edge{}
+
+		return
+	}
+
+	size := len(n.order.ids)
+	adjacency := make([][]int32, size)
 
 	for edge := range n.graph {
-		adjacency[edge.From] = append(adjacency[edge.From], edge.To)
+		from, known := n.order.index(edge.From)
+		to, present := n.order.index(edge.To)
+
+		if known && present {
+			adjacency[from] = append(adjacency[from], to)
+		}
 	}
 
-	source := hostID(n.cfg.Index)
-	prev := map[uint32]uint32{}
-	distance := map[uint32]Distance{source: {}}
-	done := map[uint32]bool{}
+	owner := make([]uint16, size)
+	attachment := make([]bool, size)
+	link := make([]int32, size)
 
-	path := func(id uint32) []uint32 {
-		out := []uint32{}
+	for i, id := range n.order.ids {
+		owner[i] = vertexOwner(id)
+		attachment[i] = isHostID(id)
+		link[i] = costWS
 
-		for ; id != source; id = prev[id] {
-			out = append(out, id)
+		if n.addresses[id].Proto == "udp" {
+			link[i] = costUDP
 		}
-
-		slices.Reverse(out)
-
-		return out
 	}
 
-	better := func(a Distance, from uint32, b Distance, than uint32) bool {
-		if a.cost != b.cost {
-			return a.cost < b.cost
-		}
+	cost := make([]int32, size)
+	hops := make([]int32, size)
+	prev := make([]int32, size)
+	paths := make([][]int32, size)
+	seen := make([]bool, size)
+	done := make([]bool, size)
+	queue := &RouteHeap{}
 
-		if a.hops != b.hops {
-			return a.hops < b.hops
-		}
+	seen[source] = true
 
-		return slices.CompareFunc(path(from), path(than), n.compareIDs) < 0
-	}
+	queue.push(RouteEntry{id: source})
 
-	for {
-		var cur uint32
+	for !queue.empty() {
+		cur := queue.pop().id
 
-		found := false
-
-		for id, d := range distance {
-			if !done[id] && (!found || better(d, id, distance[cur], cur)) {
-				cur, found = id, true
-			}
-		}
-
-		if !found {
-			break
+		if done[cur] {
+			continue
 		}
 
 		done[cur] = true
@@ -859,34 +858,46 @@ func (n *Node) recompute() {
 				continue
 			}
 
-			d := Distance{cost: distance[cur].cost + n.cost(Edge{From: cur, To: next}), hops: distance[cur].hops}
+			step := RouteEntry{cost: cost[cur], hops: hops[cur], path: paths[cur], id: next}
 
-			if vertexOwner(cur) != vertexOwner(next) {
-				d.hops++
+			if !attachment[cur] && !attachment[next] {
+				step.cost += link[next]
 			}
 
-			if old, known := distance[next]; !known || better(d, cur, old, prev[next]) {
-				distance[next] = d
-				prev[next] = cur
+			if owner[cur] != owner[next] {
+				step.hops++
 			}
+
+			if seen[next] {
+				current := RouteEntry{cost: cost[next], hops: hops[next], path: paths[prev[next]], id: next}
+
+				if compareRouteEntry(step, current) >= 0 {
+					continue
+				}
+			}
+
+			step.path = append(append(make([]int32, 0, len(paths[cur])+1), paths[cur]...), next)
+			cost[next], hops[next], prev[next], paths[next], seen[next] = step.cost, step.hops, cur, step.path, true
+
+			queue.push(step)
 		}
 	}
 
 	routes := map[uint32][]Edge{}
 
-	for dst, d := range distance {
-		if d.hops == 0 || d.hops > maxHops {
+	for index := range size {
+		if !seen[index] || hops[index] == 0 || hops[index] > maxHops {
 			continue
 		}
 
 		path := []Edge{}
 
-		for cur := dst; cur != source; cur = prev[cur] {
-			path = append(path, Edge{From: prev[cur], To: cur})
+		for cur := int32(index); cur != source; cur = prev[cur] {
+			path = append(path, Edge{From: n.order.ids[prev[cur]], To: n.order.ids[cur]})
 		}
 
 		slices.Reverse(path)
-		routes[dst] = path
+		routes[n.order.ids[index]] = path
 	}
 
 	n.routes = routes
