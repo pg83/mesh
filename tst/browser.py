@@ -9,8 +9,9 @@ from playwright.sync_api import sync_playwright
 SOURCE = Path(__file__).resolve().parent.parent / 'web' / 'app.js'
 START = time.monotonic()
 # A browser that stops answering used to burn the whole budget of the test and
-# die from the outside with nothing to read. This prints where it stopped.
-faulthandler.dump_traceback_later(300, exit=True)
+# die from the outside with nothing to read. This prints where it stopped, and
+# does it soon: the whole scenario takes some twenty seconds.
+faulthandler.dump_traceback_later(150, exit=True)
 
 
 def phase(name):

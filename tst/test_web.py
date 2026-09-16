@@ -75,7 +75,7 @@ def test():
         assert len(topo['routes'][lib.intip(3) + ':0']) == 6
         if python := os.environ.get('MESH_TEST_BROWSER_PYTHON'):
             lab.run('a', [python, str(lib.Path(__file__).with_name('browser.py'))],
-                    timeout=420, capture_output=False)
+                    timeout=240, capture_output=False)
         # Without a browser the record stays empty; the floor reads it as such.
         if report := os.environ.get('MESH_TEST_WEB_COVERAGE'):
             path = lib.Path(report)
