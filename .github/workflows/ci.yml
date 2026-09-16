@@ -180,6 +180,17 @@ jobs:
           fail_ci_if_error: true
           verbose: true
 
+      - name: Save the coverage profiles
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mesh-coverage-profiles
+          path: |
+            .build/coverage.out
+            .build/coverage-web.info
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Save failure diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

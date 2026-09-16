@@ -97,12 +97,9 @@ func (o *VertexOrder) index(id uint32) (int32, bool) {
 }
 
 func (o *VertexOrder) compare(a, b uint32) int {
-	first, known := o.rank[a]
-	second, present := o.rank[b]
-
-	if !known || !present {
-		return cmp.Compare(a, b)
+	if v := cmp.Compare(o.rank[a], o.rank[b]); v != 0 {
+		return v
 	}
 
-	return cmp.Compare(first, second)
+	return cmp.Compare(a, b)
 }

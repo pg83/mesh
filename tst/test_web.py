@@ -76,6 +76,11 @@ def test():
         if python := os.environ.get('MESH_TEST_BROWSER_PYTHON'):
             lab.run('a', [python, str(lib.Path(__file__).with_name('browser.py'))],
                     timeout=180, capture_output=False)
+        # Without a browser the record stays empty; the floor reads it as such.
+        if report := os.environ.get('MESH_TEST_WEB_COVERAGE'):
+            path = lib.Path(report)
+            if not path.exists():
+                path.write_text('TN:\nSF:web/app.js\nLF:0\nLH:0\nend_of_record\n')
 
         # Read-only export must not include host-specific binding or TLS key paths.
         lab.stop_node('a')

@@ -31,11 +31,7 @@ type DialAttempt struct {
 }
 
 func backoff(failures int) time.Duration {
-	delay := time.Second << min(failures, 6)
-
-	if delay > maxBackoff {
-		delay = maxBackoff
-	}
+	delay := min(time.Second<<min(failures, 6), maxBackoff)
 
 	return delay*3/4 + time.Duration(rand.Int64N(int64(delay)/2))
 }
