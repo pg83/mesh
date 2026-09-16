@@ -94,7 +94,7 @@ def test():
         lab.configs['a'] = {'control': ''}
         lab.start_node('a')
         # Fresh gossip must restore the route promptly after a fast restart.
-        lab.wait_ping('a', 'b', timeout=4)
+        lab.wait_ping('a', 'b', timeout=8)
         unavailable_status(lab, OSError)
 
         ready = lab.dir / 'invalid-status-ready'

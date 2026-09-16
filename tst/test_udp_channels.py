@@ -49,7 +49,11 @@ def test():
         lab.start_node('a')
         lab.wait_ping('a', 'b')
         lab.wait_ping('b', 'a')
-        lab.wait(lambda: all(len(lab.status(n)['channels']) == 2 for n in ['a', 'b']), 'two independent directed channels')
+        def described(name):
+            state = lab.status(name)
+            return len(state['channels']) == 2 and all(str(c[k]) in state['addresses'] for c in state['channels'] for k in ['from', 'to'])
+
+        lab.wait(lambda: all(described(n) for n in ['a', 'b']), 'two independent directed channels with known ends')
         workload.udp_server(lab, 'b')
         udp = workload.UdpClient(lab, 'a', 'b')
         udp.send(b'explicit-independent-return-path')

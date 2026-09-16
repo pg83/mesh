@@ -9,6 +9,7 @@ under `unshare -rUn` and spawns one `unshare -n` holder per node.
 """
 
 import collections
+import errno
 import fcntl
 import heapq
 import hashlib
@@ -300,7 +301,14 @@ class Lab:
                        if a == src and b == dst and action == 'sent' and (seg is None or seg == s))
 
     def deliver(self, out, packet, key):
-        os.write(out, packet)
+        try:
+            os.write(out, packet)
+        except OSError as error:
+            # A frame for an interface that is down is lost on the wire.
+            if error.errno != errno.EIO:
+                raise
+            self.counts[(*key, 'down')] += 1
+            return
         self.counts[(*key, 'sent')] += 1
 
     def forward(self, name, seg, public_addr, public_port, bind_port):
