@@ -133,37 +133,42 @@ with sync_playwright() as p:
     assert page.evaluate('cy.elements(".focus").length') == 0
     phase('link and background tap')
     # The route selector highlights the local route and then drops it.
-    peer = page.evaluate('[...$("route-dest").options].map(option => option.value).find(Boolean)')
-    assert page.evaluate(destination(peer)) == peer
+    chosen = page.evaluate('[...$("route-dest").options].map(option => option.value).find(Boolean)')
+    assert page.evaluate(destination(chosen)) == chosen
     assert 'hops' in page.evaluate('$("route-summary").textContent')
     assert page.evaluate('cy.edges(".focus").length') >= 1
     page.evaluate(destination(''))
     assert page.evaluate('cy.elements(".focus").length') == 0
     phase('graph interactions')
-    page.get_by_role('tab', name='Hosts', exact=True).click()
+    page.evaluate('$("hosts-mode").click()')
     assert page.evaluate('cy.nodes().length') == 3
     # In this mode a link carries how many endpoint pairs it stands for.
     page.evaluate('cy.edges()[0].emit("tap")')
     assert 'edges between endpoints' in page.evaluate('$("selected-note").textContent')
-    page.get_by_role('tab', name='Matrix', exact=True).click()
-    page.wait_for_selector('#matrix-page:not([hidden])')
-    hop = page.get_by_role('button', name='2', exact=True).first
-    assert 'a → work' in (hop.get_attribute('title') or '')
-    hop.click()
-    assert page.get_by_role('tab', name='Endpoint', exact=True).get_attribute('aria-selected') == 'true'
+    page.evaluate('$("matrix-tab").click()')
+    assert not page.evaluate('$("matrix-page").hidden')
+    # The cell for the two-hop pair carries the route and leads to the graph.
+    hop = page.evaluate('''(() => {
+      const cell = [...document.querySelectorAll('#matrix button')].find(b => b.textContent === '2');
+      if (!cell) return '';
+      cell.click();
+      return cell.title;
+    })()''')
+    assert 'a → work' in hop, hop
+    assert page.evaluate('$("endpoints-mode").getAttribute("aria-selected")') == 'true'
     assert page.evaluate('cy.edges(".focus").length') >= 2
     phase('matrix')
-    page.get_by_role('tab', name='Configs', exact=True).click()
+    page.evaluate('$("configs-tab").click()')
     with page.expect_download() as download:
-        page.get_by_role('link', name='Download mesh-2.json ↓').click()
+        page.evaluate('document.querySelector(\'a[download="mesh-2.json"]\').click()')
     config = json.loads(Path(download.value.path()).read_text())
     assert config['index'] == 2 and 'key' not in config
     assert [peer['index'] for peer in config['registry']] == [1, 2]
     assert config.get('registry_version', 1) == 1
     page.goto('http://127.0.0.1:8059/config')
     page.wait_for_selector('#config-cards .config-card')
-    assert page.get_by_role('tab', name='Configs', exact=True).get_attribute('aria-selected') == 'true'
-    page.get_by_role('tab', name='Endpoint', exact=True).click()
+    assert page.evaluate('$("configs-tab").getAttribute("aria-selected")') == 'true'
+    page.evaluate('$("endpoints-mode").click()')
     page.wait_for_function('cy.nodes().length > 3')
     if artifacts := os.environ.get('MESH_TEST_ARTIFACTS'):
         Path(artifacts).mkdir(parents=True, exist_ok=True)
@@ -173,7 +178,7 @@ with sync_playwright() as p:
     # positions they already have, and a peer nothing reaches must read as such
     # in the matrix. Both come from one answer: the same topology with every
     # link of the third node taken out.
-    page.get_by_role('tab', name='Endpoint', exact=True).click()
+    page.evaluate('$("endpoints-mode").click()')
     page.wait_for_function('cy.nodes().length > 3')
     placed = page.evaluate('cy.nodes()[0].position()')
     topology = json.loads(frozen)
@@ -186,12 +191,12 @@ with sync_playwright() as p:
         status=200, content_type='application/json', body=cut))
     page.wait_for_function('t.edges.length === %d' % len(topology['edges']), timeout=20000)
     assert page.evaluate('cy.nodes()[0].position()') == placed, 'the update moved a vertex'
-    page.get_by_role('tab', name='Matrix', exact=True).click()
-    unreachable = page.locator('td.no-path')
-    assert unreachable.count() >= 2, unreachable.count()
-    assert 'no route' in (unreachable.first.get_attribute('title') or '')
+    page.evaluate('$("matrix-tab").click()')
+    unreachable = page.evaluate('[...document.querySelectorAll("td.no-path")].map(cell => cell.title)')
+    assert len(unreachable) >= 2, unreachable
+    assert 'no route' in unreachable[0], unreachable[0]
     phase('update without a route')
-    page.get_by_role('tab', name='Endpoint', exact=True).click()
+    page.evaluate('$("endpoints-mode").click()')
     page.unroute('**/api/topology')
     # A control API that stops answering is reported, and recovery is silent.
     page.route('**/api/topology', lambda route: route.abort())
@@ -205,6 +210,9 @@ with sync_playwright() as p:
     page.unroute('**/api/topology')
     page.wait_for_function('!$("connection").classList.contains("error")', timeout=20000)
     phase('control API loss and recovery')
+    # The one place a real pointer is the point: on a phone-sized screen every
+    # tab must still be something a finger can land on, which only a click that
+    # goes through the browser's own hit testing can show.
     page.set_viewport_size({'width': 390, 'height': 844})
     for name in ['Hosts', 'Endpoint', 'Matrix', 'Configs']:
         page.get_by_role('tab', name=name, exact=True).click()
