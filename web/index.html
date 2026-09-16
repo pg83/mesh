@@ -11,7 +11,6 @@
 <nav role="tablist" aria-orientation="vertical" aria-label="View mode">
 <button id="hosts-mode" data-page="hosts" role="tab" aria-controls="topology-page" aria-selected="false">Hosts</button>
 <button id="endpoints-mode" class="active" data-page="endpoints" role="tab" aria-controls="topology-page" aria-selected="true">Endpoint</button>
-<button id="physics-mode" data-page="physics" role="tab" aria-controls="topology-page" aria-selected="false">Springs</button>
 <button id="matrix-tab" data-page="matrix" role="tab" aria-controls="matrix-page" aria-selected="false">Matrix</button>
 <button id="configs-tab" data-page="configs" role="tab" aria-controls="configs-page" aria-selected="false">Configs</button>
 </nav>
@@ -21,13 +20,6 @@
 <section id="topology-page" role="tabpanel"><div class="topology-layout">
 <section class="graph-panel">
 <div class="panel-actions"><button id="reset">Layout</button><button id="fit">Fit ↗</button></div>
-<div id="physics-controls" hidden>
-<label>Host charge <input id="physics-charge" type="range" min="4" max="6.5" step=".05" value="5.4"></label>
-<label>Link length <input id="physics-length" type="range" min="40" max="320" step="5" value="140"></label>
-<label>Damping <input id="physics-damping" type="range" min=".5" max=".98" step=".01" value=".88"></label>
-<button id="physics-restart">Restart</button><button id="physics-shake">Shake</button>
-<span id="physics-status" role="status"></span>
-</div>
 <div id="graph"></div>
 </section>
 <aside class="inspector">

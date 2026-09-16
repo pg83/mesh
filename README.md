@@ -249,7 +249,7 @@ and response truncation are not implemented.
   static endpoints, no private key.
 
 `mesh web` is a separate unprivileged process serving a page over the control
-API: host and endpoint graphs, a spring simulation of the graph, a hop
+API: host and endpoint graphs, a hop
 matrix with path highlighting, and configuration downloads. It can bind a
 LAN or mesh address while control stays on loopback:
 

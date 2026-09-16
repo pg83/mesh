@@ -149,11 +149,6 @@ body[data-design="graph"] { height:100dvh;overflow:hidden }
 [data-design="graph"] #matrix td { height:62px }
 }
 .snapshot.error { color:#e5a29c; border-color:#754440; }
-#physics-controls { display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:0 14px 8px;font-size:10px;color:var(--muted) }
-#physics-controls label { display:flex;align-items:center;gap:6px }
-#physics-controls input { width:90px;accent-color:var(--accent) }
-#physics-controls button { background:none;border:1px solid var(--line);border-radius:4px;font-size:10px;color:var(--accent);padding:2px 7px }
-#physics-status { font:10px var(--mono);margin-left:auto }
 
 /* Move the existing header to the left; leave the workspace unchanged. */
 body[data-design="graph"] { display:flex }
