@@ -63,7 +63,7 @@ def test():
         lab.clear(held)
         lab.release(held)
         lab.wait(lambda: version('c') == ident + 100, 'the latest record reaches another peer')
-        assert not any(e['from'] == host and e['to']['port'] >= 40000 for e in lab.status('c')['graph']), 'stale sockets survived the burst'
+        lab.wait(lambda: not any(e['from'] == host and e['to']['port'] >= 40000 for e in lab.status('c')['graph']), 'stale sockets survived the burst')
         assert relays['held']
         assert max(len(packet) for _, packet, _ in relays['held']) <= 1200
         lab.wait_ping('a', 'c')

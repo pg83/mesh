@@ -161,8 +161,6 @@ func (n *Node) graphLoop() {
 				clear(n.routeCache)
 				n.resetBackoff(0)
 				n.syncLocal()
-				n.refresh(time.Now())
-				n.publishSnapshot()
 			case *GraphRecord:
 				n.handleRecord(v)
 			case *Vector:

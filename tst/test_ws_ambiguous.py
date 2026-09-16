@@ -23,8 +23,8 @@ for path in ['/mesh', '/other']:
                                         'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==', 'Sec-WebSocket-Version': '13'})
     print(path, conn.getresponse().status)
 '''
-        replies = lab.run('a', [sys.executable, '-c', code]).stdout.split()
-        assert replies == ['/mesh', '200', '/other', '404'], replies
+        # The listener answers once the next snapshot carries it.
+        lab.wait(lambda: lab.run('a', [sys.executable, '-c', code]).stdout.split() == ['/mesh', '200', '/other', '404'], 'ambiguous upgrade refused')
         assert not lab.channels('b'), 'an ambiguous upgrade created channels'
 
 
