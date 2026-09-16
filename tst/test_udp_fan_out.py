@@ -20,6 +20,10 @@ def test():
             lab.wait(lambda name=name: len(lab.status(name)['links']) == 32,
                      f'{name}: all endpoint pairs discovered')
             workload.udp_server(lab, name)
+        for src in names:
+            for dst in names:
+                if src != dst:
+                    lab.wait_ping(src, dst)
         before = {name: drops(lab, name) for name in names}
         clients = [(src, dst, workload.UdpClient(lab, src, dst))
                    for src in names for dst in names if src != dst]
@@ -27,7 +31,7 @@ def test():
             for src, dst, client in clients:
                 payload = f'{src}-{dst}-{sequence}'.encode().ljust(1200, b'.')
                 client.send(payload)
-                assert client.recv() == payload
+                assert client.recv() == payload, f'{src} to {dst} lost sequence {sequence}'
             time.sleep(.1)
         assert {name: drops(lab, name) for name in names} == before
         lab.stop_node('c')
