@@ -1,6 +1,6 @@
 """A concrete WS listener follows IPv4/IPv6 addresses without restarting mesh or SSH."""
 import lib
-import workload
+import work_load as workload
 
 
 class Lab(lib.Lab):

@@ -1,7 +1,7 @@
 """Four addresses per node: gossip bursts, concurrent data, and peer restart."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def drops(lab, name):

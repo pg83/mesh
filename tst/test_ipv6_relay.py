@@ -1,6 +1,6 @@
 """An IPv6-only node reaches an IPv4-only node through a dual-stack relay."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

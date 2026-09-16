@@ -1,7 +1,7 @@
 """The same SSH and QUIC connections migrate UDP -> WSS -> UDP without reconnecting."""
 import lib
 import ws
-import workload
+import work_load as workload
 
 
 def test():

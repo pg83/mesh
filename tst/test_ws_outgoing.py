@@ -1,7 +1,7 @@
 """WSS is available with no listeners and with only a UDP listener."""
 import lib
 import ws
-import workload
+import work_load as workload
 
 
 def test():

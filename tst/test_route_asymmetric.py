@@ -1,6 +1,6 @@
 """11: Source routing permits different working forward and return paths."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

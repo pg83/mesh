@@ -1,6 +1,6 @@
 """09: Two active partitions change their local links and merge their new graphs."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

@@ -1,6 +1,6 @@
 """07: A busy sender restarts without reconnecting the QUIC application."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

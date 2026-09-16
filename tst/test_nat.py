@@ -2,7 +2,7 @@
 import struct
 import lib
 import nat
-import workload
+import work_load as workload
 
 
 def test():

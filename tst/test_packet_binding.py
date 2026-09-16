@@ -1,6 +1,6 @@
 """17: Captured ciphertext cannot be reflected or delivered to another registered peer."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

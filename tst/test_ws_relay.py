@@ -1,6 +1,6 @@
 """Source routes cross UDP and WebSocket hops in both directions."""
 import lib
-import workload
+import work_load as workload
 
 
 class Mixed(lib.Lab):

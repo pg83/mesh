@@ -1,7 +1,7 @@
 """Delivery needs the directed endpoint-to-internal-IP attachment; records may add its reverse."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def test():

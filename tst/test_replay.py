@@ -1,7 +1,7 @@
 """A packet ID already accepted within the channel's window is dropped, so replays cannot refresh a link."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def rejected(lab, name):

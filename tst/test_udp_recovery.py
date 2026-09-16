@@ -1,7 +1,7 @@
 """UDP boundary sizes and new datagrams after an interrupted route."""
 
 import lib
-import workload
+import work_load as workload
 
 
 def test():

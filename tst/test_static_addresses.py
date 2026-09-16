@@ -1,6 +1,6 @@
 """Unsupported static addresses do not prevent discovery through a valid IPv4 endpoint."""
 import lib
-import workload
+import work_load as workload
 
 
 class StaticAddresses(lib.Lab):

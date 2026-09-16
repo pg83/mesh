@@ -2,7 +2,7 @@
 import time
 import json
 import lib
-import workload
+import work_load as workload
 
 
 def test():

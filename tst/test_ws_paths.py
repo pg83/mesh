@@ -1,7 +1,7 @@
 """Paths distinguish endpoints on one TCP listener; restarting on another path preserves IP traffic."""
 import lib
 import ws
-import workload
+import work_load as workload
 
 
 class Paths(ws.Lab):

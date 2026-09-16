@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def test():

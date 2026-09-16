@@ -1,7 +1,7 @@
 """Changing only a UDP port migrates the same SSH connection to a new vertex."""
 import struct
 import lib
-import workload
+import work_load as workload
 
 
 def test():

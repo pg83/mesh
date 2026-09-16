@@ -1,7 +1,7 @@
 """Keep the application IP; change the physical address, then lose its segment."""
 
 import lib
-import workload
+import work_load as workload
 
 
 def test():

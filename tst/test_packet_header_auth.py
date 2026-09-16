@@ -1,6 +1,6 @@
 """16: The transport packet ID is authenticated; changing it invalidates the packet."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

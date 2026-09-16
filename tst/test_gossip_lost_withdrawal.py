@@ -1,7 +1,7 @@
 """14: Periodic gossip delivers a missed withdrawal while data keeps its incoming link alive."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def test():

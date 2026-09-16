@@ -1,7 +1,7 @@
 """Four real QUIC clients stress one server for thirty seconds without reconnecting."""
 
 import lib
-import workload
+import work_load as workload
 
 
 def test():

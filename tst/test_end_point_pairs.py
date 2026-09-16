@@ -1,7 +1,7 @@
 """Two different source endpoints to one destination have independent liveness."""
 import socket
 import lib
-import workload
+import work_load as workload
 
 
 def test():

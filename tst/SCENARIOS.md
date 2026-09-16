@@ -6,9 +6,9 @@ inside the nodes' network namespaces.
 
 | # | Test | Check |
 |---|---|---|
-| 1 | endpoint_oneway | Working endpoint alongside an incoming-only endpoint |
-| 2 | endpoint_stale | Delayed packets cannot revert a source address |
-| 3 | quic_failover | Four loaded connections migrate to a relay and back |
+| 1 | end_point_one_way | Working endpoint alongside an incoming-only endpoint |
+| 2 | end_point_stale | Delayed packets cannot revert a source address |
+| 3 | quic_fail_over | Four loaded connections migrate to a relay and back |
 | 4 | quic_mtu | Existing connection moves to a smaller physical MTU |
 | 5 | quic_isolation | Congested bulk traffic does not starve an independent SSH channel |
 | 6 | quic_slow_reader | One flow-controlled client does not stop three others |
@@ -20,7 +20,7 @@ inside the nodes' network namespaces.
 | 12 | gossip_cycles | Bounded flooding despite cycles and duplicate delivery |
 | 13 | gossip_stale | A superseded record cannot restore a withdrawn vertex |
 | 14 | gossip_lost_withdrawal | Periodic gossip delivers missed withdrawals while data keeps its incoming link alive |
-| 15 | endpoint_fanout | Working endpoint after 32 unreachable candidates |
+| 15 | end_point_fan_out | Working endpoint after 32 unreachable candidates |
 | 16 | packet_header_auth | Changing the transport ID invalidates authentication |
 | 17 | packet_binding | Reflection and cross-peer ciphertext injection |
 | — | ws_source | Every first message type carries the actual client socket, works without a reply, and preserves endpoint metadata |

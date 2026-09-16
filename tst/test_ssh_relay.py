@@ -1,7 +1,7 @@
 """A live SSH changes from a two-hop path to three hops after a relay exits."""
 
 import lib
-import workload
+import work_load as workload
 
 
 def test():

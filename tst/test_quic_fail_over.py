@@ -1,7 +1,7 @@
 """03: Four loaded QUIC connections survive loss and restoration of their direct paths."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def test():

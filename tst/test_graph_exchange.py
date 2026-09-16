@@ -1,7 +1,7 @@
 """Gossip relays whole per-node records and every peer keeps only the newest version."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def test():

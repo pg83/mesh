@@ -1,7 +1,7 @@
 """Overlapping declarations share one UDP listener; explicit binds stay separate."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def test():

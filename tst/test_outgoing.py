@@ -1,6 +1,6 @@
 """UDP sends from the listener socket; the channel vertex is described by that listener's address."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

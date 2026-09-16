@@ -2,7 +2,7 @@
 import copy
 
 import lib
-import workload
+import work_load as workload
 
 
 def entries(lab, name):

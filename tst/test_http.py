@@ -4,7 +4,7 @@ import concurrent.futures
 import sys
 
 import lib
-import workload
+import work_load as workload
 
 
 def test():

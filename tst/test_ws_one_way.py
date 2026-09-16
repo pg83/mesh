@@ -1,7 +1,7 @@
 """Only one peer can initiate TCP; the accepted connection still carries both directions."""
 import lib
 import ws
-import workload
+import work_load as workload
 
 
 def test():

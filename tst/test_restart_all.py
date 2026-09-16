@@ -1,6 +1,6 @@
 """08: All mesh processes restart while the original SSH application stays alive."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

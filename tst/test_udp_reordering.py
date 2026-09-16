@@ -1,7 +1,7 @@
 """Real UDP traffic tolerates reordered packets and rejects corrupted ciphertext."""
 
 import lib
-import workload
+import work_load as workload
 
 
 def test():

@@ -1,7 +1,7 @@
 """15: A reachable last endpoint is tried despite a long list of dead addresses."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 class ManyEndpoints(lib.Lab):

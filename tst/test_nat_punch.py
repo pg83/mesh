@@ -3,7 +3,7 @@ import json
 import lib
 import nat
 import time
-import workload
+import work_load as workload
 
 
 def observed(lab, observer, name):

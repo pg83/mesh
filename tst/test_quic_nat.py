@@ -1,7 +1,7 @@
 """The same SSH and QUIC connections migrate LAN -> port forward -> second port forward."""
 import lib
 import nat
-import workload
+import work_load as workload
 
 
 def test():

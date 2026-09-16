@@ -89,7 +89,7 @@ class TLSLab(Lab):
 
     def start_node(self, name):
         import os
-        import workload
+        import work_load as workload
         if self.proxy and name == 'b':
             host = f'[{self.bind}]' if ':' in self.bind else self.bind
             proc = self.spawn('b', [os.environ['MESH_TEST_PROBE'], 'proxy', '10.1.0.99:7443',

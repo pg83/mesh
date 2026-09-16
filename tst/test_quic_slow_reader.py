@@ -1,6 +1,6 @@
 """06: A QUIC client blocked by flow control does not stop three healthy clients."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

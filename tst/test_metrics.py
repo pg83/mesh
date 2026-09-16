@@ -1,7 +1,7 @@
 """The control /metrics endpoint exposes node counters and a consistent status snapshot."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def metrics(lab, name):

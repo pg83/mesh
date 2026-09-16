@@ -1,7 +1,7 @@
 """TLS terminates at a real reverse proxy, with a different public address and port."""
 import lib
 import ws
-import workload
+import work_load as workload
 
 
 def test():

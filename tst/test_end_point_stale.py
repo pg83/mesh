@@ -1,7 +1,7 @@
 """02: Previously unseen old packets cannot roll back the selected source address."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def test():

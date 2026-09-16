@@ -1,7 +1,7 @@
 """12: Cycles and duplicate deliveries cannot turn gossip into an unbounded flood."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def test():

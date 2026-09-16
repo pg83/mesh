@@ -1,7 +1,7 @@
 """Outgoing UDP leaves the listener socket; a node without listeners gets an implicit one per address."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def test():

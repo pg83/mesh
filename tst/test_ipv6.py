@@ -1,6 +1,6 @@
 """IPv6-only physical links carry IPv4 mesh traffic and survive address changes."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

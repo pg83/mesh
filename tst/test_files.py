@@ -4,7 +4,7 @@ import shlex
 import shutil
 
 import lib
-import workload
+import work_load as workload
 
 
 def test():

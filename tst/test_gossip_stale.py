@@ -1,7 +1,7 @@
 """13: Old graph records stay obsolete even when another peer republishes them."""
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def test():

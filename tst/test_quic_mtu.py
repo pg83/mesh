@@ -1,6 +1,6 @@
 """04: An existing QUIC connection survives moving to a smaller physical MTU."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

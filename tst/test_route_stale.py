@@ -1,6 +1,6 @@
 """10: Delayed gossip and an in-flight obsolete source route cannot roll back a bypass."""
 import lib
-import workload
+import work_load as workload
 
 
 def test():

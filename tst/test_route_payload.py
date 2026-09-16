@@ -5,7 +5,7 @@ import struct
 import sys
 import time
 import lib
-import workload
+import work_load as workload
 
 
 def encode(hops, payload, cursor=0):
