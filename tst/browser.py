@@ -82,6 +82,13 @@ with sync_playwright() as p:
     assert page.evaluate('cy.pan()') == {'x': 71, 'y': 83}
     assert page.evaluate('cy.nodes()[0].position()') == {'x': 321, 'y': 123}
     phase('drag survived a refresh')
+    # The inspector and the destination list are rebuilt whenever the topology
+    # changes, which a live mesh does every few seconds. Serve the snapshot the
+    # page already holds so the elements below stay put while they are used;
+    # the page keeps polling, it just keeps reading the same answer.
+    frozen = page.evaluate('JSON.stringify(t)')
+    page.route('**/api/topology', lambda route: route.fulfill(
+        status=200, content_type='application/json', body=frozen))
     # The panel buttons restore the view the dragging moved.
     page.get_by_role('button', name='Fit ↗', exact=True).click()
     assert page.evaluate('cy.zoom()') > 0
@@ -136,6 +143,7 @@ with sync_playwright() as p:
         Path(artifacts).mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(Path(artifacts) / 'mesh-web.png'))
     phase('configs')
+    page.unroute('**/api/topology')
     # A control API that stops answering is reported, and recovery is silent.
     page.route('**/api/topology', lambda route: route.abort())
     page.wait_for_function('$("connection").classList.contains("error")', timeout=15000)
