@@ -125,8 +125,9 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         outputs.append(env["GOCOVERDIR"])
 
     # The browser records which lines of the web UI it ran; the scenario writes
-    # the record whether or not a browser was there to fill it.
-    if COVERAGE and test_name == "web":
+    # the record whether or not a browser was there to fill it. It measures the
+    # page, not the daemon, so it does not wait for an instrumented build.
+    if test_name == "web":
         env["MESH_TEST_WEB_COVERAGE"] = "$(B)/coverage-web.info"
         outputs.append(env["MESH_TEST_WEB_COVERAGE"])
 
