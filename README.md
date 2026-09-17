@@ -279,13 +279,6 @@ by a userspace switch and need unprivileged user namespaces, the tun module,
 and for some scenarios sshd, iperf3, rsync and a Playwright Chromium; CI runs
 them all on every push, plus native macOS checks.
 
-## Releases
-
-**Actions → Release → Run workflow** on `master`, or locally
-`python3 dev/release.py <tag> --binaries-directory <dir> --artifacts-directory <out> < notes.md`.
-Releases are numbered tags with linux-amd64, darwin-amd64 and darwin-arm64
-binaries, a source archive and checksums.
-
 ## License
 
 MIT. See [LICENSE](LICENSE).
