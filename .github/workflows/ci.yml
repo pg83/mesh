@@ -162,8 +162,19 @@ jobs:
           sudo modprobe tun
 
       # The same scenarios against a daemon the kernel refuses now and then.
+      # Instrumented, because the paths the refusals walk are exactly the ones
+      # the ordinary suite never reaches.
       - name: Run all e2e tests against a daemon that gets refused
-        run: ./build -k -j 4 chaos
+        run: ./build -k -j 4 -Dcoverage chaos coverage-chaos
+
+      - name: Save the coverage profile
+        if: ${{ !cancelled() && hashFiles('.build/coverage-chaos.out') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mesh-coverage-go-chaos
+          path: .build/coverage-chaos.out
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Save failure diagnostics
         if: failure()
@@ -202,24 +213,15 @@ jobs:
       - name: Run the tests against the instrumented binary
         run: ./build -k -j 4 -Dcoverage coverage
 
-      - name: Upload coverage to Codecov
+      # Reported by the job that puts the runs together, not here: one run is
+      # only part of what the daemon did.
+      - name: Save the coverage profile
         if: ${{ !cancelled() && hashFiles('.build/coverage.out') != '' }}
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        with:
-          use_oidc: true
-          files: .build/coverage.out
-          flags: go
-          disable_search: true
-          fail_ci_if_error: true
-          verbose: true
-
-      - name: Save the coverage profiles
-        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mesh-coverage-profiles
+          name: mesh-coverage-go-plain
           path: .build/coverage.out
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 7
 
       - name: Save failure diagnostics
@@ -228,6 +230,56 @@ jobs:
         with:
           name: mesh-coverage-failure
           path: ${{ runner.temp }}/mesh-artifacts
+          retention-days: 7
+
+  aggregate:
+    name: Coverage aggregate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: [coverage, chaos]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Collect the profiles of every run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: mesh-coverage-go-*
+          path: ${{ runner.temp }}/profiles
+
+      - name: Add the runs up
+        run: |
+          set -o pipefail
+          python3 dev/merge_coverage.py \
+            --output "$RUNNER_TEMP/coverage.out" \
+            --minimum 98 \
+            --skip syscalls_chaos.go \
+            "$RUNNER_TEMP"/profiles/mesh-coverage-go-*/coverage*.out | tee "$RUNNER_TEMP/summary.txt"
+          {
+            echo "## Coverage"
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/summary.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          use_oidc: true
+          files: ${{ runner.temp }}/coverage.out
+          flags: go
+          disable_search: true
+          fail_ci_if_error: true
+          verbose: true
+
+      - name: Save the merged profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mesh-coverage-go
+          path: ${{ runner.temp }}/coverage.out
+          if-no-files-found: error
           retention-days: 7
 
   darwin:

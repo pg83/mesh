@@ -34,3 +34,5 @@ ignore:
   - "dev/**/*"
   - "**/*_test.go"
   - "web/cytoscape.js"
+  # Scaffolding for the build that refuses system calls, not the program.
+  - "syscalls_chaos.go"

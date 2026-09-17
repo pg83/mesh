@@ -32,6 +32,10 @@ gossip map on every node, source routing through any node, IP over TUN.
   repeatable, and only `mesh run` is ever armed. Every call into the operating
   system that can fail belongs in `syscalls.go`; network faults still belong to
   the switch in `tst/lib.py`.
+- Coverage is reported from every run together: the plain suite and the chaos
+  suite each hand their profile to the aggregate job, which merges them with
+  `dev/merge_coverage.py` and uploads one report. Profiles measured on
+  different sources are refused rather than added up.
 - `./lint.sh` before committing style-sensitive changes.
 
 - Application tests require ssh/sshd/ssh-keygen/scp, rsync, curl, iperf3 and openssl
