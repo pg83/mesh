@@ -2,6 +2,7 @@
 """Merge the Go coverage profiles of several runs into one and say what each added."""
 
 import argparse
+from decimal import Decimal
 from pathlib import Path
 import sys
 
@@ -39,7 +40,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('profiles', nargs='+')
     parser.add_argument('--output', required=True)
-    parser.add_argument('--minimum', type=float, default=0)
+    parser.add_argument('--minimum', type=Decimal, default=Decimal(0))
     args = parser.parse_args()
     merged = {}
     for path in args.profiles:
@@ -72,8 +73,8 @@ def main():
                                    for where, (statements, count) in sorted(merged.items())))
     print(f'together: {percent}% ({covered}/{total} statements)')
 
-    if percent < args.minimum:
-        sys.exit(f'coverage {percent}% is below {args.minimum}%')
+    if not total or 100 * covered < args.minimum * total:
+        sys.exit(f'coverage {covered}/{total} statements is below {args.minimum}%')
 
 
 if __name__ == '__main__':

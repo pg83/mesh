@@ -1,6 +1,8 @@
 """One node is refused by the kernel at every turn it is meant to survive, and the mesh forms anyway."""
 import os
+from pathlib import Path
 import time
+import uuid
 
 import lib
 
@@ -85,10 +87,16 @@ def test():
 
             # Something that panics with a value that is not an exception of
             # ours must take the node down rather than be swallowed.
-            result = lab.run('b', [lib.MESH, 'run', '-c', lab.dir / 'b.json'], check=False, timeout=20,
-                             env={**os.environ, 'MESH_CHAOS': 'panic:1'})
+            env = {**os.environ, 'MESH_CHAOS': 'panic:1'}
+            if env.get('GOCOVERDIR'):
+                counters = Path(env['GOCOVERDIR']) / ('daemon-panic-' + uuid.uuid4().hex)
+                counters.mkdir()
+                env['GOCOVERDIR'] = str(counters)
+            result = lab.run('b', [lib.MESH, 'run', '-c', lab.dir / 'b.json'], check=False, timeout=20, env=env)
 
-            assert result.returncode != 0 and 'panic' in result.stderr, result
+            assert result.returncode != 0 and 'panic: chaos: a panic that is not ours' in result.stderr, result
+            if env.get('GOCOVERDIR'):
+                assert list(counters.glob('covcounters.*')), 'panic lost its coverage counters'
 
             # The stack a node serves its own address from is built once, at
             # the start, and only by a node that serves something there. One

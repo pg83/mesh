@@ -69,7 +69,11 @@ type Channel struct {
 }
 
 func (a *Channel) run() {
-	defer func() { a.io.stop(); a.report() }()
+	defer func() {
+		a.io.stop()
+		sys.pause("channel report pause")
+		a.report()
+	}()
 
 	a.since = time.Now()
 

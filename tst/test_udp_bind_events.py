@@ -1,10 +1,12 @@
 """A concrete UDP listener follows its address: removal closes the socket and its channels, return restores them."""
 import lib
+import os
 
 
 def test():
     lab = lib.Lab(['a', 'b'], {1: ['a', 'b']}, statics=['a'])
     lab.configs['b'] = dict(endpoint=[dict(proto='udp', addr='10.1.0.2', port=7000)])
+    lab.node_env['b'] = {'MESH_CHAOS': ','.join(filter(None, [os.environ.get('MESH_CHAOS'), 'channel report pause:1']))}
     with lab:
         lab.wait_ping('a', 'b')
         lab.wait_ping('b', 'a')
@@ -18,6 +20,10 @@ def test():
         lab.run('b', ['ip', 'route', 'add', '192.0.2.0/24', 'dev', 's1'])
         lab.run('b', ['ip', 'addr', 'del', '10.1.0.2/24', 'dev', 's1'])
         lab.wait(lambda: not listening(), 'UDP listener closed by address removal', timeout=5)
+        def withdrawn():
+            record = next(r for r in lab.status('b')['records'] if r['owner'] == 2)
+            return not record['vertices'] and not record['links']
+        lab.wait(withdrawn, 'published record withdraws the removed address and its links', timeout=5)
         lab.wait(lambda: not lab.status('b')['channels'], 'channels closed with their address', timeout=5)
         lab.run('b', ['ip', 'addr', 'add', '10.1.0.2/24', 'dev', 's1'])
         lab.wait(listening, 'UDP listener restored by address event', timeout=5)

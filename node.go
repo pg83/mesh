@@ -27,10 +27,6 @@ import (
 const (
 	tickInterval   = time.Second
 	sessionTimeout = 5 * time.Second
-
-	// How long the node waits before asking again for something the kernel
-	// refused it: the interface list once, a socket read for every failure in
-	// a row, so that a socket which is truly broken cannot spin.
 	interfaceRetry = time.Second
 	readRetry      = 10 * time.Millisecond
 )
@@ -486,6 +482,7 @@ func (n *Node) graphLoop() {
 				clear(n.routeCache)
 				n.resetBackoff(0)
 				n.syncLocal()
+				sys.reached("interfaces")
 			case *GraphRecord:
 				n.handleRecord(v)
 			case *Vector:
@@ -607,8 +604,6 @@ func (n *Node) publishRecord() {
 	observed := map[uint32]SocketAddress{}
 
 	for id := range n.local {
-		// The address of a local vertex is written wherever the vertex itself
-		// is, so there is always one here.
 		vertex := n.addresses[id]
 
 		if ingress[id] || egress[id] {
@@ -803,8 +798,6 @@ func (n *Node) compareIDs(a, b uint32) int {
 	return n.order.compare(a, b)
 }
 
-// Only the edges of channels are ranked, and a channel never ends on a host
-// vertex, so there is nothing here about those.
 func (n *Node) cost(edge Edge) int {
 	if n.addresses[edge.To].Proto == "udp" {
 		return costUDP
@@ -814,15 +807,10 @@ func (n *Node) cost(edge Edge) int {
 }
 
 func (n *Node) recompute() {
-	// A node is in its own registry, the registry is in the order, so this is
-	// where the routes start from.
 	source := n.order.index(hostID(n.cfg.Index))
-
 	size := len(n.order.ids)
 	adjacency := make([][]int32, size)
 
-	// The order is built from this very graph, so both ends of every edge have
-	// a place in it.
 	for edge := range n.graph {
 		from, to := n.order.index(edge.From), n.order.index(edge.To)
 
@@ -1060,8 +1048,6 @@ func (n *Node) refresh(now time.Time) {
 	n.publishRecord()
 	n.rebuild()
 
-	// The node has done its round; whoever was told to wait for one is waiting
-	// for this.
 	sys.reached("tick")
 }
 
@@ -1150,11 +1136,6 @@ func (n *Node) interfaceAddresses() (InterfaceState, error) {
 		addrs, err := sys.addresses(iface)
 
 		if err != nil {
-			// Not being able to read an interface's addresses is not the same
-			// as that interface having none. Handing back a state with them
-			// missing would close every socket bound to them and drop every
-			// channel through them, so the whole scan fails instead and the
-			// node keeps what it knew until the next attempt.
 			return nil, err
 		}
 
@@ -1214,10 +1195,6 @@ func (n *Node) watchInterfaces() {
 		current, err := n.interfaceAddresses()
 
 		if err != nil {
-			// A scan that fails leaves the node with whatever it knew before,
-			// and at startup that is nothing at all: no address to listen on
-			// and none to dial from. Ask again shortly instead of sitting out
-			// the whole period.
 			n.log.Warn("interface scan failed", "err", err)
 
 			select {
@@ -1229,8 +1206,6 @@ func (n *Node) watchInterfaces() {
 		}
 
 		if !slices.Equal(previous, current) {
-			// What was read a moment ago is not what is there now, and the
-			// node is about to act on it.
 			sys.pause("interface pause")
 			post(n.events.in, any(current))
 			previous = current
@@ -1290,9 +1265,6 @@ func (n *Node) udpSource(src InterfaceAddress) *UDPSource {
 			continue
 		}
 
-		// Every local vertex is a listener the node holds open: one that cannot
-		// be opened stops the node there and then, so there is no such thing
-		// here as a vertex without its socket.
 		socket := n.udpSocketFor(local.address)
 
 		if best == nil || (best.socket.implicit && !socket.implicit) || (best.socket.implicit == socket.implicit && compareVertex(vertex, best.vertex) < 0) {
@@ -1305,6 +1277,7 @@ func (n *Node) udpSource(src InterfaceAddress) *UDPSource {
 
 func (n *Node) syncListeners(addresses InterfaceState) {
 	n.relisten = false
+
 	present := map[string]bool{}
 
 	for _, addr := range addresses {
@@ -1380,9 +1353,6 @@ func (n *Node) syncListeners(addresses InterfaceState) {
 				n.sockets[*key] = socket
 				go n.loop("UDP listener", func() { n.discoverUDP(socket) })
 			}).catch(func(e *Exception) {
-				// The addresses are only looked at again when they change,
-				// which may be never. A socket that could not be opened this
-				// time is asked for again on the next tick instead.
 				n.relisten = true
 
 				n.log.Debug("implicit UDP socket failed", "address", addr.ip.String(), "err", e)
@@ -1529,9 +1499,6 @@ func (n *Node) dialChannel(attempt *DialAttempt) {
 			c.dialed = true
 		}
 
-		// A dial that takes its time lands in a node that has moved on: the
-		// peer may have a new session by now, or the address it was dialled
-		// from may be gone.
 		sys.pause("dial pause")
 		post(n.events.in, any(result))
 	}()
@@ -1582,10 +1549,6 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 		}
 
 		if err != nil {
-			// A datagram socket can fail one read and go on working: a queue
-			// that filled up, a signal, an ICMP error arriving for something
-			// sent earlier. None of that is a reason to take the node down,
-			// which is what an exception out of this loop would do.
 			failures++
 
 			n.log.Warn("socket read failed", "port", socket.port, "err", err)
@@ -1793,6 +1756,7 @@ func (n *Node) acceptWS(w http.ResponseWriter, r *http.Request) {
 			read(input)
 		}
 
+		sys.pause("channel accept pause")
 		post(n.events.in, any(c.send))
 		post(n.events.in, any(c.receive))
 

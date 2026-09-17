@@ -14,13 +14,9 @@ import (
 	"time"
 )
 
-// What this build is allowed to invent, and the name the kernel gives it. A
-// point that is not listed here cannot be armed, so a typo in the environment
-// stops the node instead of quietly testing nothing.
 var faults = map[string]error{
 	"accept": syscall.EMFILE,
-	// The same call refused for good rather than for a moment: the server
-	// retries what the kernel calls temporary and gives up on the rest.
+
 	"accept lost":         syscall.EINVAL,
 	"interface addresses": syscall.EMFILE,
 	"interface event":     syscall.ENOBUFS,
@@ -31,13 +27,7 @@ var faults = map[string]error{
 	"panic":               syscall.EIO,
 	"routes":              syscall.EBUSY,
 	"socket read":         syscall.EIO,
-	// What a device call is actually refused with: a signal arriving, which is
-	// worth another go. Anything else there means the device is gone, and the
-	// node is meant to die rather than pretend.
-	// An interrupted call is the standard library's business and never reaches
-	// the node, so a refusal of the device here means the device is gone. A
-	// node is meant to die of that, which is why these two are armed in the
-	// scenario that expects the death and nowhere else.
+
 	"tun read":  syscall.EIO,
 	"tun write": syscall.EIO,
 	"udp write": syscall.EHOSTDOWN,
@@ -45,23 +35,19 @@ var faults = map[string]error{
 	"ws write":  syscall.EPIPE,
 }
 
-// The same arming, but what comes of it is a wait rather than a refusal, and
-// what is waited for is another part of the node getting somewhere, not a
-// length of time. The node works off a tick, so waiting out two of them puts
-// whatever was in flight behind everything that tick does.
-type wait struct {
+var pauses = map[string]Wait{
+	"channel accept pause": {"interfaces", 1},
+	"channel report pause": {"tick", 2},
+	"dial pause":           {"tick", 2},
+	"interface pause":      {"tick", 1},
+}
+
+const patience = 30 * time.Second
+
+type Wait struct {
 	mark  string
 	times uint64
 }
-
-var pauses = map[string]wait{
-	"dial pause":      {"tick", 2},
-	"interface pause": {"tick", 1},
-}
-
-// Nothing waits for a mark that never comes: a node that stopped ticking has
-// bigger problems, and a scenario should hear about them rather than hang.
-const patience = 30 * time.Second
 
 func armChaos() {
 	sys = newChaos()
@@ -78,12 +64,6 @@ type Chaos struct {
 	marks    map[string]uint64
 }
 
-// MESH_CHAOS names the points to arm and how often each fails: "tun read:50"
-// refuses one call in fifty, "all:200" arms everything at that rate. It is
-// every fiftieth call, not a call with one chance in fifty: a run that makes
-// the calls gets the refusals rather than possibly getting none of them. The
-// seed decides which of the fifty, never a clock and never a race, so the same
-// seed breaks the same calls wherever the goroutines happen to run.
 func newChaos() Syscalls {
 	spec := os.Getenv("MESH_CHAOS")
 
@@ -100,8 +80,6 @@ func newChaos() Syscalls {
 	}
 
 	for _, item := range strings.Split(spec, ",") {
-		// A scenario whose subject is something else says so by taking a point
-		// away, rather than by spelling out the whole list again.
 		if stripped, found := strings.CutPrefix(item, "-"); found {
 			delete(c.rates, stripped)
 
@@ -143,7 +121,6 @@ func newChaos() Syscalls {
 	return c
 }
 
-// Whether this call of this point is the one to be interfered with.
 func (c *Chaos) due(what string) uint64 {
 	rate := c.rates[what]
 
@@ -175,7 +152,6 @@ func (c *Chaos) failing(what string) error {
 	return faults[what]
 }
 
-// Passing a mark: whoever waits for it is counting these.
 func (c *Chaos) reached(mark string) {
 	c.mu.Lock()
 	c.marks[mark]++
@@ -191,11 +167,14 @@ func (c *Chaos) pause(what string) {
 	}
 
 	until := pauses[what]
+	expired := false
 
-	slog.Warn("chaos", "at", what, "call", call, "waits for", until.times, "of", until.mark)
-
-	give := time.Now().Add(patience)
-	timer := time.AfterFunc(patience, func() { c.passed.Broadcast() })
+	timer := time.AfterFunc(patience, func() {
+		c.mu.Lock()
+		expired = true
+		c.passed.Broadcast()
+		c.mu.Unlock()
+	})
 
 	defer timer.Stop()
 
@@ -203,8 +182,12 @@ func (c *Chaos) pause(what string) {
 
 	defer c.mu.Unlock()
 
-	for target := c.marks[until.mark] + until.times; c.marks[until.mark] < target; {
-		if time.Now().After(give) {
+	target := c.marks[until.mark] + until.times
+
+	slog.Warn("chaos", "at", what, "call", call, "waits for", until.times, "of", until.mark)
+
+	for c.marks[until.mark] < target {
+		if expired {
 			slog.Warn("chaos gave up waiting", "at", what, "for", until.mark)
 
 			return
@@ -214,8 +197,6 @@ func (c *Chaos) pause(what string) {
 	}
 }
 
-// Where in the count of a point its refusals fall. Same seed, same places,
-// whatever order the goroutines happen to run in.
 func mix(seed uint64, what string, call uint64) uint64 {
 	hash := seed ^ 14695981039346656037
 
@@ -270,9 +251,6 @@ func (c *Chaos) accepts(listener net.Listener) net.Listener {
 	return ChaosListener{Listener: listener, chaos: c}
 }
 
-// The one point that does not refuse but explodes. Something panicking with a
-// value that is not an exception of ours is the one thing the catch in throw.go
-// must not swallow, and nothing else can produce one.
 func (c *Chaos) check(what string) error {
 	if what == "panic" && c.due(what) != 0 {
 		panic("chaos: a panic that is not ours")

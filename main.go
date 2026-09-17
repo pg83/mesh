@@ -9,6 +9,8 @@ import (
 )
 
 func main() {
+	defer flushCoverage()
+
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	slog.SetDefault(log)

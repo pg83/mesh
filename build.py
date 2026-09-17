@@ -67,7 +67,7 @@ mesh = command(
         "-trimpath",
         "-buildvcs=false",
         *(["-race"] if RACE else []),
-        *(["-cover", "-covermode=atomic"] if COVERAGE else []),
+        *(["-cover", "-covermode=atomic", "-tags=meshcoverage"] if COVERAGE else []),
         "-o", "$(B)/bin/mesh",
         ".",
     ],
@@ -98,7 +98,7 @@ chaos_binary = command(
     cmd=[
         "go", "build",
         "-trimpath",
-        "-tags=meshchaos",
+        "-tags=" + ("meshchaos,meshcoverage" if COVERAGE else "meshchaos"),
         *(["-cover", "-covermode=atomic"] if COVERAGE else []),
         "-o", "$(B)/bin/mesh-chaos", ".",
     ],
@@ -144,7 +144,7 @@ quic = command(
 NEEDS_PROBE = (
     "echo", "gossip_binary", "gossip_collision", "gossip_record", "gossip_stale", "graph_exchange",
     "protocol", "registry_binary", "replay", "route_attachment", "route_payload",
-    "ws_channels", "ws_loop_back", "ws_outgoing", "ws_protocol", "ws_proxy", "ws_source",
+    "ws_channels", "ws_lifecycle", "ws_loop_back", "ws_outgoing", "ws_protocol", "ws_proxy", "ws_source",
 )
 
 e2e_tests = []
