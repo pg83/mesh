@@ -33,10 +33,6 @@ const (
 	// a row, so that a socket which is truly broken cannot spin.
 	interfaceRetry = time.Second
 	readRetry      = 10 * time.Millisecond
-
-	// How many refusals in a row from the TUN device the node sits through
-	// before it accepts that the device is gone.
-	tunAttempts = 10
 )
 
 type LocalAddress struct {
@@ -1865,22 +1861,12 @@ func (n *Node) run() {
 	}
 
 	go n.loop("TUN writer", func() {
-		failures := 0
-
 		for p := range n.tunWrites.out {
-			if n.tun == nil {
+			if n.tun != nil {
+				n.tun.write(p)
+			} else {
 				n.metrics.tunDropped.Add(1)
-
-				continue
 			}
-
-			if e := try(func() { n.tun.write(p) }); e != nil {
-				failures = n.tunFailed("tun write", failures, e)
-
-				continue
-			}
-
-			failures = 0
 		}
 	})
 	go n.loop("control", n.controlLoop)
@@ -1917,34 +1903,11 @@ func (n *Node) routeData(view *Snapshot, d *Data, inner []byte) {
 	}
 }
 
-// The device is allowed to refuse one call and go on working: a signal, a queue
-// that filled up. It is not allowed to refuse every call, and a node whose only
-// device is really gone is better off dying than pretending otherwise.
-func (n *Node) tunFailed(what string, failures int, e *Exception) int {
-	if failures+1 >= tunAttempts {
-		e.throw()
-	}
-
-	n.log.Warn(what+" failed", "err", e, "attempt", failures+1)
-	time.Sleep(min(time.Duration(failures+1)*readRetry, time.Second))
-
-	return failures + 1
-}
-
 func (n *Node) readTun() {
 	buf := make([]byte, maxPacket)
-	failures := 0
 
 	for {
-		var packet []byte
-
-		if e := try(func() { packet = append([]byte(nil), n.tun.read(buf)...) }); e != nil {
-			failures = n.tunFailed("tun read", failures, e)
-
-			continue
-		}
-
-		failures = 0
+		packet := append([]byte(nil), n.tun.read(buf)...)
 
 		if destination := ipDestination(packet); destination != nil {
 			post(n.tunInbox.in, any(TunPacket{payload: packet, destination: destination}))

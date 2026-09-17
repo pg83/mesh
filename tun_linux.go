@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net"
 	"net/netip"
 
@@ -42,10 +43,27 @@ func (t *LinuxTun) route(prefix netip.Prefix) {
 	throw(netlink.RouteReplace(&netlink.Route{LinkIndex: t.link.Attrs().Index, Dst: prefixNet(prefix), Scope: netlink.SCOPE_LINK}))
 }
 
+// A read of the device is a raw system call, and a goroutine of this program is
+// interrupted by a signal often. That is the one failure worth another go; any
+// other means the device is gone, and there is nothing to wait for.
 func (t *LinuxTun) read(buf []byte) []byte {
-	throw(sys.check("tun read"))
+	n := 0
 
-	n := throw2(unix.Read(t.fd, buf))
+	for {
+		var err error
+
+		if err = sys.check("tun read"); err == nil {
+			n, err = unix.Read(t.fd, buf)
+		}
+
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+
+		throw(err)
+
+		break
+	}
 
 	return buf[:n]
 }
@@ -55,7 +73,19 @@ func (t *LinuxTun) write(packet []byte) {
 		return
 	}
 
-	throw(sys.check("tun write"))
+	for {
+		var err error
 
-	throw2(unix.Write(t.fd, packet))
+		if err = sys.check("tun write"); err == nil {
+			_, err = unix.Write(t.fd, packet)
+		}
+
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+
+		throw(err)
+
+		return
+	}
 }

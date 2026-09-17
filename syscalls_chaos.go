@@ -27,11 +27,14 @@ var faults = map[string]error{
 	"netstack":            syscall.EINVAL,
 	"routes":              syscall.EBUSY,
 	"socket read":         syscall.EIO,
-	"tun read":            syscall.EIO,
-	"tun write":           syscall.EIO,
-	"udp write":           syscall.EHOSTDOWN,
-	"ws read":             syscall.ECONNRESET,
-	"ws write":            syscall.EPIPE,
+	// What a device call is actually refused with: a signal arriving, which is
+	// worth another go. Anything else there means the device is gone, and the
+	// node is meant to die rather than pretend.
+	"tun read":  syscall.EINTR,
+	"tun write": syscall.EINTR,
+	"udp write": syscall.EHOSTDOWN,
+	"ws read":   syscall.ECONNRESET,
+	"ws write":  syscall.EPIPE,
 }
 
 // The same arming, but what comes of it is a wait rather than a refusal. Long
