@@ -66,9 +66,14 @@ def test():
         lab.run('i', ['ip', 'route', 'replace', lib.SUBNET, 'via', lab.nodes['f'].addresses[2]])
         return_path('f')
         lab.wait(reaches, 'internet host reached through the remaining exit', timeout=20)
-        # A route naming no live exit leaves packets unrouted.
+        # A route naming no live exit leaves packets unrouted: the client keeps
+        # reading them off its own device and drops them, having nowhere to send.
         lab.stop_node('f')
         lab.wait(lambda: not reaches(), 'no exit left', timeout=20)
+        unrouted = metric(lab, 'a', 'mesh_tun_unrouted_total')
+        lab.wait(lambda: reaches() or metric(lab, 'a', 'mesh_tun_unrouted_total') > unrouted,
+                 'packets for the internet go nowhere', timeout=20)
+        assert metric(lab, 'a', 'mesh_tun_unrouted_total') > unrouted
 
 
 lib.main(test)

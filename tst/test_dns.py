@@ -32,11 +32,13 @@ def test():
         assert ask(lab, 'a', service, '9.0.77.10.in-addr.arpa', qtype=12)[0] == 3
         assert ask(lab, 'a', service, 'example.com')[0] == 5
         assert ask(lab, 'a', service, '1.0.0.10.in-addr.arpa', qtype=12)[0] == 5
-        # Malformed queries are dropped: short, a response, two questions, a truncated
-        # name, a label over 63 bytes, a name too long; a wrong class and a bad octet
-        # in a reverse name are refused; a PTR name asked for another type is empty.
+        # Malformed queries are dropped: short, a response, two questions, a name
+        # cut mid-label, a name whose last label ends the packet with nothing to
+        # close it, a label over 63 bytes, a name too long; a wrong class and a
+        # bad octet in a reverse name are refused; a PTR name asked for another
+        # type is empty.
         q = query('b.mesh')
-        for bad in [q[:11], bytes([0, 7, 0x81]) + q[3:], q[:4] + b'\0\x02' + q[6:], q[:16], q[:12] + b'\x40' + b'x' * 64 + q[13:],
+        for bad in [q[:11], bytes([0, 7, 0x81]) + q[3:], q[:4] + b'\0\x02' + q[6:], q[:16], q[:14], q[:12] + b'\x40' + b'x' * 64 + q[13:],
                     q[:12] + b'\x01x' * 40 + q[12:]]:
             assert send(lab, 'a', service, bad, timeout=1) is None, bad.hex()
         assert parse(send(lab, 'a', service, q[:-2] + b'\0\x03'))[0] == 5

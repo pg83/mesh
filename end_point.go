@@ -106,27 +106,7 @@ func (e Vertex) url() string {
 }
 
 func compareVertex(a, b Vertex) int {
-	if v := cmp.Compare(a.Proto, b.Proto); v != 0 {
-		return v
-	}
-
-	ai, bi := a.ip().To4(), b.ip().To4()
-
-	if ai != nil && bi != nil {
-		for i := range ai {
-			if v := int(ai[i]) - int(bi[i]); v != 0 {
-				return v
-			}
-		}
-	} else if v := cmp.Compare(a.Addr, b.Addr); v != 0 {
-		return v
-	}
-
-	if v := cmp.Compare(a.Port, b.Port); v != 0 {
-		return v
-	}
-
-	return cmp.Compare(a.Path, b.Path)
+	return compareVertexKey(vertexKey(0, a), vertexKey(0, b))
 }
 
 func compareEdge(a, b Edge) int {
