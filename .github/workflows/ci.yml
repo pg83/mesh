@@ -253,7 +253,6 @@ jobs:
           python3 dev/merge_coverage.py \
             --output "$RUNNER_TEMP/coverage.out" \
             --minimum 98 \
-            --skip syscalls_chaos.go \
             "$RUNNER_TEMP"/profiles/mesh-coverage-go-*/coverage*.out | tee "$RUNNER_TEMP/summary.txt"
           {
             echo "## Coverage"

@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 
-def read(path, skip):
+def read(path):
     """A profile as {block: (statements, count)}. Identical blocks are counted
     once at the highest count seen, which is what running the same code twice
     means."""
@@ -15,13 +15,18 @@ def read(path, skip):
         if not line or line.startswith('mode:'):
             continue
         where, statements, count = line.rsplit(' ', 2)
-
-        if any(where.split(':')[0].endswith(name) for name in skip):
-            continue
-
         held = blocks.get(where, (0, 0))
         blocks[where] = (int(statements), max(int(count), held[1]))
     return blocks
+
+
+def files(blocks):
+    """The blocks of each file, so that profiles can be compared where they
+    describe the same file and carried over where only one of them does."""
+    out = {}
+    for where in blocks:
+        out.setdefault(where.split(':')[0], set()).add(where)
+    return out
 
 
 def share(blocks):
@@ -35,25 +40,25 @@ def main():
     parser.add_argument('profiles', nargs='+')
     parser.add_argument('--output', required=True)
     parser.add_argument('--minimum', type=float, default=0)
-    # A build that carries its own scaffolding, like the one that refuses
-    # system calls, measures files the others do not have. They are not the
-    # program and they have no place in what the program's coverage is.
-    parser.add_argument('--skip', action='append', default=[])
     args = parser.parse_args()
     merged = {}
     for path in args.profiles:
-        blocks = read(path, args.skip)
+        blocks = read(path)
 
         if not blocks:
             sys.exit(f'{path} carries no measured block')
 
-        # Every profile has a line for every block of the binary, run or not,
-        # so two profiles of the same source have the same blocks. Different
-        # blocks mean different sources, and adding those up would invent a
-        # number that describes neither.
-        if merged and set(blocks) != set(merged):
-            missing, extra = len(set(merged) - set(blocks)), len(set(blocks) - set(merged))
-            sys.exit(f'{path} was measured on other sources: {missing} blocks missing, {extra} unknown')
+        # Every profile has a line for every block of its binary, run or not,
+        # so where two profiles describe the same file they describe the same
+        # blocks. Blocks that differ mean the sources differ, and adding those
+        # up would invent a number that describes neither. A file only one
+        # binary contains, such as the scaffolding that refuses system calls,
+        # is carried over as it stands: it is code, and it is measured.
+        for name, held in files(merged).items():
+            found = files(blocks).get(name)
+
+            if found is not None and found != held:
+                sys.exit(f'{path} was measured on other sources: {name} has other blocks')
 
         covered, total, percent = share(blocks)
         print(f'{Path(path).name}: {percent}% ({covered}/{total} statements)')

@@ -1,15 +1,19 @@
 """One node is refused by the kernel at every turn it is meant to survive, and the mesh forms anyway."""
+import os
 import time
 
 import lib
 
-# Only the points a node has no right to die on. Against the ordinary binary
-# none of this means anything and the scenario is a plain two node mesh.
-# One scan of the interfaces is several calls and is retried as a whole, so the
-# period for those has to be well above the number of calls in a scan: a node
-# refused every other call never assembles a picture at all, which says nothing
-# about recovery and everything about the rate being wrong.
+# Only the points a node has no right to die on. One scan of the interfaces is
+# several calls and is retried as a whole, so the period for those has to be
+# well above the number of calls in a scan: a node refused every other call
+# never assembles a picture at all, which says nothing about recovery and
+# everything about the rate being wrong. Against the ordinary binary none of
+# this means anything and the scenario is a plain two node mesh.
 REFUSALS = ','.join([
+    # Everything is armed, most of it so rarely that a scenario this short
+    # never reaches it; the points below are the ones meant to be met.
+    'all:5000',
     'implicit socket:3',
     'interface addresses:20',
     'interface event:5',
@@ -56,6 +60,16 @@ def test():
                 lab.ports.pop((1, lib.ipbytes(address)), None)
 
         lab.wait_ping('a', 'b', timeout=30)
+        # The tool doing the refusing has to be strict about what it is told:
+        # a point that does not exist, or a rate of nothing, would leave a run
+        # quietly testing less than it says it does.
+        if os.environ.get('MESH_CHAOS'):
+            for spec, message in [('nonsense:5', 'unknown chaos point'),
+                                  ('tun read:0', 'needs a rate above zero')]:
+                result = lab.run('b', [lib.MESH, 'run', '-c', lab.dir / 'b.json'], check=False,
+                                 timeout=10, env={**os.environ, 'MESH_CHAOS': spec})
+
+                assert result.returncode != 0 and message in result.stderr, (spec, result.stderr)
 
 
 lib.main(test)
