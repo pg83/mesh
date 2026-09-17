@@ -45,13 +45,23 @@ var faults = map[string]error{
 	"ws write":  syscall.EPIPE,
 }
 
-// The same arming, but what comes of it is a wait rather than a refusal. Long
-// enough that whatever else the node is doing gets there first, short enough
-// that a scenario can afford a few of them.
-var pauses = map[string]time.Duration{
-	"dial pause":      time.Second,
-	"interface pause": 300 * time.Millisecond,
+// The same arming, but what comes of it is a wait rather than a refusal, and
+// what is waited for is another part of the node getting somewhere, not a
+// length of time. The node works off a tick, so waiting out two of them puts
+// whatever was in flight behind everything that tick does.
+type wait struct {
+	mark  string
+	times uint64
 }
+
+var pauses = map[string]wait{
+	"dial pause":      {"tick", 2},
+	"interface pause": {"tick", 1},
+}
+
+// Nothing waits for a mark that never comes: a node that stopped ticking has
+// bigger problems, and a scenario should hear about them rather than hang.
+const patience = 30 * time.Second
 
 func armChaos() {
 	sys = newChaos()
@@ -63,6 +73,9 @@ type Chaos struct {
 	rates    map[string]uint64
 	calls    sync.Map
 	announce sync.Once
+	mu       sync.Mutex
+	passed   *sync.Cond
+	marks    map[string]uint64
 }
 
 // MESH_CHAOS names the points to arm and how often each fails: "tun read:50"
@@ -78,7 +91,9 @@ func newChaos() Syscalls {
 		return OS{}
 	}
 
-	c := &Chaos{seed: 1, rates: map[string]uint64{}}
+	c := &Chaos{seed: 1, rates: map[string]uint64{}, marks: map[string]uint64{}}
+
+	c.passed = sync.NewCond(&c.mu)
 
 	if seed := os.Getenv("MESH_CHAOS_SEED"); seed != "" {
 		c.seed = uint64(throw2(strconv.ParseUint(seed, 10, 64)))
@@ -160,6 +175,14 @@ func (c *Chaos) failing(what string) error {
 	return faults[what]
 }
 
+// Passing a mark: whoever waits for it is counting these.
+func (c *Chaos) reached(mark string) {
+	c.mu.Lock()
+	c.marks[mark]++
+	c.mu.Unlock()
+	c.passed.Broadcast()
+}
+
 func (c *Chaos) pause(what string) {
 	call := c.due(what)
 
@@ -167,8 +190,28 @@ func (c *Chaos) pause(what string) {
 		return
 	}
 
-	slog.Warn("chaos", "at", what, "call", call, "waits", pauses[what])
-	time.Sleep(pauses[what])
+	until := pauses[what]
+
+	slog.Warn("chaos", "at", what, "call", call, "waits for", until.times, "of", until.mark)
+
+	give := time.Now().Add(patience)
+	timer := time.AfterFunc(patience, func() { c.passed.Broadcast() })
+
+	defer timer.Stop()
+
+	c.mu.Lock()
+
+	defer c.mu.Unlock()
+
+	for target := c.marks[until.mark] + until.times; c.marks[until.mark] < target; {
+		if time.Now().After(give) {
+			slog.Warn("chaos gave up waiting", "at", what, "for", until.mark)
+
+			return
+		}
+
+		c.passed.Wait()
+	}
 }
 
 // Where in the count of a point its refusals fall. Same seed, same places,

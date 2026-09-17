@@ -10,3 +10,6 @@ __pycache__/
 /e2e_*
 /chaos_*
 /chaos-binary
+/chaos-points
+/probe
+/quic

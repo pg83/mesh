@@ -1059,6 +1059,10 @@ func (n *Node) refresh(now time.Time) {
 
 	n.publishRecord()
 	n.rebuild()
+
+	// The node has done its round; whoever was told to wait for one is waiting
+	// for this.
+	sys.reached("tick")
 }
 
 func (n *Node) advertisements() []Advertisement {

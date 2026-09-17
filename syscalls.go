@@ -23,11 +23,14 @@ type Syscalls interface {
 	interfaceEvent(socket *os.File, buf []byte) error
 	accepts(listener net.Listener) net.Listener
 	check(what string) error
-	// Some of what a node has to survive is not a refusal but a delay: a dial
-	// that lands after the peer it was started for is gone, a picture of the
-	// interfaces that is already out of date when it is acted on. Widening
-	// those windows on purpose is the only way to walk what is behind them.
+	// Some of what a node has to survive is not a refusal but an order of
+	// events: a dial that lands after the peer it was started for is gone, a
+	// picture of the interfaces that is already out of date when it is acted
+	// on. Those windows are microseconds wide and nothing can walk into them
+	// on purpose, so one side waits for the other to pass a mark rather than
+	// waiting for a length of time, which would depend on the machine.
 	pause(what string)
+	reached(what string)
 }
 
 // What the calls go to. The chaos build puts its own in front of this one when
@@ -66,3 +69,5 @@ func (OS) check(string) error {
 }
 
 func (OS) pause(string) {}
+
+func (OS) reached(string) {}
