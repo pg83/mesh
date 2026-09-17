@@ -126,8 +126,6 @@ CHAOS_POINTS = ",".join([
     "interfaces:200",
     "routes:100",
     "socket read:1000",
-    "tun read:5000",
-    "tun write:5000",
     "udp write:2000",
 ])
 

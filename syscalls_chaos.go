@@ -30,8 +30,12 @@ var faults = map[string]error{
 	// What a device call is actually refused with: a signal arriving, which is
 	// worth another go. Anything else there means the device is gone, and the
 	// node is meant to die rather than pretend.
-	"tun read":  syscall.EINTR,
-	"tun write": syscall.EINTR,
+	// An interrupted call is the standard library's business and never reaches
+	// the node, so a refusal of the device here means the device is gone. A
+	// node is meant to die of that, which is why these two are armed in the
+	// scenario that expects the death and nowhere else.
+	"tun read":  syscall.EIO,
+	"tun write": syscall.EIO,
 	"udp write": syscall.EHOSTDOWN,
 	"ws read":   syscall.ECONNRESET,
 	"ws write":  syscall.EPIPE,

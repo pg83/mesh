@@ -64,12 +64,24 @@ def test():
         # a point that does not exist, or a rate of nothing, would leave a run
         # quietly testing less than it says it does.
         if os.environ.get('MESH_CHAOS'):
+            # A device that refuses is not something to sit through: the node
+            # says what happened and stops, rather than running without one.
+            lab.stop_node('b')
+            result = lab.run('b', [lib.MESH, 'run', '-c', lab.dir / 'b.json'], check=False, timeout=20,
+                             env={**os.environ, 'MESH_CHAOS': 'tun read:1'})
+
+            assert result.returncode != 0 and 'input/output error' in result.stderr, result
+
+            lab.start_node('b')
+            lab.wait_ping('a', 'b', timeout=45)
+
             for spec, message in [('nonsense:5', 'unknown chaos point'),
                                   ('tun read:0', 'needs a rate above zero')]:
                 result = lab.run('b', [lib.MESH, 'run', '-c', lab.dir / 'b.json'], check=False,
                                  timeout=10, env={**os.environ, 'MESH_CHAOS': spec})
 
                 assert result.returncode != 0 and message in result.stderr, (spec, result.stderr)
+
 
 
 lib.main(test)

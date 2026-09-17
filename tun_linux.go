@@ -1,9 +1,9 @@
 package main
 
 import (
-	"errors"
 	"net"
 	"net/netip"
+	"os"
 
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -14,7 +14,10 @@ const defaultTun = "mesh0"
 type Tun = LinuxTun
 
 type LinuxTun struct {
-	fd   int
+	// Through a file rather than the descriptor: a read of a device is
+	// interrupted by signals often enough that the standard library keeps a
+	// loop for it, and there is no reason to write that loop again here.
+	file *os.File
 	link netlink.Link
 }
 
@@ -36,36 +39,17 @@ func openTun(name string, intip [4]byte, subnet string, mtu int) *LinuxTun {
 	throw(netlink.LinkSetUp(link))
 	throw(unix.IoctlSetInt(fd, unix.TUNSETPERSIST, 1))
 
-	return &LinuxTun{fd: fd, link: link}
+	return &LinuxTun{file: os.NewFile(uintptr(fd), name), link: link}
 }
 
 func (t *LinuxTun) route(prefix netip.Prefix) {
 	throw(netlink.RouteReplace(&netlink.Route{LinkIndex: t.link.Attrs().Index, Dst: prefixNet(prefix), Scope: netlink.SCOPE_LINK}))
 }
 
-// A read of the device is a raw system call, and a goroutine of this program is
-// interrupted by a signal often. That is the one failure worth another go; any
-// other means the device is gone, and there is nothing to wait for.
 func (t *LinuxTun) read(buf []byte) []byte {
-	n := 0
+	throw(sys.check("tun read"))
 
-	for {
-		var err error
-
-		if err = sys.check("tun read"); err == nil {
-			n, err = unix.Read(t.fd, buf)
-		}
-
-		if errors.Is(err, unix.EINTR) {
-			continue
-		}
-
-		throw(err)
-
-		break
-	}
-
-	return buf[:n]
+	return buf[:throw2(t.file.Read(buf))]
 }
 
 func (t *LinuxTun) write(packet []byte) {
@@ -73,19 +57,6 @@ func (t *LinuxTun) write(packet []byte) {
 		return
 	}
 
-	for {
-		var err error
-
-		if err = sys.check("tun write"); err == nil {
-			_, err = unix.Write(t.fd, packet)
-		}
-
-		if errors.Is(err, unix.EINTR) {
-			continue
-		}
-
-		throw(err)
-
-		return
-	}
+	throw(sys.check("tun write"))
+	throw2(t.file.Write(packet))
 }
