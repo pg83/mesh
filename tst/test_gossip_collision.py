@@ -1,4 +1,6 @@
-"""Two vectors of one version listing different records: the second is news, not an echo of the first."""
+"""Two vectors of one version listing different records: one is an echo of what is held, the other is not."""
+import time
+
 import lib
 import work_load as workload
 
@@ -14,27 +16,37 @@ def test():
         for name in ['b', 'c']:
             lab.wait_ping('a', name)
         lab.wait_ping('b', 'c')
-        # a is replaced by a peer that says whatever it is told to. What it
-        # talks about is c, which stays where it is: a vector of a node that
-        # went away would be dropped rather than compared.
+        # a is replaced by a peer that says what it is told. What it talks about
+        # is c, which stays where it is: the vector of a node that went away
+        # would be dropped rather than compared.
         probe = workload.Probe(lab, 'a', 'b')
-        lab.wait(lambda: any(v['owner'] == 3 for v in lab.status('b')['vectors']), 'b holds a vector for c')
-        held = next(v for v in lab.status('b')['vectors'] if v['owner'] == 3)
-        records = dict(held['records'])
 
-        # The same version listing the same records is an echo of what b holds.
-        before = stale(lab, 'b')
-        probe.send(op='versions', body=[dict(owner=3, version=held['version'], records=records)])
-        lab.wait(lambda: stale(lab, 'b') > before, 'a vector b already holds is counted as stale')
+        def vector():
+            return next((v for v in lab.status('b')['vectors'] if v['owner'] == 3), None)
 
-        # The same version listing something else is not an echo: one version
-        # can be reached by different routes, and what it lists has to be read.
-        echoed = stale(lab, 'b')
-        changed = dict(records, **{'2': records.get('2', 0) + 1})
-        probe.send(op='versions', body=[dict(owner=3, version=held['version'], records=changed)])
-        lab.wait_ping('b', 'c')
+        lab.wait(vector, 'b holds a vector for c')
 
-        assert stale(lab, 'b') == echoed, 'a vector listing other records was taken for an echo'
+        # Both bundles carry the version b holds: the first lists what b holds
+        # too and is an echo, the second lists something else and is not. A
+        # vector that moved under the attempt would be answering by age
+        # instead, so that attempt says nothing and another is made.
+        for _ in range(10):
+            held = vector()
+            before = stale(lab, 'b')
+            changed = dict(held['records'], **{'2': held['records'].get('2', 0) + 1})
+
+            probe.send(op='versions', body=[dict(owner=3, version=held['version'], records=dict(held['records']))])
+            probe.send(op='versions', body=[dict(owner=3, version=held['version'], records=changed)])
+            time.sleep(0.5)
+
+            if vector() != held:
+                continue
+
+            assert stale(lab, 'b') == before + 1, 'of two vectors of one version, exactly the echo is stale'
+
+            break
+        else:
+            raise AssertionError('the vector never stood still for one attempt')
 
 
 lib.main(test)
