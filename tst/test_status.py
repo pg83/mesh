@@ -124,6 +124,9 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         lab.configs['a'] = {}
         lab.start_node('a')
         lab.wait_links('a', [])
+        lab.wait(lambda: lab.outgoing_channel('a', lab.nodes['a'].addresses[1],
+                                             target=lab.nodes['b'].addresses[1]),
+                 'a has an outgoing channel while traffic is blocked')
         lab.unblock('a', 'b')
         lab.wait_ping('a', 'b', timeout=4)
 
