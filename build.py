@@ -182,7 +182,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         env["MESH_TEST_WEB_COVERAGE"] = "$(B)/coverage-web.info"
         outputs.append(env["MESH_TEST_WEB_COVERAGE"])
 
-    inputs = [test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), *(["$(S)/tst/dns.py"] if test_name.startswith("dns") else []), "$(S)/tst/lib.py", "$(S)/tst/work_load.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat", "nat_punch") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])]
+    inputs = [test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), *(["$(S)/tst/dns.py"] if test_name.startswith("dns") else []), "$(S)/tst/lib.py", "$(S)/tst/work_load.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "nat_lan", "quic_nat", "nat_punch") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])]
     helpers = [probe] if test_name in NEEDS_PROBE else [quic] if test_name.startswith("quic") else []
 
     # The same scenario against a daemon the kernel refuses now and then. The
@@ -223,7 +223,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
 
     e2e_tests.append(command(
         name=f"e2e_{test_name}",
-        inputs=[test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), *(["$(S)/tst/dns.py"] if test_name.startswith("dns") else []), "$(S)/tst/lib.py", "$(S)/tst/work_load.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat", "nat_punch") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])],
+        inputs=[test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), *(["$(S)/tst/dns.py"] if test_name.startswith("dns") else []), "$(S)/tst/lib.py", "$(S)/tst/work_load.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "nat_lan", "quic_nat", "nat_punch") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])],
         outputs=outputs,
         deps=[mesh, probe] if test_name in NEEDS_PROBE else [mesh, quic] if test_name.startswith("quic") else [mesh],
         cmd=[
