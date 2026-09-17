@@ -27,6 +27,12 @@ import (
 const (
 	tickInterval   = time.Second
 	sessionTimeout = 5 * time.Second
+
+	// How long the node waits before asking again for something the kernel
+	// refused it: the interface list once, a socket read for every failure in
+	// a row, so that a socket which is truly broken cannot spin.
+	interfaceRetry = time.Second
+	readRetry      = 10 * time.Millisecond
 )
 
 type LocalAddress struct {
@@ -42,6 +48,7 @@ type Node struct {
 	log           *slog.Logger
 	subnet        *net.IPNet
 	sockets       map[SocketKey]*UDPSocket
+	relisten      bool
 	listeners     map[string]*WSListener
 	listenerIDs   map[Vertex]uint32
 	counter       uint32
@@ -93,8 +100,13 @@ type UDPSource struct {
 
 func (n *Node) reachable(src InterfaceAddress, target Vertex) bool {
 	route := n.routeCache[target.Addr]
+	lifetime := routeTTL
 
-	if route == nil || (!route.pending && time.Since(route.at) >= routeTTL) {
+	if route != nil && route.partial {
+		lifetime = interfaceRetry
+	}
+
+	if route == nil || (!route.pending && time.Since(route.at) >= lifetime) {
 		if route == nil {
 			route = &Route{host: target.Addr}
 			n.routeCache[target.Addr] = route
@@ -143,7 +155,17 @@ func (n *Node) resolveRoute(host string, ifaces []int) {
 
 	for _, iface := range ifaces {
 		for _, ip := range route.targets {
-			if routeViable(iface, ip) {
+			viable, err := routeViable(iface, ip)
+
+			if err != nil {
+				n.log.Warn("route lookup failed", "interface", iface, "target", ip.String(), "err", err)
+
+				route.partial = true
+
+				continue
+			}
+
+			if viable {
 				route.viable[iface] = true
 			}
 		}
@@ -1030,6 +1052,10 @@ func (n *Node) scanLocal(addresses InterfaceState) map[uint32]*LocalAddress {
 }
 
 func (n *Node) refresh(now time.Time) {
+	if n.relisten {
+		n.syncListeners(n.interfaces)
+	}
+
 	n.syncLocal()
 
 	for edge, received := range n.observed {
@@ -1113,7 +1139,7 @@ func (n *Node) describe(id uint32) string {
 }
 
 func (n *Node) interfaceAddresses() (InterfaceState, error) {
-	interfaces, err := net.Interfaces()
+	interfaces, err := sys.interfaces()
 
 	if err != nil {
 		return nil, err
@@ -1126,12 +1152,15 @@ func (n *Node) interfaceAddresses() (InterfaceState, error) {
 			continue
 		}
 
-		addrs, err := iface.Addrs()
+		addrs, err := sys.addresses(iface)
 
 		if err != nil {
-			n.log.Debug("interface addresses unavailable", "interface", iface.Name, "err", err)
-
-			continue
+			// Not being able to read an interface's addresses is not the same
+			// as that interface having none. Handing back a state with them
+			// missing would close every socket bound to them and drop every
+			// channel through them, so the whole scan fails instead and the
+			// node keeps what it knew until the next attempt.
+			return nil, err
 		}
 
 		for _, addr := range addrs {
@@ -1168,7 +1197,7 @@ func (n *Node) watchInterfaces() {
 		buf := make([]byte, 65536)
 
 		for {
-			if err := readInterfaceEvent(socket, buf); err != nil {
+			if err := sys.interfaceEvent(socket, buf); err != nil {
 				n.log.Warn("interface notification lost", "err", err)
 				time.Sleep(time.Second)
 			}
@@ -1190,8 +1219,21 @@ func (n *Node) watchInterfaces() {
 		current, err := n.interfaceAddresses()
 
 		if err != nil {
+			// A scan that fails leaves the node with whatever it knew before,
+			// and at startup that is nothing at all: no address to listen on
+			// and none to dial from. Ask again shortly instead of sitting out
+			// the whole period.
 			n.log.Warn("interface scan failed", "err", err)
-		} else if !slices.Equal(previous, current) {
+
+			select {
+			case <-changed:
+			case <-time.After(interfaceRetry):
+			}
+
+			continue
+		}
+
+		if !slices.Equal(previous, current) {
 			post(n.events.in, any(current))
 			previous = current
 		}
@@ -1265,6 +1307,7 @@ func (n *Node) udpSource(src InterfaceAddress) *UDPSource {
 }
 
 func (n *Node) syncListeners(addresses InterfaceState) {
+	n.relisten = false
 	present := map[string]bool{}
 
 	for _, addr := range addresses {
@@ -1339,7 +1382,14 @@ func (n *Node) syncListeners(addresses InterfaceState) {
 				key = &SocketKey{addr: addr.ip.String(), port: socket.port, ipv6: addr.ip.Is6()}
 				n.sockets[*key] = socket
 				go n.loop("UDP listener", func() { n.discoverUDP(socket) })
-			}).catch(func(e *Exception) { n.log.Debug("implicit UDP socket failed", "address", addr.ip.String(), "err", e) })
+			}).catch(func(e *Exception) {
+				// The addresses are only looked at again when they change,
+				// which may be never. A socket that could not be opened this
+				// time is asked for again on the next tick instead.
+				n.relisten = true
+
+				n.log.Debug("implicit UDP socket failed", "address", addr.ip.String(), "err", e)
+			})
 		}
 
 		if key != nil {
@@ -1521,14 +1571,29 @@ func (n *Node) discoverUDP(socket *UDPSocket) {
 		}
 	}()
 
+	failures := 0
+
 	for {
-		size, dst, addr, err := socket.read(buf)
+		size, dst, addr, err := sys.readSocket(socket, buf)
 
 		if errors.Is(err, net.ErrClosed) {
 			return
 		}
 
-		throw(err)
+		if err != nil {
+			// A datagram socket can fail one read and go on working: a queue
+			// that filled up, a signal, an ICMP error arriving for something
+			// sent earlier. None of that is a reason to take the node down,
+			// which is what an exception out of this loop would do.
+			failures++
+
+			n.log.Warn("socket read failed", "port", socket.port, "err", err)
+			time.Sleep(min(time.Duration(failures)*readRetry, time.Second))
+
+			continue
+		}
+
+		failures = 0
 
 		if size < headerTransport || dst == nil {
 			continue
@@ -1634,7 +1699,7 @@ func (n *Node) listenWS(config ListenerBinding) string {
 	}
 
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
-	listener := net.Listener(throw2(net.Listen(key.network("tcp"), address)))
+	listener := sys.accepts(throw2(net.Listen(key.network("tcp"), address)))
 
 	if proto == "wss" {
 		loaded := map[string]bool{}

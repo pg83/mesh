@@ -43,6 +43,8 @@ func (t *LinuxTun) route(prefix netip.Prefix) {
 }
 
 func (t *LinuxTun) read(buf []byte) []byte {
+	throw(sys.check("tun read"))
+
 	n := throw2(unix.Read(t.fd, buf))
 
 	return buf[:n]

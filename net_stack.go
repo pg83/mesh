@@ -57,6 +57,10 @@ func newNetstack(n *Node, mtu int, addresses [][4]byte) *Netstack {
 }
 
 func netstackCheck(what string, err tcpip.Error) {
+	if err == nil && sys.check("netstack") != nil {
+		err = &tcpip.ErrAborted{}
+	}
+
 	if err != nil {
 		throwFmt("netstack %s: %v", what, err)
 	}

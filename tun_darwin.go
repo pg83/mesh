@@ -72,6 +72,8 @@ func darwinCommand(command string, args ...string) {
 }
 
 func (t *DarwinTun) read(buf []byte) []byte {
+	throw(sys.check("tun read"))
+
 	for {
 		n := throw2(t.file.Read(buf))
 

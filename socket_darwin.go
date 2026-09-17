@@ -46,7 +46,13 @@ func socketInterface(fd, iface int, v6 bool) error {
 	return unix.SetsockoptInt(fd, unix.IPPROTO_IP, unix.IP_BOUND_IF, iface)
 }
 
-func routeViable(iface int, ip netip.Addr) bool {
+// Whether this interface has a route to that address, and whether the question
+// could be answered at all.
+func routeViable(iface int, ip netip.Addr) (bool, error) {
+	if failed := sys.check("routes"); failed != nil {
+		return false, failed
+	}
+
 	dialer := net.Dialer{Control: udpControl(iface)}
 	conn, err := dialer.Dial("udp", net.JoinHostPort(ip.String(), "9"))
 
@@ -54,5 +60,5 @@ func routeViable(iface int, ip netip.Addr) bool {
 		conn.Close()
 	}
 
-	return err == nil
+	return err == nil, nil
 }

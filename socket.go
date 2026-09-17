@@ -2,7 +2,6 @@ package main
 
 import (
 	"cmp"
-	"context"
 	"errors"
 	"io"
 	"net"
@@ -54,8 +53,12 @@ func newUDPSocket(key SocketKey, implicit bool) *UDPSocket {
 		guard = udpGuard(key)
 	}
 
+	if implicit {
+		throw(sys.check("implicit socket"))
+	}
+
 	lc := net.ListenConfig{Control: udpControl(0)}
-	udp := throw2(lc.ListenPacket(context.Background(), key.network("udp"), net.JoinHostPort(key.addr, strconv.Itoa(int(key.port))))).(*net.UDPConn)
+	udp := throw2(sys.listenPacket(lc, key.network("udp"), net.JoinHostPort(key.addr, strconv.Itoa(int(key.port))))).(*net.UDPConn)
 
 	throw(udp.SetReadBuffer(1 << 20))
 

@@ -16,6 +16,8 @@ type LinuxUDPWriter struct {
 }
 
 func (u *LinuxUDPWriter) writePacket(packet []byte) {
+	throw(sys.check("udp write"))
+
 	if u.local.address.ipv6() {
 		control := &ipv6.ControlMessage{Src: u.local.address.ip(), IfIndex: u.local.iface}
 

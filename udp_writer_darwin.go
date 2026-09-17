@@ -13,5 +13,6 @@ type DarwinUDPWriter struct {
 }
 
 func (u *DarwinUDPWriter) writePacket(packet []byte) {
+	throw(sys.check("udp write"))
 	throw2(u.conn.WriteToUDP(packet, u.remote))
 }

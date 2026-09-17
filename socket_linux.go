@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"net"
 	"net/netip"
 	"strconv"
@@ -25,18 +26,22 @@ func socketInterface(fd, iface int, v6 bool) error {
 	}).asError()
 }
 
-func routeViable(iface int, ip netip.Addr) bool {
+// Whether this interface has a route to that address, and whether the question
+// could be answered at all. A kernel that will not show its routing table is
+// saying nothing about the route, which is not the same as saying there is
+// none.
+func routeViable(iface int, ip netip.Addr) (bool, error) {
 	routes, err := netlink.RouteList(nil, unix.AF_INET)
 
-	if err != nil {
-		return false
+	if failed := cmp.Or(err, sys.check("routes")); failed != nil {
+		return false, failed
 	}
 
 	for _, route := range routes {
 		if route.LinkIndex == iface && (route.Dst == nil || route.Dst.Contains(ip.AsSlice())) {
-			return true
+			return true, nil
 		}
 	}
 
-	return false
+	return false, nil
 }
