@@ -140,6 +140,13 @@ quic = command(
     color="cyan",
 )
 
+# The scenarios that put a hand written peer where a node would be.
+NEEDS_PROBE = (
+    "echo", "gossip_binary", "gossip_collision", "gossip_record", "gossip_stale", "graph_exchange",
+    "protocol", "registry_binary", "replay", "route_attachment", "route_payload",
+    "ws_channels", "ws_loop_back", "ws_outgoing", "ws_protocol", "ws_proxy", "ws_source",
+)
+
 e2e_tests = []
 chaos_tests = []
 coverage_dirs = []
@@ -176,7 +183,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         outputs.append(env["MESH_TEST_WEB_COVERAGE"])
 
     inputs = [test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), *(["$(S)/tst/dns.py"] if test_name.startswith("dns") else []), "$(S)/tst/lib.py", "$(S)/tst/work_load.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat", "nat_punch") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])]
-    helpers = [probe] if test_name in ("echo", "protocol", "gossip_binary", "gossip_record", "replay", "registry_binary", "gossip_stale", "graph_exchange", "route_attachment", "ws_proxy", "ws_protocol", "ws_outgoing", "ws_loop_back", "ws_channels", "ws_source", "route_payload") else [quic] if test_name.startswith("quic") else []
+    helpers = [probe] if test_name in NEEDS_PROBE else [quic] if test_name.startswith("quic") else []
 
     # The same scenario against a daemon the kernel refuses now and then. The
     # seed comes from the name, so a point that breaks breaks again on a rerun.
@@ -218,7 +225,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         name=f"e2e_{test_name}",
         inputs=[test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), *(["$(S)/tst/dns.py"] if test_name.startswith("dns") else []), "$(S)/tst/lib.py", "$(S)/tst/work_load.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat", "nat_punch") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])],
         outputs=outputs,
-        deps=[mesh, probe] if test_name in ("echo", "protocol", "gossip_binary", "gossip_record", "replay", "registry_binary", "gossip_stale", "graph_exchange", "route_attachment", "ws_proxy", "ws_protocol", "ws_outgoing", "ws_loop_back", "ws_channels", "ws_source", "route_payload") else [mesh, quic] if test_name.startswith("quic") else [mesh],
+        deps=[mesh, probe] if test_name in NEEDS_PROBE else [mesh, quic] if test_name.startswith("quic") else [mesh],
         cmd=[
             *prelude,
             ["python3", test_path],

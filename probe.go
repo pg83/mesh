@@ -9,11 +9,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"github.com/coder/websocket"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 )
@@ -175,6 +177,20 @@ func main() {
 			}
 
 			out = session.seal(from, kindGraph, compress(encodeRecord(record.Owner, record.Version, recordFlags(&record), encodeRecordBody(&record))), packetID)
+		case "versions":
+			var vectors []Vector
+
+			throw(json.Unmarshal(command.Body, &vectors))
+
+			items := []vectorItem{}
+
+			for i := range vectors {
+				for _, owner := range slices.Sorted(maps.Keys(vectors[i].Records)) {
+					items = append(items, vectorItem{vector: &vectors[i], owner: owner, version: vectors[i].Records[owner]})
+				}
+			}
+
+			out = session.seal(from, kindVersions, compress(encodeBundle(items)), packetID)
 		case "open":
 			origin, inner, ok := session.open(throw2(hex.DecodeString(command.Hex)))
 			report := map[string]any{"opened": ok, "hex": hex.EncodeToString(inner), "source": origin, "kind": packetKind(throw2(hex.DecodeString(command.Hex)))}
