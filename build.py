@@ -230,10 +230,24 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         color="green",
     ))
 
+# A point that is armed but never consulted refuses nothing and says nothing.
+chaos_points = command(
+    name="chaos-points",
+    inputs=[*GO_SOURCES, "$(S)/dev/chaos_points.py"],
+    outputs=["$(B)/chaos-points.stamp"],
+    cmd=[
+        ["python3", "$(S)/dev/chaos_points.py"],
+        touch("$(B)/chaos-points.stamp"),
+    ],
+    cwd="$(S)",
+    descr="KO",
+    color="red",
+)
+
 group("install", mesh)
 group("e2e", *e2e_tests)
 group("test", *e2e_tests)
-group("chaos", *chaos_tests)
+group("chaos", chaos_points, *chaos_tests)
 
 if COVERAGE:
     chaos_coverage = command(

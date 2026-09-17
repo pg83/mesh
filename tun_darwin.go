@@ -88,6 +88,8 @@ func (t *DarwinTun) write(packet []byte) {
 		return
 	}
 
+	throw(sys.check("tun write"))
+
 	out := make([]byte, 4, len(packet)+4)
 	family := uint32(unix.AF_INET)
 

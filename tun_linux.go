@@ -55,5 +55,7 @@ func (t *LinuxTun) write(packet []byte) {
 		return
 	}
 
+	throw(sys.check("tun write"))
+
 	throw2(unix.Write(t.fd, packet))
 }
