@@ -74,6 +74,14 @@ func newChaos() Syscalls {
 	}
 
 	for _, item := range strings.Split(spec, ",") {
+		// A scenario whose subject is something else says so by taking a point
+		// away, rather than by spelling out the whole list again.
+		if stripped, found := strings.CutPrefix(item, "-"); found {
+			delete(c.rates, stripped)
+
+			continue
+		}
+
 		name, rate := item, uint64(100)
 
 		if at := strings.LastIndex(item, ":"); at >= 0 {

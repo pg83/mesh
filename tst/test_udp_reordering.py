@@ -1,11 +1,24 @@
 """Real UDP traffic tolerates reordered packets and rejects corrupted ciphertext."""
 
+import os
+
 import lib
 import work_load as workload
 
+# What this scenario is about is the order datagrams arrive in, and it counts
+# every one of them. A refusal that drops one answers a question it is not
+# asking, so those points are taken away here and left armed everywhere else.
+LOSSY = ['socket read', 'udp write', 'tun read', 'tun write']
+
 
 def test():
-    with lib.Lab(['a', 'b'], {1: ['a', 'b']}) as lab:
+    lab = lib.Lab(['a', 'b'], {1: ['a', 'b']})
+
+    if spec := os.environ.get('MESH_CHAOS'):
+        quiet = spec + ''.join(f',-{point}' for point in LOSSY)
+        lab.node_env = {name: {'MESH_CHAOS': quiet} for name in lab.nodes}
+
+    with lab:
         lab.wait_ping('a', 'b')
         log = workload.udp_server(lab, 'b')
         client = workload.UdpClient(lab, 'a', 'b')
