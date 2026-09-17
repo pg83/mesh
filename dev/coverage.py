@@ -10,7 +10,10 @@ import sys
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', required=True)
-    parser.add_argument('--minimum', type=float, default=98)
+    # One suite is one part of what the daemon does, and the paths a refused
+    # daemon walks are not in this one at all. What the whole of it has to
+    # clear is checked where the runs are added up, in dev/merge_coverage.py.
+    parser.add_argument('--minimum', type=float, default=95)
     parser.add_argument('dirs', nargs='+')
     args = parser.parse_args()
     directories = []

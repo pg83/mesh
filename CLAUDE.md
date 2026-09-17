@@ -47,6 +47,7 @@ gossip map on every node, source routing through any node, IP over TUN.
   tst/test_quic.py runs four clients for 30 seconds in every CI e2e run.
 - Keep the same SSH/TCP process alive across failover assertions. Reconnecting
   a client is not a successful migration test.
-- Coverage requires counters for every daemon run and at least 95% overall.
+- Coverage requires counters for every daemon run. One suite has to clear 95%;
+  the 98% floor is on the runs added up, in the aggregate job.
 - The browser records which lines of `web/app.js` it ran into
   `.build/coverage-web.info`; `dev/web_coverage.py` holds that floor at 80%.
