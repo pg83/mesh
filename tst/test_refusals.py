@@ -72,6 +72,14 @@ def test():
 
             assert result.returncode != 0 and 'input/output error' in result.stderr, result
 
+            # A listener named in the configuration is not optional: refused
+            # the address it was told to take, the node stops rather than
+            # running where nobody can reach it.
+            result = lab.run('b', [lib.MESH, 'run', '-c', lab.dir / 'b.json'], check=False, timeout=20,
+                             env={**os.environ, 'MESH_CHAOS': 'listen packet:1'})
+
+            assert result.returncode != 0 and 'cannot assign requested address' in result.stderr, result
+
             # The stack a node serves its own address from is built once, at
             # the start, and only by a node that serves something there. One
             # that cannot build it says so instead of coming up half made.

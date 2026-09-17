@@ -1284,11 +1284,10 @@ func (n *Node) udpSource(src InterfaceAddress) *UDPSource {
 			continue
 		}
 
+		// Every local vertex is a listener the node holds open: one that cannot
+		// be opened stops the node there and then, so there is no such thing
+		// here as a vertex without its socket.
 		socket := n.udpSocketFor(local.address)
-
-		if socket == nil {
-			continue
-		}
 
 		if best == nil || (best.socket.implicit && !socket.implicit) || (best.socket.implicit == socket.implicit && compareVertex(vertex, best.vertex) < 0) {
 			best = &UDPSource{socket: socket, local: local, vertex: vertex}
