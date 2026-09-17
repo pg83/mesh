@@ -8,3 +8,5 @@ __pycache__/
 /node_ownership_gen.go
 /coverage
 /e2e_*
+/chaos_*
+/chaos-binary

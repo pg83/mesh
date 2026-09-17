@@ -25,6 +25,13 @@ gossip map on every node, source routing through any node, IP over TUN.
   suite: the binary is instrumented and each daemon run gets its own
   `GOCOVERDIR`. A mesh node exits cleanly on SIGTERM so those counters
   actually reach disk; killing it with SIGKILL loses them.
+- `./build chaos` runs every scenario again against `mesh-chaos`, the same
+  daemon built behind the `meshchaos` tag. Its `Syscalls` implementation
+  refuses some calls the way the kernel is entitled to. `MESH_CHAOS` names the
+  points and how often each fails, `MESH_CHAOS_SEED` makes the choice
+  repeatable, and only `mesh run` is ever armed. Every call into the operating
+  system that can fail belongs in `syscalls.go`; network faults still belong to
+  the switch in `tst/lib.py`.
 - `./lint.sh` before committing style-sensitive changes.
 
 - Application tests require ssh/sshd/ssh-keygen/scp, rsync, curl, iperf3 and openssl

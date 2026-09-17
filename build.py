@@ -1,5 +1,6 @@
 import build
 import os
+import zlib
 
 build.flags.allow({
     "coverage": {
@@ -87,6 +88,36 @@ probe = command(
     color="cyan",
 )
 
+# The same daemon, built to be refused by the operating system now and then.
+# Only the points a node is meant to survive are armed by default; the ones a
+# node is meant to die on are named in the scenarios that expect the death.
+chaos_binary = command(
+    name="chaos-binary",
+    inputs=GO_INPUTS,
+    outputs=["$(B)/bin/mesh-chaos"],
+    cmd=["go", "build", "-trimpath", "-tags=meshchaos", "-o", "$(B)/bin/mesh-chaos", "."],
+    cwd="$(S)",
+    env=GO_ENV,
+    descr="GO",
+    color="cyan",
+)
+
+# How often each point is refused, as one call in so many. A scan of the
+# interfaces is made of several calls and the whole scan is retried when any of
+# them fails, so those two are rare on purpose: a node that can never read its
+# own interfaces is not a node under test, it is a node that is broken.
+CHAOS_POINTS = ",".join([
+    "implicit socket:20",
+    "interface addresses:200",
+    "interface event:30",
+    "interfaces:200",
+    "routes:100",
+    "socket read:1000",
+    "tun read:5000",
+    "tun write:5000",
+    "udp write:2000",
+])
+
 quic = command(
     name="quic",
     inputs=GO_INPUTS,
@@ -99,6 +130,7 @@ quic = command(
 )
 
 e2e_tests = []
+chaos_tests = []
 coverage_dirs = []
 for test_path in build.glob("$(S)/tst/test_*.py"):
     test_name = test_path.rsplit("/", 1)[-1][len("test_"):-len(".py")]
@@ -131,6 +163,32 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
         env["MESH_TEST_WEB_COVERAGE"] = "$(B)/coverage-web.info"
         outputs.append(env["MESH_TEST_WEB_COVERAGE"])
 
+    inputs = [test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), *(["$(S)/tst/dns.py"] if test_name.startswith("dns") else []), "$(S)/tst/lib.py", "$(S)/tst/work_load.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat", "nat_punch") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])]
+    helpers = [probe] if test_name in ("echo", "protocol", "gossip_binary", "gossip_record", "replay", "registry_binary", "gossip_stale", "graph_exchange", "route_attachment", "ws_proxy", "ws_protocol", "ws_outgoing", "ws_loop_back", "ws_channels", "ws_source", "route_payload") else [quic] if test_name.startswith("quic") else []
+
+    # The same scenario against a daemon the kernel refuses now and then. The
+    # seed comes from the name, so a point that breaks breaks again on a rerun.
+    chaos_stamp = f"$(B)/chaos/{test_name}.stamp"
+    chaos_tests.append(command(
+        name=f"chaos_{test_name}",
+        inputs=inputs,
+        outputs=[chaos_stamp],
+        deps=[chaos_binary, *helpers],
+        cmd=[
+            ["python3", test_path],
+            touch(chaos_stamp),
+        ],
+        cwd="$(S)",
+        env={
+            **{k: v for k, v in env.items() if k not in ("GOCOVERDIR", "MESH_TEST_WEB_COVERAGE")},
+            "MESH_TEST_BINARY": chaos_binary.outputs[0],
+            "MESH_CHAOS": CHAOS_POINTS,
+            "MESH_CHAOS_SEED": str(zlib.crc32(test_name.encode()) % 100000),
+        },
+        descr="KO",
+        color="red",
+    ))
+
     e2e_tests.append(command(
         name=f"e2e_{test_name}",
         inputs=[test_path, *(["$(S)/tst/browser.py"] if test_name == "web" else []), *(["$(S)/tst/dns.py"] if test_name.startswith("dns") else []), "$(S)/tst/lib.py", "$(S)/tst/work_load.py", "$(S)/tst/program.py", *(["$(S)/tst/nat.py"] if test_name in ("nat", "quic_nat", "nat_punch") else []), *(["$(S)/tst/ws.py"] if "ws" in test_name else [])],
@@ -150,6 +208,7 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
 group("install", mesh)
 group("e2e", *e2e_tests)
 group("test", *e2e_tests)
+group("chaos", *chaos_tests)
 
 if COVERAGE:
     coverage = command(

@@ -1,0 +1,182 @@
+//go:build meshchaos
+
+package main
+
+import (
+	"log/slog"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+)
+
+// What this build is allowed to invent, and the name the kernel gives it. A
+// point that is not listed here cannot be armed, so a typo in the environment
+// stops the node instead of quietly testing nothing.
+var faults = map[string]error{
+	"accept":              syscall.EMFILE,
+	"interface addresses": syscall.EMFILE,
+	"interface event":     syscall.ENOBUFS,
+	"implicit socket":     syscall.EADDRNOTAVAIL,
+	"interfaces":          syscall.EMFILE,
+	"listen packet":       syscall.EADDRNOTAVAIL,
+	"netstack":            syscall.EINVAL,
+	"routes":              syscall.EBUSY,
+	"socket read":         syscall.EIO,
+	"tun read":            syscall.EIO,
+	"tun write":           syscall.EIO,
+	"udp write":           syscall.EHOSTDOWN,
+}
+
+var sys Syscalls = newChaos()
+
+type Chaos struct {
+	OS
+	seed     uint64
+	rates    map[string]uint64
+	calls    sync.Map
+	announce sync.Once
+}
+
+// MESH_CHAOS names the points to arm and how often each fails: "tun read:50"
+// fails one call in fifty, "all:200" arms everything at that rate. Which call
+// fails is decided by the seed and the number of the call, never by a clock or
+// a race, so the same seed breaks the same calls in the same places.
+func newChaos() Syscalls {
+	spec := os.Getenv("MESH_CHAOS")
+
+	if spec == "" || len(os.Args) < 2 || os.Args[1] != "run" {
+		return OS{}
+	}
+
+	c := &Chaos{seed: 1, rates: map[string]uint64{}}
+
+	if seed := os.Getenv("MESH_CHAOS_SEED"); seed != "" {
+		c.seed = uint64(throw2(strconv.ParseUint(seed, 10, 64)))
+	}
+
+	for _, item := range strings.Split(spec, ",") {
+		name, rate := item, uint64(100)
+
+		if at := strings.LastIndex(item, ":"); at >= 0 {
+			name, rate = item[:at], throw2(strconv.ParseUint(item[at+1:], 10, 64))
+		}
+
+		if rate == 0 {
+			throwFmt("chaos point %q needs a rate above zero", name)
+		}
+
+		if name == "all" {
+			for point := range faults {
+				c.rates[point] = rate
+			}
+
+			continue
+		}
+
+		if _, known := faults[name]; !known {
+			throwFmt("unknown chaos point %q", name)
+		}
+
+		c.rates[name] = rate
+	}
+
+	return c
+}
+
+func (c *Chaos) failing(what string) error {
+	rate := c.rates[what]
+
+	if rate == 0 {
+		return nil
+	}
+
+	counter, _ := c.calls.LoadOrStore(what, &atomic.Uint64{})
+	call := counter.(*atomic.Uint64).Add(1)
+
+	c.announce.Do(func() { slog.Warn("chaos armed", "seed", c.seed, "points", len(c.rates)) })
+
+	if mix(c.seed, what, call)%rate != 0 {
+		return nil
+	}
+
+	slog.Warn("chaos", "at", what, "call", call, "err", faults[what])
+
+	return faults[what]
+}
+
+// The decision for one call of one point: same seed, same answer, whatever
+// order the goroutines happen to run in.
+func mix(seed uint64, what string, call uint64) uint64 {
+	hash := seed ^ 14695981039346656037
+
+	for _, b := range append([]byte(what), byte(call), byte(call>>8), byte(call>>16), byte(call>>24)) {
+		hash = (hash ^ uint64(b)) * 1099511628211
+	}
+
+	return hash >> 7
+}
+
+func (c *Chaos) interfaces() ([]net.Interface, error) {
+	if err := c.failing("interfaces"); err != nil {
+		return nil, err
+	}
+
+	return c.OS.interfaces()
+}
+
+func (c *Chaos) addresses(iface net.Interface) ([]net.Addr, error) {
+	if err := c.failing("interface addresses"); err != nil {
+		return nil, err
+	}
+
+	return c.OS.addresses(iface)
+}
+
+func (c *Chaos) listenPacket(config net.ListenConfig, network, address string) (net.PacketConn, error) {
+	if err := c.failing("listen packet"); err != nil {
+		return nil, err
+	}
+
+	return c.OS.listenPacket(config, network, address)
+}
+
+func (c *Chaos) readSocket(socket *UDPSocket, buf []byte) (int, net.IP, net.Addr, error) {
+	if err := c.failing("socket read"); err != nil {
+		return 0, nil, nil, err
+	}
+
+	return c.OS.readSocket(socket, buf)
+}
+
+func (c *Chaos) interfaceEvent(socket *os.File, buf []byte) error {
+	if err := c.failing("interface event"); err != nil {
+		return err
+	}
+
+	return c.OS.interfaceEvent(socket, buf)
+}
+
+func (c *Chaos) accepts(listener net.Listener) net.Listener {
+	return ChaosListener{Listener: listener, chaos: c}
+}
+
+func (c *Chaos) check(what string) error {
+	return c.failing(what)
+}
+
+type ChaosListener struct {
+	net.Listener
+	chaos *Chaos
+}
+
+func (l ChaosListener) Accept() (net.Conn, error) {
+	if err := l.chaos.failing("accept"); err != nil {
+		return nil, err
+	}
+
+	return l.Listener.Accept()
+}

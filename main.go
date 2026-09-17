@@ -11,6 +11,8 @@ import (
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
+	slog.SetDefault(log)
+
 	if len(os.Args) < 2 {
 		printUsage()
 		os.Exit(1)
