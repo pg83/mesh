@@ -179,6 +179,9 @@ class Lab:
         self.configs = {}
         self.run_args = {}
         self.node_env = {}
+        # Wraps the daemon's command line, for a node that has to run in an
+        # environment the lab cannot set from the outside.
+        self.node_prefix = {}
         self.coverage_dirs = []
         for seg, names in segments.items():
             for name in names:
@@ -579,7 +582,8 @@ class Lab:
                 env.pop(key, None)
             else:
                 env[key] = value
-        node.proc = self.spawn(name, [MESH, 'run', '-c', self.write_config(node), *self.run_args.get(name, [])], name, env=env)
+        argv = [MESH, 'run', '-c', self.write_config(node), *self.run_args.get(name, [])]
+        node.proc = self.spawn(name, [*self.node_prefix.get(name, []), *argv], name, env=env)
 
     def stop_node(self, name):
         node = self.nodes[name]

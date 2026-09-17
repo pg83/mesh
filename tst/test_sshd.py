@@ -21,6 +21,8 @@ class Ring(lib.Lab):
             self.run_args[node.name] += ['-sshd-port', '2222']
         if node.name == 'c':
             self.run_args[node.name] += ['-sshd', '-tun', '-sshd-authorized-keys', str(self.dir / 'authorized_keys')]
+        if node.name == 'd':
+            self.run_args[node.name] += ['-sshd']
 
     def registry(self):
         peers = super().registry()
@@ -30,7 +32,20 @@ class Ring(lib.Lab):
 
 
 def test():
-    lab = Ring(['a', 'b', 'c'], {1: ['a', 'b', 'c']}, statics=['c'])
+    lab = Ring(['a', 'b', 'c', 'd'], {1: ['a', 'b', 'c', 'd']}, statics=['c'])
+    # d runs where the system cannot name its own account: an empty passwd file
+    # of its own, which is a host with a user database it cannot reach.
+    # d runs on a host whose user database it cannot read: its own account is
+    # not in there, and the one account that is has no groups to be found,
+    # because there is no file of groups at all.
+    lab.node_prefix['d'] = [
+        'unshare', '-m', 'sh', '-c',
+        'mount -t tmpfs tmpfs /etc && printf "weird:x:4242:4242::/tmp:/bin/sh\\n" > /etc/passwd && exec "$@"',
+        'sh',
+    ]
+    # Without these the library names the account from the environment instead
+    # of the database, and the database is the point.
+    lab.node_env['d'] = dict(USER=None, HOME=None, SHELL=None, LOGNAME=None)
     lab.configs['b'] = dict(sshd=True)
     # b runs without HOME and SHELL: sessions fall back to / and the login shell of the account.
     lab.node_env['b'] = dict(HOME=None, SHELL=None)
@@ -40,13 +55,13 @@ def test():
         lab.wait_ping('a', 'b')
         lab.wait_ping('a', 'c')
         known = lab.dir / 'known_hosts'
-        known.write_text(''.join(f'{lib.intip(lab.nodes[name].index)} {(lab.dir / f"{name}.ssh.pub").read_text()}' for name in 'bc'))
+        known.write_text(''.join(f'{lib.intip(lab.nodes[name].index)} {(lab.dir / f"{name}.ssh.pub").read_text()}' for name in 'bcd'))
         base = ['ssh', '-F', '/dev/null', '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes',
                 '-o', f'UserKnownHostsFile={known}', '-o', 'ConnectTimeout=10']
 
-        def ssh(command, *options, key='a.ssh', port=2222, target='b', **kwargs):
+        def ssh(command, *options, key='a.ssh', port=2222, target='b', user='root', **kwargs):
             kwargs.setdefault('stdin', subprocess.DEVNULL)
-            argv = base + ['-i', lab.dir / key, '-p', str(port), *options, 'root@' + lib.intip(lab.nodes[target].index)]
+            argv = base + ['-i', lab.dir / key, '-p', str(port), *options, user + '@' + lib.intip(lab.nodes[target].index)]
             return lab.run('a', argv + ([command] if command is not None else []), check=False, timeout=30, **kwargs)
 
         result = ssh('echo hello; id -u; echo $HOME')
@@ -78,6 +93,17 @@ def test():
         assert result.stdout == 'via-flag\n' + os.environ['HOME'] + '\n', result
         result = ssh('echo guest', key='guest.ssh', port=22, target='c')
         assert result.stdout == 'guest\n', result
+        # The account of the node that cannot read a user database is its own
+        # number, and a session there gets the shell of last resort.
+        lab.wait(lambda: lab.route('a', 'd'), 'a has a route to d')
+        result = ssh('echo $0', port=22, target='d', user='0')
+        assert result.returncode == 0 and result.stdout.strip().endswith('sh'), result
+        assert ssh('true', port=22, target='d').returncode == 255, 'root is not a name it knows'
+        # An account the database describes in a way that cannot be used: the
+        # session ends and the node goes on serving.
+        assert ssh('true', port=22, target='d', user='weird').returncode == 255
+        result = ssh('echo still-here', port=22, target='d', user='0')
+        assert result.returncode == 0 and result.stdout.strip() == 'still-here', result
         # Keys outside the ring and unknown users are refused; the host key is the node key.
         assert ssh('true', key='guest.ssh').returncode == 255
         result = lab.run('a', base + ['-i', lab.dir / 'a.ssh', '-p', '2222', 'nosuchuser@' + lib.intip(2), 'true'], check=False, timeout=30)
