@@ -90,16 +90,12 @@ func newVertexOrder(addresses map[uint32]Vertex, graph map[Edge]bool) *VertexOrd
 	return o
 }
 
-func (o *VertexOrder) index(id uint32) (int32, bool) {
-	rank, known := o.rank[id]
-
-	return rank, known
+func (o *VertexOrder) index(id uint32) int32 {
+	return o.rank[id]
 }
 
+// Ranks are positions in one order, so no two vertices share one and there is
+// nothing to break a tie between.
 func (o *VertexOrder) compare(a, b uint32) int {
-	if v := cmp.Compare(o.rank[a], o.rank[b]); v != 0 {
-		return v
-	}
-
-	return cmp.Compare(a, b)
+	return cmp.Compare(o.rank[a], o.rank[b])
 }

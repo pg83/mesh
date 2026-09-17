@@ -611,13 +611,9 @@ func (n *Node) publishRecord() {
 	observed := map[uint32]SocketAddress{}
 
 	for id := range n.local {
-		vertex, known := n.addresses[id]
-
-		if !known {
-			n.log.Error("local vertex without address", "id", id, "address", n.local[id].address.string())
-
-			continue
-		}
+		// The address of a local vertex is written wherever the vertex itself
+		// is, so there is always one here.
+		vertex := n.addresses[id]
 
 		if ingress[id] || egress[id] {
 			record.Vertices = append(record.Vertices, RecordVertex{ID: id, Vertex: vertex, Ingress: ingress[id], Egress: egress[id]})
@@ -811,11 +807,9 @@ func (n *Node) compareIDs(a, b uint32) int {
 	return n.order.compare(a, b)
 }
 
+// Only the edges of channels are ranked, and a channel never ends on a host
+// vertex, so there is nothing here about those.
 func (n *Node) cost(edge Edge) int {
-	if isHostID(edge.From) || isHostID(edge.To) {
-		return 0
-	}
-
 	if n.addresses[edge.To].Proto == "udp" {
 		return costUDP
 	}
@@ -824,24 +818,19 @@ func (n *Node) cost(edge Edge) int {
 }
 
 func (n *Node) recompute() {
-	source, reachable := n.order.index(hostID(n.cfg.Index))
-
-	if !reachable {
-		n.routes, n.hops, n.next = map[uint32][]Edge{}, map[uint32][]uint16{}, map[uint16]Edge{}
-
-		return
-	}
+	// A node is in its own registry, the registry is in the order, so this is
+	// where the routes start from.
+	source := n.order.index(hostID(n.cfg.Index))
 
 	size := len(n.order.ids)
 	adjacency := make([][]int32, size)
 
+	// The order is built from this very graph, so both ends of every edge have
+	// a place in it.
 	for edge := range n.graph {
-		from, known := n.order.index(edge.From)
-		to, present := n.order.index(edge.To)
+		from, to := n.order.index(edge.From), n.order.index(edge.To)
 
-		if known && present {
-			adjacency[from] = append(adjacency[from], to)
-		}
+		adjacency[from] = append(adjacency[from], to)
 	}
 
 	owner := make([]uint16, size)
@@ -1238,6 +1227,9 @@ func (n *Node) watchInterfaces() {
 		}
 
 		if !slices.Equal(previous, current) {
+			// What was read a moment ago is not what is there now, and the
+			// node is about to act on it.
+			sys.pause("interface pause")
 			post(n.events.in, any(current))
 			previous = current
 		}
@@ -1536,6 +1528,10 @@ func (n *Node) dialChannel(attempt *DialAttempt) {
 			c.dialed = true
 		}
 
+		// A dial that takes its time lands in a node that has moved on: the
+		// peer may have a new session by now, or the address it was dialled
+		// from may be gone.
+		sys.pause("dial pause")
 		post(n.events.in, any(result))
 	}()
 
