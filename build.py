@@ -95,7 +95,13 @@ chaos_binary = command(
     name="chaos-binary",
     inputs=GO_INPUTS,
     outputs=["$(B)/bin/mesh-chaos"],
-    cmd=["go", "build", "-trimpath", "-tags=meshchaos", "-o", "$(B)/bin/mesh-chaos", "."],
+    cmd=[
+        "go", "build",
+        "-trimpath",
+        "-tags=meshchaos",
+        *(["-cover", "-covermode=atomic"] if COVERAGE else []),
+        "-o", "$(B)/bin/mesh-chaos", ".",
+    ],
     cwd="$(S)",
     env=GO_ENV,
     descr="GO",
@@ -132,6 +138,7 @@ quic = command(
 e2e_tests = []
 chaos_tests = []
 coverage_dirs = []
+chaos_coverage_dirs = []
 for test_path in build.glob("$(S)/tst/test_*.py"):
     test_name = test_path.rsplit("/", 1)[-1][len("test_"):-len(".py")]
     test_stamp = f"$(B)/tests/{test_name}.stamp"
@@ -169,22 +176,35 @@ for test_path in build.glob("$(S)/tst/test_*.py"):
     # The same scenario against a daemon the kernel refuses now and then. The
     # seed comes from the name, so a point that breaks breaks again on a rerun.
     chaos_stamp = f"$(B)/chaos/{test_name}.stamp"
+    chaos_env = {
+        **{k: v for k, v in env.items() if k not in ("GOCOVERDIR", "MESH_TEST_WEB_COVERAGE")},
+        "MESH_TEST_BINARY": chaos_binary.outputs[0],
+        "MESH_CHAOS": CHAOS_POINTS,
+        "MESH_CHAOS_SEED": str(zlib.crc32(test_name.encode()) % 100000),
+    }
+    chaos_outputs = [chaos_stamp]
+    chaos_prelude = []
+
+    # What the refusals walk is exactly what the plain suite cannot reach, so
+    # these counters are worth keeping apart and reading on their own.
+    if COVERAGE:
+        chaos_env["GOCOVERDIR"] = f"$(B)/coverage-chaos/{test_name}"
+        chaos_prelude = [mkdir(chaos_env["GOCOVERDIR"])]
+        chaos_coverage_dirs.append(chaos_env["GOCOVERDIR"])
+        chaos_outputs.append(chaos_env["GOCOVERDIR"])
+
     chaos_tests.append(command(
         name=f"chaos_{test_name}",
         inputs=inputs,
-        outputs=[chaos_stamp],
+        outputs=chaos_outputs,
         deps=[chaos_binary, *helpers],
         cmd=[
+            *chaos_prelude,
             ["python3", test_path],
             touch(chaos_stamp),
         ],
         cwd="$(S)",
-        env={
-            **{k: v for k, v in env.items() if k not in ("GOCOVERDIR", "MESH_TEST_WEB_COVERAGE")},
-            "MESH_TEST_BINARY": chaos_binary.outputs[0],
-            "MESH_CHAOS": CHAOS_POINTS,
-            "MESH_CHAOS_SEED": str(zlib.crc32(test_name.encode()) % 100000),
-        },
+        env=chaos_env,
         descr="KO",
         color="red",
     ))
@@ -211,6 +231,18 @@ group("test", *e2e_tests)
 group("chaos", *chaos_tests)
 
 if COVERAGE:
+    chaos_coverage = command(
+        name="coverage-chaos",
+        inputs=["$(S)/dev/coverage.py"],
+        outputs=["$(B)/coverage-chaos.out"],
+        deps=chaos_tests,
+        cmd=["python3", "$(S)/dev/coverage.py", "--output", "$(B)/coverage-chaos.out", "--minimum", "0", *chaos_coverage_dirs],
+        cwd="$(S)",
+        env=GO_ENV,
+        descr="CV",
+        color="magenta",
+    )
+
     coverage = command(
         name="coverage",
         inputs=["$(S)/dev/coverage.py"],
