@@ -85,7 +85,18 @@ def rejected_status():
             assert not thread.is_alive()
 
 
+def links_before_gossip():
+    lab = lib.Lab(['a', 'b'], {1: ['a', 'b']})
+    lab.intercept('b', 'a', 'drop', kind=1, count=-1)
+    with lab:
+        lab.wait_links('a', ['b'])
+        state = lab.status('a')
+        assert any(link['from']['proto'] == 'unknown' for link in state['links']), state['links']
+        assert lab.links('a') == {lab.nodes['b'].index}
+
+
 def test():
+    links_before_gossip()
     with lib.Lab(['a', 'b'], {1: ['a', 'b']}) as lab:
         lab.wait_ping('a', 'b')
         fragmented_status()

@@ -700,7 +700,7 @@ class Lab:
             response.begin()
             return response.status, dict(response.getheaders()), response.read()
 
-    def status(self, name):
+    def raw_status(self, name):
         """Asks the node itself, from inside its namespace."""
         try:
             code, _, data = self.http(name, '/status')
@@ -708,7 +708,10 @@ class Lab:
                 raise OSError(f'control HTTP {code}')
         except OSError as error:
             raise OSError(f'{name}: status failed: {error}') from error
-        status = json.loads(data)
+        return json.loads(data)
+
+    def status(self, name):
+        status = self.raw_status(name)
         descriptors = status['addresses']
         def describe(ident):
             # A vertex whose owner's record has not arrived yet has an id but no description.
@@ -722,9 +725,7 @@ class Lab:
         return status
 
     def links(self, name):
-        by_address = {address:node.index for node in self.nodes.values() for address in node.addresses.values()}
-        return {by_address[endpoint_address(link['from'])] for link in self.status(name)['links']
-                if endpoint_address(link['from']) in by_address}
+        return {vertex_owner(link['from']) for link in self.raw_status(name)['links']}
 
     def wait_links(self, name, peers, timeout=15):
         want = {self.nodes[p].index for p in peers}
