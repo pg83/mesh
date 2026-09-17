@@ -19,7 +19,7 @@ def asked_in(paths):
     points = set()
     for path in paths:
         source = path.read_text()
-        points |= set(re.findall(r'sys\.check\("([^"]+)"\)', source))
+        points |= set(re.findall(r'sys\.(?:check|pause)\("([^"]+)"\)', source))
         points |= set(re.findall(r'(?:failing|check)\("([^"]+)"\)', source))
     return points
 

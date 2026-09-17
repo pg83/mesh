@@ -23,7 +23,17 @@ type Syscalls interface {
 	interfaceEvent(socket *os.File, buf []byte) error
 	accepts(listener net.Listener) net.Listener
 	check(what string) error
+	// Some of what a node has to survive is not a refusal but a delay: a dial
+	// that lands after the peer it was started for is gone, a picture of the
+	// interfaces that is already out of date when it is acted on. Widening
+	// those windows on purpose is the only way to walk what is behind them.
+	pause(what string)
 }
+
+// What the calls go to. The chaos build puts its own in front of this one when
+// the program arms it, which it does inside the error handling of main so that
+// a spec the tool cannot read stops the program the way any bad setting does.
+var sys Syscalls = OS{}
 
 type OS struct{}
 
@@ -54,3 +64,5 @@ func (OS) accepts(listener net.Listener) net.Listener {
 func (OS) check(string) error {
 	return nil
 }
+
+func (OS) pause(string) {}

@@ -118,6 +118,8 @@ chaos_binary = command(
 # own interfaces is not a node under test, it is a node that is broken.
 CHAOS_POINTS = ",".join([
     "accept:500",
+    "dial pause:20",
+    "interface pause:10",
     "implicit socket:20",
     "interface addresses:200",
     "interface event:30",

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 // What this build is allowed to invent, and the name the kernel gives it. A
@@ -33,7 +34,17 @@ var faults = map[string]error{
 	"ws write":            syscall.EPIPE,
 }
 
-var sys Syscalls = newChaos()
+// The same arming, but what comes of it is a wait rather than a refusal. Long
+// enough that whatever else the node is doing gets there first, short enough
+// that a scenario can afford a few of them.
+var pauses = map[string]time.Duration{
+	"dial pause":      time.Second,
+	"interface pause": 300 * time.Millisecond,
+}
+
+func armChaos() {
+	sys = newChaos()
+}
 
 type Chaos struct {
 	OS
@@ -52,7 +63,7 @@ type Chaos struct {
 func newChaos() Syscalls {
 	spec := os.Getenv("MESH_CHAOS")
 
-	if spec == "" || len(os.Args) < 2 || os.Args[1] != "run" {
+	if spec == "" {
 		return OS{}
 	}
 
@@ -78,10 +89,17 @@ func newChaos() Syscalls {
 				c.rates[point] = rate
 			}
 
+			for point := range pauses {
+				c.rates[point] = rate
+			}
+
 			continue
 		}
 
-		if _, known := faults[name]; !known {
+		_, refuses := faults[name]
+		_, waits := pauses[name]
+
+		if !refuses && !waits {
 			throwFmt("unknown chaos point %q", name)
 		}
 
@@ -91,11 +109,12 @@ func newChaos() Syscalls {
 	return c
 }
 
-func (c *Chaos) failing(what string) error {
+// Whether this call of this point is the one to be interfered with.
+func (c *Chaos) due(what string) uint64 {
 	rate := c.rates[what]
 
 	if rate == 0 {
-		return nil
+		return 0
 	}
 
 	counter, _ := c.calls.LoadOrStore(what, &atomic.Uint64{})
@@ -104,12 +123,33 @@ func (c *Chaos) failing(what string) error {
 	c.announce.Do(func() { slog.Warn("chaos armed", "seed", c.seed, "points", len(c.rates)) })
 
 	if (call+mix(c.seed, what, 0))%rate != 0 {
+		return 0
+	}
+
+	return call
+}
+
+func (c *Chaos) failing(what string) error {
+	call := c.due(what)
+
+	if call == 0 {
 		return nil
 	}
 
 	slog.Warn("chaos", "at", what, "call", call, "err", faults[what])
 
 	return faults[what]
+}
+
+func (c *Chaos) pause(what string) {
+	call := c.due(what)
+
+	if call == 0 {
+		return
+	}
+
+	slog.Warn("chaos", "at", what, "call", call, "waits", pauses[what])
+	time.Sleep(pauses[what])
 }
 
 // Where in the count of a point its refusals fall. Same seed, same places,

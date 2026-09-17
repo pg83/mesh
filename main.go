@@ -21,6 +21,8 @@ func main() {
 	try(func() {
 		switch os.Args[1] {
 		case "run":
+			armChaos()
+
 			fs := flag.NewFlagSet("run", flag.ExitOnError)
 			config := fs.String("c", "", "config file")
 			keyFile := fs.String("key-file", "", "private key file (base64 seed or OpenSSH Ed25519)")
