@@ -30,6 +30,9 @@ def test():
     # of its own, which is one more thing the kernel can refuse.
     lab.configs['b'] = dict(endpoint=[lib.endpoint(lib.segaddr(1, 2))])
     lab.node_env['b'] = {'MESH_CHAOS': REFUSALS, 'MESH_CHAOS_SEED': '11'}
+    # a runs the very same binary with nothing armed, which is how the ordinary
+    # one behaves and has to keep behaving.
+    lab.node_env['a'] = {'MESH_CHAOS': None}
     with lab:
         # It takes longer than a healthy node would, and it happens.
         lab.wait_ping('a', 'b', timeout=45)
@@ -79,6 +82,13 @@ def test():
                              env={**os.environ, 'MESH_CHAOS': 'listen packet:1'})
 
             assert result.returncode != 0 and 'cannot assign requested address' in result.stderr, result
+
+            # Something that panics with a value that is not an exception of
+            # ours must take the node down rather than be swallowed.
+            result = lab.run('b', [lib.MESH, 'run', '-c', lab.dir / 'b.json'], check=False, timeout=20,
+                             env={**os.environ, 'MESH_CHAOS': 'panic:1'})
+
+            assert result.returncode != 0 and 'panic' in result.stderr, result
 
             # The stack a node serves its own address from is built once, at
             # the start, and only by a node that serves something there. One

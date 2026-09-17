@@ -117,9 +117,9 @@ chaos_binary = command(
 # them fails, so those two are rare on purpose: a node that can never read its
 # own interfaces is not a node under test, it is a node that is broken.
 CHAOS_POINTS = ",".join([
-    "accept:500",
-    "dial pause:20",
-    "interface pause:10",
+    "accept:5",
+    "dial pause:5",
+    "interface pause:3",
     "implicit socket:20",
     "interface addresses:200",
     "interface event:30",

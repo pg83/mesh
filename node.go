@@ -1041,6 +1041,8 @@ func (n *Node) scanLocal(addresses InterfaceState) map[uint32]*LocalAddress {
 }
 
 func (n *Node) refresh(now time.Time) {
+	throw(sys.check("panic"))
+
 	if n.relisten {
 		n.syncListeners(n.interfaces)
 	}

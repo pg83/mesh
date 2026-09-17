@@ -18,13 +18,17 @@ import (
 // point that is not listed here cannot be armed, so a typo in the environment
 // stops the node instead of quietly testing nothing.
 var faults = map[string]error{
-	"accept":              syscall.EMFILE,
+	"accept": syscall.EMFILE,
+	// The same call refused for good rather than for a moment: the server
+	// retries what the kernel calls temporary and gives up on the rest.
+	"accept lost":         syscall.EINVAL,
 	"interface addresses": syscall.EMFILE,
 	"interface event":     syscall.ENOBUFS,
 	"implicit socket":     syscall.EADDRNOTAVAIL,
 	"interfaces":          syscall.EMFILE,
 	"listen packet":       syscall.EADDRNOTAVAIL,
 	"netstack":            syscall.EINVAL,
+	"panic":               syscall.EIO,
 	"routes":              syscall.EBUSY,
 	"socket read":         syscall.EIO,
 	// What a device call is actually refused with: a signal arriving, which is
@@ -223,7 +227,14 @@ func (c *Chaos) accepts(listener net.Listener) net.Listener {
 	return ChaosListener{Listener: listener, chaos: c}
 }
 
+// The one point that does not refuse but explodes. Something panicking with a
+// value that is not an exception of ours is the one thing the catch in throw.go
+// must not swallow, and nothing else can produce one.
 func (c *Chaos) check(what string) error {
+	if what == "panic" && c.due(what) != 0 {
+		panic("chaos: a panic that is not ours")
+	}
+
 	return c.failing(what)
 }
 
@@ -234,6 +245,10 @@ type ChaosListener struct {
 
 func (l ChaosListener) Accept() (net.Conn, error) {
 	if err := l.chaos.failing("accept"); err != nil {
+		return nil, err
+	}
+
+	if err := l.chaos.failing("accept lost"); err != nil {
 		return nil, err
 	}
 
