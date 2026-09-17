@@ -3,17 +3,18 @@ import time
 
 import lib
 
-# Only the points a node has no right to die on, refused often enough that the
-# node meets them rather than might. Every socket it opens for an address of
-# its own is refused outright: it has to work with the ones it already has.
-# Against the ordinary binary none of this means anything and the scenario is a
-# plain two node mesh.
+# Only the points a node has no right to die on. Against the ordinary binary
+# none of this means anything and the scenario is a plain two node mesh.
+# One scan of the interfaces is several calls and is retried as a whole, so the
+# period for those has to be well above the number of calls in a scan: a node
+# refused every other call never assembles a picture at all, which says nothing
+# about recovery and everything about the rate being wrong.
 REFUSALS = ','.join([
-    'implicit socket:1',
-    'interface addresses:2',
-    'interface event:2',
-    'interfaces:2',
-    'routes:2',
+    'implicit socket:3',
+    'interface addresses:20',
+    'interface event:5',
+    'interfaces:20',
+    'routes:5',
     'socket read:20',
     'udp write:20',
 ])

@@ -108,7 +108,11 @@ chaos_binary = command(
     color="cyan",
 )
 
-# How often each point is refused, as one call in so many. A scan of the
+# How often each point is refused, as one call in so many, and it is every
+# so-manyth call rather than a chance. Breaking a websocket connection is not
+# here: it is a normal event for that transport, but a scenario that asserts a
+# working connection is never replaced cannot survive one, so those points are
+# armed in tst/test_refusals_ws.py instead. A scan of the
 # interfaces is made of several calls and the whole scan is retried when any of
 # them fails, so those two are rare on purpose: a node that can never read its
 # own interfaces is not a node under test, it is a node that is broken.

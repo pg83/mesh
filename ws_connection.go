@@ -13,6 +13,7 @@ type WSConnection struct {
 }
 
 func writeWS(ctx context.Context, conn *websocket.Conn, p []byte) {
+	throw(sys.check("ws write"))
 	throw(conn.Write(ctx, websocket.MessageBinary, p))
 }
 
@@ -32,6 +33,8 @@ func newWSConnection(socket *websocket.Conn, session *Session, edge Edge, source
 
 		try(func() {
 			for {
+				throw(sys.check("ws read"))
+
 				kind, packet := throw3(socket.Read(ctx))
 
 				if kind != websocket.MessageBinary {
@@ -62,6 +65,8 @@ func newWSConnection(socket *websocket.Conn, session *Session, edge Edge, source
 }
 
 func readWS(ctx context.Context, conn *websocket.Conn) []byte {
+	throw(sys.check("ws read"))
+
 	kind, packet := throw3(conn.Read(ctx))
 
 	if kind != websocket.MessageBinary {

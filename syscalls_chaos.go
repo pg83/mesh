@@ -29,6 +29,8 @@ var faults = map[string]error{
 	"tun read":            syscall.EIO,
 	"tun write":           syscall.EIO,
 	"udp write":           syscall.EHOSTDOWN,
+	"ws read":             syscall.ECONNRESET,
+	"ws write":            syscall.EPIPE,
 }
 
 var sys Syscalls = newChaos()
@@ -42,9 +44,11 @@ type Chaos struct {
 }
 
 // MESH_CHAOS names the points to arm and how often each fails: "tun read:50"
-// fails one call in fifty, "all:200" arms everything at that rate. Which call
-// fails is decided by the seed and the number of the call, never by a clock or
-// a race, so the same seed breaks the same calls in the same places.
+// refuses one call in fifty, "all:200" arms everything at that rate. It is
+// every fiftieth call, not a call with one chance in fifty: a run that makes
+// the calls gets the refusals rather than possibly getting none of them. The
+// seed decides which of the fifty, never a clock and never a race, so the same
+// seed breaks the same calls wherever the goroutines happen to run.
 func newChaos() Syscalls {
 	spec := os.Getenv("MESH_CHAOS")
 
@@ -99,7 +103,7 @@ func (c *Chaos) failing(what string) error {
 
 	c.announce.Do(func() { slog.Warn("chaos armed", "seed", c.seed, "points", len(c.rates)) })
 
-	if mix(c.seed, what, call)%rate != 0 {
+	if (call+mix(c.seed, what, 0))%rate != 0 {
 		return nil
 	}
 
@@ -108,8 +112,8 @@ func (c *Chaos) failing(what string) error {
 	return faults[what]
 }
 
-// The decision for one call of one point: same seed, same answer, whatever
-// order the goroutines happen to run in.
+// Where in the count of a point its refusals fall. Same seed, same places,
+// whatever order the goroutines happen to run in.
 func mix(seed uint64, what string, call uint64) uint64 {
 	hash := seed ^ 14695981039346656037
 
