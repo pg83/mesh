@@ -72,6 +72,14 @@ def test():
 
             assert result.returncode != 0 and 'input/output error' in result.stderr, result
 
+            # The stack a node serves its own address from is built once, at
+            # the start, and only by a node that serves something there. One
+            # that cannot build it says so instead of coming up half made.
+            result = lab.run('b', [lib.MESH, 'run', '-c', lab.dir / 'b.json', '-dns'], check=False, timeout=20,
+                             env={**os.environ, 'MESH_CHAOS': 'netstack:1'})
+
+            assert result.returncode != 0 and 'netstack' in result.stderr, result
+
             lab.start_node('b')
             lab.wait_ping('a', 'b', timeout=45)
 
