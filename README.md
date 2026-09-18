@@ -5,14 +5,26 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/pg83/mesh)](go.mod)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Private overlay network for a closed set of nodes. Every node has a key and
-a fixed address in the mesh subnet; nodes find each other through a shared
-registry, connect over UDP or WebSocket (plain or TLS), encrypt every packet
-with keys derived from the pair's public keys, and route IP traffic between
-their TUN devices, relaying through other nodes when there is no direct
-path. Nodes behind NAT reach each other through any common peer; no STUN or
-coordination server is involved. There is no handshake: the first packet
-already carries data.
+Private overlay network for your lab, servers and laptops: known peers,
+stable addresses and encrypted links, direct or relayed.
+
+- **Names that survive host failures:** magic DNS, split DNS and wildcard
+  service pools such as `"*.lab": ["lab1", "lab2", "lab3"]`, returning reachable nodes.
+- **All your networks:** multiple NICs, Wi-Fi, Ethernet and internet uplinks,
+  with automatic roaming and failover.
+- **A full VPN:** subnet routes and internet access through exit nodes.
+- **Connectivity across networks:** UDP, WebSocket and TLS endpoints; NAT
+  hole punching through common peers, without a separate coordination server.
+- **Compact, decentralized routing:** gossip topology discovery, weighted
+  Dijkstra and source routes taking just N+1 bytes for N hops. No handshake;
+  the first encrypted packet carries data.
+- **Rootless operation:** relay, DNS and an embedded SSH server over gVisor's
+  userspace TCP/IP stack, without a TUN device.
+- **See the whole mesh:** live topology, route inspection and Prometheus metrics.
+- **Tested through failures:** chaos injection at OS boundaries and end-to-end
+  network namespaces wired through a programmable Python router.
+- **In progress:** channel aggregation for throughput, latency and redundant
+  delivery over multiple paths.
 
 ## Usage
 
