@@ -10,6 +10,15 @@ def test():
     lab = lib.Lab(['a', 'b'], {1: ['a', 'b']}, ipv6=[1])
     with lab:
         lab.wait_ping('a', 'b')
+
+        def described():
+            states = [lab.raw_status(name) for name in ['a', 'b']]
+            return all(len(state['channels']) == 2
+                       and all(str(channel[end]) in state['addresses']
+                               for channel in state['channels'] for end in ['from', 'to'])
+                       for state in states)
+
+        lab.wait(described, 'both UDP directions have their gossip descriptions')
         target = lab.nodes['b'].addresses[1]
 
         def channel():
